@@ -2,7 +2,7 @@
   "name": "effect-opcua",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@11.1.2",
+  "packageManager": "pnpm@11.1.10",
   "engines": {
     "node": ">=22",
     "pnpm": ">=11"
