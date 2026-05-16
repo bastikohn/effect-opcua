@@ -1,7 +1,9 @@
+import { Config } from "effect";
 import { expect, it } from "vitest";
 
 import {
   Capabilities,
+  OpcuaClient,
   type OpcuaSession,
   type OpcuaValueHandle,
   type WritableOpcuaValueHandle,
@@ -22,6 +24,27 @@ const expectWriteValuesTypes = (
 };
 
 void expectWriteValuesTypes;
+
+const expectLayerConfigTypes = () => {
+  OpcuaClient.layerConfig({
+    endpointUrl: Config.string("OPCUA_ENDPOINT_URL"),
+  });
+
+  OpcuaClient.layerConfig({
+    endpointUrl: Config.string("OPCUA_ENDPOINT_URL"),
+    clientOptions: {},
+  });
+
+  OpcuaClient.layerConfig({
+    endpointUrl: Config.string("OPCUA_ENDPOINT_URL"),
+    clientOptions: Config.succeed({}),
+  });
+
+  // @ts-expect-error endpointUrl must be a Config value
+  OpcuaClient.layerConfig({ endpointUrl: "opc.tcp://localhost:4840" });
+};
+
+void expectLayerConfigTypes;
 
 it("keeps compile-time writeValues checks", () => {
   expect(true).toBe(true);
