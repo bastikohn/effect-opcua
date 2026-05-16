@@ -1,0 +1,38 @@
+{
+  "name": "@effect-opcua/client",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Effect-native OPC-UA client wrapper for node-opcua",
+  "sideEffects": false,
+  "type": "module",
+  "files": [
+    "README.md",
+    "dist",
+    "package.json",
+    "src"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.mjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "scripts": {
+    "build": "tsdown --config-loader unrun",
+    "dev": "tsdown --watch --config-loader unrun",
+    "typecheck": "tsc --noEmit --project tsconfig.json",
+    "test": "vitest run --passWithNoTests",
+    "clean": "rm -rf dist coverage node_modules"
+  },
+  "peerDependencies": {
+    "effect": "4.0.0-beta.66"
+  },
+  "dependencies": {
+    "node-opcua": "^2.170.0"
+  },
+  "devDependencies": {}
+}

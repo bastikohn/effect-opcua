@@ -1,0 +1,36 @@
+{
+  "name": "effect-opcua",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.1.2",
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=11"
+  },
+  "scripts": {
+    "build": "pnpm -r --filter='@effect-opcua/*' build",
+    "dev": "pnpm -r --filter='@effect-opcua/*' dev",
+    "typecheck": "pnpm -r --filter='@effect-opcua/*' typecheck",
+    "test": "pnpm -r --filter='@effect-opcua/*' test",
+    "lint": "eslint . --max-warnings=0",
+    "format": "prettier --check .",
+    "fix": "prettier --write . && eslint --fix . --max-warnings=0",
+    "clean": "pnpm -r --filter='@effect-opcua/*' clean && rm -rf node_modules"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "msgpackr-extract"
+    ]
+  },
+  "devDependencies": {
+    "@effect/language-service": "^0.39.0",
+    "@types/node": "^24.0.0",
+    "eslint": "^9.0.0",
+    "prettier": "^3.0.0",
+    "tsdown": "^0.16.0",
+    "typescript-eslint": "^8.0.0",
+    "typescript": "^5.0.0",
+    "unrun": "^0.3.0",
+    "vitest": "^4.0.0"
+  }
+}
