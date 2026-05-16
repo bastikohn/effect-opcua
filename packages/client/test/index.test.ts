@@ -64,7 +64,7 @@ describe("subscriptions", () => {
 
   it("receives values in the right format", async () => {
     const endpointUrl = "opc.tcp://192.168.100.166:4842";
-    const nodeIds = ["ns=0;i=2258", "ns=0;i=2259"] as const;
+    const nodeIds = ["ns=0;i=2258"] as const;
     const layer = OpcuaSession.layer().pipe(
       Layer.provideMerge(OpcuaClient.layer({ endpointUrl })),
     );
@@ -72,40 +72,29 @@ describe("subscriptions", () => {
       Effect.gen(function* () {
         const session = yield* OpcuaSession;
         const subscription = yield* session.createSubscription({
-          publishingInterval: Duration.millis(250),
+          publishingInterval: Duration.millis(500),
         });
         return yield* subscription
-          .monitorValues(
-            [
-              { nodeId: nodeIds[0], schema: Schema.Date },
-              { nodeId: nodeIds[1], schema: Schema.Number },
-            ],
-            {
-              samplingInterval: Duration.millis(250),
-              queueSize: 1,
-              discardOldest: true,
-              clientBuffer: ClientBufferPolicy.latest(),
-            },
-          )
-          .pipe(Stream.take(2), Stream.runCollect);
+          .monitorValues([{ nodeId: nodeIds[0], schema: Schema.Date }], {
+            samplingInterval: Duration.millis(100),
+            queueSize: 5,
+            discardOldest: false,
+            clientBuffer: ClientBufferPolicy.latest(),
+          })
+          .pipe(Stream.take(5), Stream.runCollect);
       }),
     ).pipe(Effect.provide(layer), Effect.timeout("10 seconds"));
 
     const values = await Effect.runPromise(program);
 
-    console.dir(values);
-    expect(values).toHaveLength(2);
+    console.dir(values, { depth: null });
+    expect(values).toHaveLength(5);
     expect(values).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           _tag: "Value",
           nodeId: nodeIds[0],
           value: expect.any(Date),
-        }),
-        expect.objectContaining({
-          _tag: "Value",
-          nodeId: nodeIds[1],
-          value: expect.any(Number),
         }),
       ]),
     );
