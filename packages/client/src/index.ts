@@ -91,6 +91,11 @@ export class OpcuaMonitorCreateError extends Data.TaggedError(
 )<{
   readonly subscriptionId?: number;
   readonly nodeIds?: ReadonlyArray<NodeIdString>;
+  readonly details?: ReadonlyArray<{
+    readonly nodeId: NodeIdString;
+    readonly statusCode?: StatusCode;
+    readonly cause?: unknown;
+  }>;
   readonly cause?: unknown;
 }> {}
 
@@ -138,8 +143,8 @@ export class OpcuaSchemaDataTypeMismatchError extends Data.TaggedError(
   "OpcuaSchemaDataTypeMismatchError",
 )<{
   readonly nodeId: NodeIdString;
-  readonly expected: "scalar" | "array";
-  readonly actual: "scalar" | "array";
+  readonly expected: string;
+  readonly actual: string;
   readonly cause?: unknown;
 }> {}
 
@@ -305,8 +310,9 @@ type WriteCapabilityPart<A, Caps extends CapabilitySet> =
 export type OpcuaValueHandle<
   A,
   Caps extends CapabilitySet = typeof Capabilities.readWrite,
+  Id extends string = string,
 > = {
-  readonly nodeId: NodeIdString;
+  readonly nodeId: Id;
   readonly schema: Schema.Schema<A>;
   readonly metadata: OpcuaValueMetadata;
   readonly capabilities: Caps;
@@ -316,6 +322,19 @@ export type OpcuaValueHandle<
   };
 } & ReadCapabilityPart<A, Caps> &
   WriteCapabilityPart<A, Caps>;
+
+export type WritableOpcuaValueHandle<A = any, Id extends string = string> =
+  | OpcuaValueHandle<A, typeof Capabilities.write, Id>
+  | OpcuaValueHandle<A, typeof Capabilities.readWrite, Id>;
+
+type ValueOfHandle<H> =
+  H extends OpcuaValueHandle<infer A, CapabilitySet, string> ? A : never;
+type NodeIdOfHandle<H> =
+  H extends OpcuaValueHandle<any, CapabilitySet, infer Id> ? Id : never;
+type WriteEntry<H extends WritableOpcuaValueHandle<any, string>> = {
+  readonly handle: H;
+  readonly value: ValueOfHandle<H>;
+};
 
 export type MonitorValueSpec<
   Id extends string = string,
@@ -366,12 +385,13 @@ export type OpcuaSession = {
     OpcuaConfigurationError | OpcuaServiceError
   >;
   readonly valueHandle: <
+    const Id extends NodeIdString,
     S extends AnySchema,
     const Caps extends CapabilitySet = typeof Capabilities.readWrite,
   >(
-    input: ValueSpec<NodeIdString, S> & { readonly capabilities?: Caps },
+    input: ValueSpec<Id, S> & { readonly capabilities?: Caps },
   ) => Effect.Effect<
-    OpcuaValueHandle<SchemaType<S>, Caps>,
+    OpcuaValueHandle<SchemaType<S>, Caps, Id>,
     | OpcuaServiceError
     | OpcuaAccessDeniedError
     | OpcuaUnsupportedValueRankError
@@ -379,17 +399,11 @@ export type OpcuaSession = {
     | OpcuaConfigurationError
   >;
   readonly writeValues: <
-    const Writes extends ReadonlyArray<{
-      readonly handle: OpcuaValueHandle<
-        unknown,
-        readonly ["write"] | readonly ["read", "write"]
-      >;
-      readonly value: unknown;
-    }>,
-  >(
-    writes: Writes,
-  ) => Effect.Effect<
-    OpcuaWriteValuesResult<Writes[number]["handle"]["nodeId"]>,
+    const Handles extends ReadonlyArray<WritableOpcuaValueHandle<any>>,
+  >(writes: {
+    readonly [Index in keyof Handles]: WriteEntry<Handles[Index]>;
+  }) => Effect.Effect<
+    OpcuaWriteValuesResult<NodeIdOfHandle<Handles[number]>>,
     OpcuaConfigurationError | OpcuaEncodeError | OpcuaServiceError
   >;
   readonly createSubscription: (options: {
@@ -535,10 +549,11 @@ const makeSession = (
     });
 
   const valueHandle = <
+    const Id extends NodeIdString,
     S extends AnySchema,
     const Caps extends CapabilitySet = typeof Capabilities.readWrite,
   >(
-    input: ValueSpec<NodeIdString, S> & { readonly capabilities?: Caps },
+    input: ValueSpec<Id, S> & { readonly capabilities?: Caps },
   ) =>
     Effect.gen(function* () {
       const requested = (input.capabilities ?? Capabilities.readWrite) as Caps;
@@ -549,6 +564,12 @@ const makeSession = (
         metadata.valueRank,
       );
       if (rankError) return yield* Effect.fail(rankError);
+      const dataTypeError = schemaDataTypeError(
+        input.nodeId,
+        input.schema,
+        metadata.dataType,
+      );
+      if (dataTypeError) return yield* Effect.fail(dataTypeError);
       const nodeId = coerceNodeId(input.nodeId);
       const base = {
         nodeId: input.nodeId,
@@ -565,12 +586,12 @@ const makeSession = (
         handle.write = (value: SchemaType<S>) =>
           writeOne(
             raw,
-            base as unknown as OpcuaValueHandle<SchemaType<S>, Caps>,
+            base as unknown as OpcuaValueHandle<SchemaType<S>, Caps, Id>,
             value,
             true,
           );
       }
-      return handle as OpcuaValueHandle<SchemaType<S>, Caps>;
+      return handle as OpcuaValueHandle<SchemaType<S>, Caps, Id>;
     });
 
   const writeValues: OpcuaSession["writeValues"] = (writes) =>
@@ -591,7 +612,10 @@ const makeSession = (
       }
       const writePayloads: Array<WriteValueOptions> = [];
       for (const write of writes) {
-        const encoded = yield* encodeHandleValue(write.handle, write.value);
+        const encoded = yield* encodeHandleValue(
+          write.handle as OpcuaValueHandle<unknown, CapabilitySet>,
+          write.value,
+        );
         writePayloads.push({
           nodeId: coerceNodeId(write.handle.nodeId),
           attributeId: AttributeIds.Value,
@@ -632,10 +656,6 @@ const makeSession = (
               priority: DEFAULT_PRIORITY,
             });
             wireSubscriptionEvents(subscription, subscriptionEvents);
-            publishUnsafe(subscriptionEvents, {
-              _tag: "Started",
-              subscriptionId: subscription.subscriptionId,
-            });
             return subscription;
           },
           catch: (cause) => new OpcuaSubscriptionCreateError({ cause }),
@@ -678,82 +698,27 @@ const makeSubscription = (
           OpcuaValueSample<unknown, string>,
           OpcuaMonitorCreateError
         >(options.clientBuffer);
-        const group = yield* Effect.acquireRelease(
-          Effect.tryPromise({
-            try: () =>
-              raw.monitorItems(
-                specs.map((spec) => ({
-                  nodeId: coerceNodeId(spec.nodeId),
-                  attributeId: AttributeIds.Value,
-                })),
-                {
-                  samplingInterval: durationMillis(options.samplingInterval),
-                  queueSize: options.queueSize,
-                  discardOldest: options.discardOldest,
-                },
-                TimestampsToReturn.Both,
-              ),
-            catch: (cause) =>
-              new OpcuaMonitorCreateError({
-                subscriptionId: raw.subscriptionId,
-                nodeIds: specs.map((spec) => spec.nodeId),
-                cause,
-              }),
-          }),
-          (group) =>
-            Effect.sync(() => {
-              group.terminate();
-              publishUnsafe(events, {
-                _tag: "MonitorItemsTerminated",
-                subscriptionId: raw.subscriptionId,
-                nodeIds: specs.map((spec) => spec.nodeId),
-              });
-            }),
+        const monitorGroups = groupMonitorSpecs(
+          specs,
+          durationMillis(options.samplingInterval),
         );
-        group.on("changed", (_item, dataValue, index) => {
-          const spec = specs[index];
-          if (!spec) return;
-          const offered = Queue.offerUnsafe(
-            queue,
-            sampleFromDataValue(spec, dataValue),
+        for (const monitorGroup of monitorGroups) {
+          const group = yield* acquireMonitorGroup(
+            raw,
+            events,
+            monitorGroup,
+            options,
           );
-          if (!offered) {
-            publishUnsafe(events, {
-              _tag: "ClientBufferDropped",
-              subscriptionId: raw.subscriptionId,
-              nodeId: spec.nodeId,
-            });
-          }
-        });
-        group.on("err", (message) => {
-          publishUnsafe(events, {
-            _tag: "InternalError",
-            subscriptionId: raw.subscriptionId,
-            cause: message,
-          });
-        });
-        group.on("terminated", (cause) => {
-          publishUnsafe(events, {
-            _tag: "MonitorItemsTerminated",
-            subscriptionId: raw.subscriptionId,
-            nodeIds: specs.map((spec) => spec.nodeId),
-          });
-          Effect.runFork(
-            Queue.fail(
-              queue,
-              new OpcuaMonitorCreateError({
-                subscriptionId: raw.subscriptionId,
-                cause,
-              }),
-            ),
-          );
-        });
+          wireMonitorGroup(raw, events, group, monitorGroup, queue, options);
+        }
         publishUnsafe(events, {
           _tag: "MonitorItemsCreated",
           subscriptionId: raw.subscriptionId,
           nodeIds: specs.map((spec) => spec.nodeId),
         });
-        return Stream.fromQueue(queue);
+        return Stream.fromQueue(queue).pipe(
+          Stream.ensuring(Queue.shutdown(queue)),
+        );
       }),
     ) as Stream.Stream<
       Specs[number] extends MonitorValueSpec<infer Id, infer S>
@@ -767,6 +732,194 @@ const makeSubscription = (
     events: Stream.fromPubSub(events),
     raw,
   };
+};
+
+type MonitorGroupEntry = {
+  readonly spec: MonitorValueSpec;
+};
+
+type MonitorGroupSpec = {
+  readonly samplingInterval: number;
+  readonly entries: ReadonlyArray<MonitorGroupEntry>;
+};
+
+const groupMonitorSpecs = (
+  specs: ReadonlyArray<MonitorValueSpec>,
+  defaultSamplingInterval: number,
+): ReadonlyArray<MonitorGroupSpec> => {
+  const groups = new Map<number, Array<MonitorGroupEntry>>();
+  specs.forEach((spec) => {
+    const samplingInterval = spec.samplingInterval
+      ? durationMillis(spec.samplingInterval)
+      : defaultSamplingInterval;
+    const entries = groups.get(samplingInterval);
+    if (entries) {
+      entries.push({ spec });
+    } else {
+      groups.set(samplingInterval, [{ spec }]);
+    }
+  });
+  return Array.from(groups, ([samplingInterval, entries]) => ({
+    samplingInterval,
+    entries,
+  }));
+};
+
+const acquireMonitorGroup = (
+  subscription: ClientSubscription,
+  events: PubSub.PubSub<OpcuaSubscriptionEvent>,
+  groupSpec: MonitorGroupSpec,
+  options: MonitorValuesOptions,
+) =>
+  Effect.acquireRelease(
+    Effect.gen(function* () {
+      const group = yield* Effect.tryPromise({
+        try: () =>
+          subscription.monitorItems(
+            groupSpec.entries.map(({ spec }) => ({
+              nodeId: coerceNodeId(spec.nodeId),
+              attributeId: AttributeIds.Value,
+            })),
+            {
+              samplingInterval: groupSpec.samplingInterval,
+              queueSize: options.queueSize,
+              discardOldest: options.discardOldest,
+            },
+            TimestampsToReturn.Both,
+          ),
+        catch: (cause) => monitorCreateError(subscription, groupSpec, cause),
+      });
+      const failures = monitorCreateFailures(group, groupSpec);
+      if (failures.length > 0) {
+        yield* terminateMonitorGroup(group).pipe(Effect.ignore);
+        return yield* Effect.fail(
+          monitorCreateError(
+            subscription,
+            groupSpec,
+            "One or more monitored items failed to initialize",
+            failures,
+          ),
+        );
+      }
+      return group;
+    }),
+    (group) =>
+      terminateMonitorGroup(group).pipe(
+        Effect.tap(() =>
+          Effect.sync(() =>
+            publishUnsafe(events, {
+              _tag: "MonitorItemsTerminated",
+              subscriptionId: subscription.subscriptionId,
+              nodeIds: groupSpec.entries.map(({ spec }) => spec.nodeId),
+            }),
+          ),
+        ),
+      ),
+  );
+
+const terminateMonitorGroup = (group: ClientMonitoredItemGroup) =>
+  Effect.tryPromise({
+    try: () => group.terminate(),
+    catch: (cause) => cause,
+  }).pipe(Effect.ignore);
+
+const monitorCreateFailures = (
+  group: ClientMonitoredItemGroup,
+  groupSpec: MonitorGroupSpec,
+) =>
+  group.monitoredItems
+    .flatMap((item, index) => {
+      const entry = groupSpec.entries[index];
+      return entry
+        ? [
+            {
+              nodeId: entry.spec.nodeId,
+              statusCode: item.statusCode,
+              cause: item.result,
+            },
+          ]
+        : [];
+    })
+    .filter((detail) => !detail.statusCode || !isGood(detail.statusCode));
+
+const monitorCreateError = (
+  subscription: ClientSubscription,
+  groupSpec: MonitorGroupSpec,
+  cause: unknown,
+  details?: ReadonlyArray<{
+    readonly nodeId: NodeIdString;
+    readonly statusCode?: StatusCode;
+    readonly cause?: unknown;
+  }>,
+) =>
+  new OpcuaMonitorCreateError({
+    subscriptionId: subscription.subscriptionId,
+    nodeIds: groupSpec.entries.map(({ spec }) => spec.nodeId),
+    details,
+    cause,
+  });
+
+const wireMonitorGroup = (
+  subscription: ClientSubscription,
+  events: PubSub.PubSub<OpcuaSubscriptionEvent>,
+  group: ClientMonitoredItemGroup,
+  groupSpec: MonitorGroupSpec,
+  queue: Queue.Queue<
+    OpcuaValueSample<unknown, string>,
+    OpcuaMonitorCreateError
+  >,
+  options: MonitorValuesOptions,
+) => {
+  group.on("changed", (_item, dataValue, index) => {
+    const spec = groupSpec.entries[index]?.spec;
+    if (!spec) return;
+    offerMonitorSample(
+      subscription,
+      events,
+      queue,
+      options.clientBuffer,
+      sampleFromDataValue(spec, dataValue),
+    );
+  });
+  group.on("err", (message) => {
+    publishUnsafe(events, {
+      _tag: "InternalError",
+      subscriptionId: subscription.subscriptionId,
+      cause: message,
+    });
+  });
+  group.on("terminated", (cause) => {
+    publishUnsafe(events, {
+      _tag: "MonitorItemsTerminated",
+      subscriptionId: subscription.subscriptionId,
+      nodeIds: groupSpec.entries.map(({ spec }) => spec.nodeId),
+    });
+    Effect.runFork(
+      Queue.fail(queue, monitorCreateError(subscription, groupSpec, cause)),
+    );
+  });
+};
+
+const offerMonitorSample = (
+  subscription: ClientSubscription,
+  events: PubSub.PubSub<OpcuaSubscriptionEvent>,
+  queue: Queue.Queue<
+    OpcuaValueSample<unknown, string>,
+    OpcuaMonitorCreateError
+  >,
+  policy: ClientBufferPolicy,
+  sample: OpcuaValueSample<unknown, string>,
+) => {
+  const willDrop =
+    policy._tag === "Sliding" && Queue.sizeUnsafe(queue) >= policy.capacity;
+  const offered = Queue.offerUnsafe(queue, sample);
+  if (willDrop || !offered) {
+    publishUnsafe(events, {
+      _tag: "ClientBufferDropped",
+      subscriptionId: subscription.subscriptionId,
+      nodeId: sample.nodeId,
+    });
+  }
 };
 
 const readDataValue = (session: ClientSession, nodeId: NodeIdString) =>
@@ -899,11 +1052,20 @@ const discoverMetadata = (
       );
     }
     const valueRank = valueRankValue.value.value as number;
-    if (valueRank > 1) {
+    if (!isSupportedValueRank(valueRank)) {
       return yield* Effect.fail(
         new OpcuaUnsupportedValueRankError({ nodeId, valueRank }),
       );
     }
+    const builtInDataType = yield* Effect.tryPromise({
+      try: () => session.getBuiltInDataType(coerceNodeId(nodeId)),
+      catch: (cause) =>
+        new OpcuaServiceError({
+          operation: "valueHandle.discovery.getBuiltInDataType",
+          nodeId,
+          cause,
+        }),
+    });
     const accessLevel = accessLevelValue.value.value as number;
     const userAccessLevel =
       userAccessLevelValue &&
@@ -923,7 +1085,7 @@ const discoverMetadata = (
     return {
       nodeId,
       dataTypeNodeId: dataTypeValue.value.value as NodeId,
-      dataType: builtInDataTypeFromNodeId(dataTypeValue.value.value as NodeId),
+      dataType: builtInDataType,
       valueRank,
       arrayDimensions:
         arrayDimensionsValue &&
@@ -1000,19 +1162,12 @@ const makeVariant = (metadata: OpcuaValueMetadata, value: unknown) =>
     value: value as Variant["value"],
   });
 
-const builtInDataTypeFromNodeId = (nodeId: NodeId): DataType => {
-  const value = Number(nodeId.value);
-  return Number.isInteger(value) && value in DataType
-    ? (value as DataType)
-    : DataType.ExtensionObject;
-};
-
 const schemaRankError = (
   nodeId: NodeIdString,
   schema: AnySchema,
   valueRank: number,
 ) => {
-  const schemaIsArray = schemaAccepts(schema, []);
+  const schemaIsArray = schemaShape(schema) === "array";
   const valueIsArray = isArrayRank(valueRank);
   if (schemaIsArray !== valueIsArray) {
     return new OpcuaSchemaDataTypeMismatchError({
@@ -1024,18 +1179,38 @@ const schemaRankError = (
   return undefined;
 };
 
+const schemaDataTypeError = (
+  nodeId: NodeIdString,
+  schema: AnySchema,
+  dataType: DataType,
+) => {
+  const expected = schemaDataTypeCategory(schema);
+  if (!expected) return undefined;
+  const actual = opcuaDataTypeCategory(dataType);
+  if (expected !== actual) {
+    return new OpcuaSchemaDataTypeMismatchError({
+      nodeId,
+      expected,
+      actual,
+    });
+  }
+  return undefined;
+};
+
 const accessDeniedError = (
   nodeId: NodeIdString,
   requestedCapability: Capability,
   accessLevel: number,
   userAccessLevel?: number,
 ) => {
-  const effective = userAccessLevel ?? accessLevel;
   const flag =
     requestedCapability === "read"
       ? AccessLevelFlag.CurrentRead
       : AccessLevelFlag.CurrentWrite;
-  if ((effective & flag) === 0) {
+  const hasNodeAccess = (accessLevel & flag) !== 0;
+  const hasUserAccess =
+    userAccessLevel === undefined || (userAccessLevel & flag) !== 0;
+  if (!hasNodeAccess || !hasUserAccess) {
     return new OpcuaAccessDeniedError({
       nodeId,
       requestedCapability,
@@ -1091,7 +1266,9 @@ const duplicateStringError = (
 
 const durationMillis = (duration: Duration.Duration) =>
   Duration.toMillis(duration);
-const isGood = (statusCode: StatusCode) => statusCode.equals(StatusCodes.Good);
+const isGood = (statusCode: StatusCode) => statusCode.isGood();
+const isSupportedValueRank = (valueRank: number) =>
+  valueRank === -1 || valueRank === 1;
 const isArrayRank = (valueRank: number) => valueRank === 1;
 const hasCapability = (capabilities: CapabilitySet, capability: Capability) =>
   capabilities.includes(capability);
@@ -1102,14 +1279,95 @@ const decodeWithSchema = <S extends AnySchema>(
   Schema.decodeUnknownSync(schema as unknown as Schema.Decoder<unknown>)(
     value,
   ) as SchemaType<S>;
-const schemaAccepts = (schema: AnySchema, value: unknown) => {
-  try {
-    Schema.decodeUnknownSync(schema as unknown as Schema.Decoder<unknown>)(
-      value,
-    );
-    return true;
-  } catch {
-    return false;
+
+type SchemaAst = {
+  readonly _tag?: string;
+  readonly literal?: unknown;
+  readonly members?: ReadonlyArray<SchemaAst>;
+  readonly rest?: ReadonlyArray<SchemaAst>;
+  readonly annotations?: {
+    readonly typeConstructor?: { readonly _tag?: string };
+  };
+};
+
+const schemaAst = (schema: AnySchema) =>
+  (schema as unknown as { readonly ast?: SchemaAst }).ast;
+
+const schemaShape = (schema: AnySchema): "scalar" | "array" =>
+  schemaAst(schema)?._tag === "Arrays" ? "array" : "scalar";
+
+const schemaDataTypeCategory = (schema: AnySchema) => {
+  const ast = schemaAst(schema);
+  if (!ast) return undefined;
+  if (ast._tag === "Arrays") {
+    return schemaAstDataTypeCategory(ast.rest?.[0]);
+  }
+  return schemaAstDataTypeCategory(ast);
+};
+
+const schemaAstDataTypeCategory = (
+  ast: SchemaAst | undefined,
+): "boolean" | "number" | "string" | "date" | undefined => {
+  switch (ast?._tag) {
+    case "Boolean":
+      return "boolean";
+    case "Number":
+      return "number";
+    case "String":
+      return "string";
+    case "Literal":
+      switch (typeof ast.literal) {
+        case "boolean":
+          return "boolean";
+        case "number":
+          return "number";
+        case "string":
+          return "string";
+        default:
+          return undefined;
+      }
+    case "Declaration":
+      return ast.annotations?.typeConstructor?._tag === "Date"
+        ? "date"
+        : undefined;
+    case "Union": {
+      const categories = ast.members
+        ?.map(schemaAstDataTypeCategory)
+        .filter((category) => category !== undefined);
+      if (!categories || categories.length !== ast.members?.length) {
+        return undefined;
+      }
+      const [first] = categories;
+      return categories.every((category) => category === first)
+        ? first
+        : undefined;
+    }
+    default:
+      return undefined;
+  }
+};
+
+const opcuaDataTypeCategory = (dataType: DataType) => {
+  switch (dataType) {
+    case DataType.Boolean:
+      return "boolean";
+    case DataType.SByte:
+    case DataType.Byte:
+    case DataType.Int16:
+    case DataType.UInt16:
+    case DataType.Int32:
+    case DataType.UInt32:
+    case DataType.Int64:
+    case DataType.UInt64:
+    case DataType.Float:
+    case DataType.Double:
+      return "number";
+    case DataType.String:
+      return "string";
+    case DataType.DateTime:
+      return "date";
+    default:
+      return DataType[dataType] ?? String(dataType);
   }
 };
 
@@ -1160,6 +1418,9 @@ const wireSubscriptionEvents = (
   subscription: ClientSubscription,
   events: PubSub.PubSub<OpcuaSubscriptionEvent>,
 ) => {
+  subscription.on("started", (subscriptionId) =>
+    publishUnsafe(events, { _tag: "Started", subscriptionId }),
+  );
   subscription.on("terminated", (...raw) =>
     publishUnsafe(events, {
       _tag: "Terminated",
