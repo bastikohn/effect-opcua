@@ -4,7 +4,10 @@ import {
   ClientSubscription,
   coerceNodeId,
   DataType,
+  DataChangeFilter,
+  DataChangeTrigger,
   DataValue,
+  DeadbandType,
   NodeId,
   OPCUAClient,
   StatusCode,
@@ -267,6 +270,52 @@ export const ClientBufferPolicy = {
   latest: (): ClientBufferPolicy => ({ _tag: "Sliding", capacity: 1 }),
 };
 
+export type MonitorValueDeadband =
+  | { readonly _tag: "None" }
+  | { readonly _tag: "Absolute"; readonly value: number }
+  | { readonly _tag: "Percent"; readonly value: number };
+
+export const MonitorValueDeadband = {
+  none: (): MonitorValueDeadband => ({ _tag: "None" }),
+  absolute: (value: number): MonitorValueDeadband => ({
+    _tag: "Absolute",
+    value,
+  }),
+  percent: (value: number): MonitorValueDeadband => ({
+    _tag: "Percent",
+    value,
+  }),
+};
+
+export type MonitorValueFilter =
+  | { readonly _tag: "None" }
+  | { readonly _tag: "Status" }
+  | {
+      readonly _tag: "StatusValue";
+      readonly deadband: MonitorValueDeadband;
+    }
+  | {
+      readonly _tag: "StatusValueTimestamp";
+      readonly deadband: MonitorValueDeadband;
+    };
+
+export const MonitorValueFilter = {
+  none: (): MonitorValueFilter => ({ _tag: "None" }),
+  status: (): MonitorValueFilter => ({ _tag: "Status" }),
+  statusValue: (
+    deadband: MonitorValueDeadband = MonitorValueDeadband.none(),
+  ): MonitorValueFilter => ({
+    _tag: "StatusValue",
+    deadband,
+  }),
+  statusValueTimestamp: (
+    deadband: MonitorValueDeadband = MonitorValueDeadband.none(),
+  ): MonitorValueFilter => ({
+    _tag: "StatusValueTimestamp",
+    deadband,
+  }),
+};
+
 type AnySchema = Schema.Schema<unknown>;
 type SchemaType<S> = S extends Schema.Schema<infer A> ? A : never;
 type ValueSpec<Id extends string = string, S extends AnySchema = AnySchema> = {
@@ -343,6 +392,7 @@ export type MonitorValueSpec<
   readonly nodeId: Id;
   readonly schema: S;
   readonly samplingInterval?: Duration.Duration;
+  readonly filter?: MonitorValueFilter;
 };
 
 export type MonitorValuesOptions = {
@@ -350,6 +400,7 @@ export type MonitorValuesOptions = {
   readonly queueSize: number;
   readonly discardOldest: boolean;
   readonly clientBuffer: ClientBufferPolicy;
+  readonly filter?: MonitorValueFilter;
 };
 
 export type OpcuaSubscription = {
@@ -701,6 +752,7 @@ const makeSubscription = (
         const monitorGroups = groupMonitorSpecs(
           specs,
           durationMillis(options.samplingInterval),
+          options.filter,
         );
         for (const monitorGroup of monitorGroups) {
           const group = yield* acquireMonitorGroup(
@@ -740,29 +792,113 @@ type MonitorGroupEntry = {
 
 type MonitorGroupSpec = {
   readonly samplingInterval: number;
+  readonly filter?: MonitorValueFilter;
   readonly entries: ReadonlyArray<MonitorGroupEntry>;
 };
 
 const groupMonitorSpecs = (
   specs: ReadonlyArray<MonitorValueSpec>,
   defaultSamplingInterval: number,
+  defaultFilter?: MonitorValueFilter,
 ): ReadonlyArray<MonitorGroupSpec> => {
-  const groups = new Map<number, Array<MonitorGroupEntry>>();
+  const groups = new Map<
+    string,
+    {
+      readonly samplingInterval: number;
+      readonly filter?: MonitorValueFilter;
+      readonly entries: Array<MonitorGroupEntry>;
+    }
+  >();
   specs.forEach((spec) => {
     const samplingInterval = spec.samplingInterval
       ? durationMillis(spec.samplingInterval)
       : defaultSamplingInterval;
-    const entries = groups.get(samplingInterval);
-    if (entries) {
-      entries.push({ spec });
+    const filter = spec.filter ?? defaultFilter;
+    const key = `${samplingInterval}:${monitorValueFilterKey(filter)}`;
+    const group = groups.get(key);
+    if (group) {
+      group.entries.push({ spec });
     } else {
-      groups.set(samplingInterval, [{ spec }]);
+      groups.set(key, {
+        samplingInterval,
+        filter,
+        entries: [{ spec }],
+      });
     }
   });
-  return Array.from(groups, ([samplingInterval, entries]) => ({
-    samplingInterval,
-    entries,
-  }));
+  return Array.from(groups.values());
+};
+
+const monitorValueFilterKey = (filter: MonitorValueFilter | undefined) => {
+  if (!filter) return "None";
+  switch (filter._tag) {
+    case "None":
+      return "None";
+    case "Status":
+      return "Status";
+    case "StatusValue":
+      return `StatusValue:${monitorValueDeadbandKey(filter.deadband)}`;
+    case "StatusValueTimestamp":
+      return `StatusValueTimestamp:${monitorValueDeadbandKey(filter.deadband)}`;
+  }
+};
+
+const monitorValueDeadbandKey = (deadband: MonitorValueDeadband) => {
+  switch (deadband._tag) {
+    case "None":
+      return "None";
+    case "Absolute":
+      return `Absolute:${deadband.value}`;
+    case "Percent":
+      return `Percent:${deadband.value}`;
+  }
+};
+
+const toNodeOpcuaDataChangeFilter = (filter: MonitorValueFilter | undefined) =>
+  filter && filter._tag !== "None"
+    ? new DataChangeFilter({
+        trigger: toNodeOpcuaDataChangeTrigger(filter),
+        ...toNodeOpcuaDeadband(filter),
+      })
+    : undefined;
+
+const toNodeOpcuaDataChangeTrigger = (filter: MonitorValueFilter) => {
+  switch (filter._tag) {
+    case "None":
+      return DataChangeTrigger.StatusValue;
+    case "Status":
+      return DataChangeTrigger.Status;
+    case "StatusValue":
+      return DataChangeTrigger.StatusValue;
+    case "StatusValueTimestamp":
+      return DataChangeTrigger.StatusValueTimestamp;
+  }
+};
+
+const toNodeOpcuaDeadband = (
+  filter: MonitorValueFilter,
+): {
+  readonly deadbandType?: DeadbandType;
+  readonly deadbandValue?: number;
+} => {
+  if (filter._tag === "None" || filter._tag === "Status") return {};
+  switch (filter.deadband._tag) {
+    case "None":
+      return {
+        deadbandType: DeadbandType.None,
+        deadbandValue: 0,
+      };
+    case "Absolute":
+      return {
+        deadbandType: DeadbandType.Absolute,
+        deadbandValue: filter.deadband.value,
+      };
+    case "Percent":
+      return {
+        deadbandType: DeadbandType.Percent,
+        deadbandValue: filter.deadband.value,
+      };
+  }
 };
 
 const acquireMonitorGroup = (
@@ -782,6 +918,7 @@ const acquireMonitorGroup = (
             })),
             {
               samplingInterval: groupSpec.samplingInterval,
+              filter: toNodeOpcuaDataChangeFilter(groupSpec.filter),
               queueSize: options.queueSize,
               discardOldest: options.discardOldest,
             },
