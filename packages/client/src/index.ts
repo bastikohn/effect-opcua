@@ -455,10 +455,18 @@ export type OpcuaSession = {
     readonly [Index in keyof Handles]: WriteEntry<Handles[Index]>;
   }) => Effect.Effect<
     OpcuaWriteValuesResult<NodeIdOfHandle<Handles[number]>>,
-    OpcuaConfigurationError | OpcuaEncodeError | OpcuaServiceError
+    | OpcuaConfigurationError
+    | OpcuaEncodeError
+    | OpcuaServiceError
+    | OpcuaAccessDeniedError
   >;
   readonly createSubscription: (options: {
     readonly publishingInterval: Duration.Duration;
+    readonly lifetimeCount?: number;
+    readonly maxKeepAliveCount?: number;
+    readonly maxNotificationsPerPublish?: number;
+    readonly publishingEnabled?: boolean;
+    readonly priority?: number;
   }) => Effect.Effect<
     OpcuaSubscription,
     OpcuaSubscriptionCreateError,
@@ -653,10 +661,11 @@ const makeSession = (
       for (const write of writes) {
         if (!hasCapability(write.handle.capabilities, "write")) {
           return yield* Effect.fail(
-            new OpcuaConfigurationError({
-              operation: "writeValues",
+            new OpcuaAccessDeniedError({
               nodeId: write.handle.nodeId,
-              cause: "Handle lacks write capability",
+              requestedCapability: "write",
+              accessLevel: write.handle.metadata.accessLevel,
+              userAccessLevel: write.handle.metadata.userAccessLevel,
             }),
           );
         }
@@ -700,11 +709,16 @@ const makeSession = (
               requestedPublishingInterval: durationMillis(
                 options.publishingInterval,
               ),
-              requestedLifetimeCount: DEFAULT_LIFETIME_COUNT,
-              requestedMaxKeepAliveCount: DEFAULT_MAX_KEEP_ALIVE_COUNT,
-              maxNotificationsPerPublish: DEFAULT_MAX_NOTIFICATIONS_PER_PUBLISH,
-              publishingEnabled: DEFAULT_PUBLISHING_ENABLED,
-              priority: DEFAULT_PRIORITY,
+              requestedLifetimeCount:
+                options.lifetimeCount ?? DEFAULT_LIFETIME_COUNT,
+              requestedMaxKeepAliveCount:
+                options.maxKeepAliveCount ?? DEFAULT_MAX_KEEP_ALIVE_COUNT,
+              maxNotificationsPerPublish:
+                options.maxNotificationsPerPublish ??
+                DEFAULT_MAX_NOTIFICATIONS_PER_PUBLISH,
+              publishingEnabled:
+                options.publishingEnabled ?? DEFAULT_PUBLISHING_ENABLED,
+              priority: options.priority ?? DEFAULT_PRIORITY,
             });
             wireSubscriptionEvents(subscription, subscriptionEvents);
             return subscription;
@@ -735,43 +749,56 @@ const makeSubscription = (
   raw: ClientSubscription,
   events: PubSub.PubSub<OpcuaSubscriptionEvent>,
 ): OpcuaSubscription => {
+  const finalizingMonitorGroups = new WeakSet<ClientMonitoredItemGroup>();
+
   const monitorValues = (<const Specs extends ReadonlyArray<MonitorValueSpec>>(
     specs: Specs,
     options: MonitorValuesOptions,
   ) =>
-    Stream.unwrap(
-      Effect.gen(function* () {
-        const duplicate = duplicateNodeIdError("monitorValues", specs);
-        if (duplicate) return yield* Effect.fail(duplicate);
-        const bufferError = bufferPolicyError(options.clientBuffer);
-        if (bufferError) return yield* Effect.fail(bufferError);
-        const queue = yield* makeQueue<
-          OpcuaValueSample<unknown, string>,
-          OpcuaMonitorCreateError
-        >(options.clientBuffer);
-        const monitorGroups = groupMonitorSpecs(
-          specs,
-          durationMillis(options.samplingInterval),
-          options.filter,
-        );
-        for (const monitorGroup of monitorGroups) {
-          const group = yield* acquireMonitorGroup(
-            raw,
-            events,
-            monitorGroup,
-            options,
+    Stream.scoped(
+      Stream.unwrap(
+        Effect.gen(function* () {
+          const duplicate = duplicateNodeIdError("monitorValues", specs);
+          if (duplicate) return yield* Effect.fail(duplicate);
+          const bufferError = bufferPolicyError(options.clientBuffer);
+          if (bufferError) return yield* Effect.fail(bufferError);
+          const queue = yield* makeQueue<
+            OpcuaValueSample<unknown, string>,
+            OpcuaMonitorCreateError
+          >(options.clientBuffer);
+          const monitorGroups = groupMonitorSpecs(
+            specs,
+            durationMillis(options.samplingInterval),
+            options.filter,
           );
-          wireMonitorGroup(raw, events, group, monitorGroup, queue, options);
-        }
-        publishUnsafe(events, {
-          _tag: "MonitorItemsCreated",
-          subscriptionId: raw.subscriptionId,
-          nodeIds: specs.map((spec) => spec.nodeId),
-        });
-        return Stream.fromQueue(queue).pipe(
-          Stream.ensuring(Queue.shutdown(queue)),
-        );
-      }),
+          for (const monitorGroup of monitorGroups) {
+            const group = yield* acquireMonitorGroup(
+              raw,
+              events,
+              monitorGroup,
+              options,
+              finalizingMonitorGroups,
+            );
+            wireMonitorGroup(
+              raw,
+              events,
+              group,
+              monitorGroup,
+              queue,
+              options,
+              finalizingMonitorGroups,
+            );
+          }
+          publishUnsafe(events, {
+            _tag: "MonitorItemsCreated",
+            subscriptionId: raw.subscriptionId,
+            nodeIds: specs.map((spec) => spec.nodeId),
+          });
+          return Stream.fromQueue(queue).pipe(
+            Stream.ensuring(Queue.shutdown(queue)),
+          );
+        }),
+      ),
     ) as Stream.Stream<
       Specs[number] extends MonitorValueSpec<infer Id, infer S>
         ? OpcuaValueSample<SchemaType<S>, Id>
@@ -906,6 +933,7 @@ const acquireMonitorGroup = (
   events: PubSub.PubSub<OpcuaSubscriptionEvent>,
   groupSpec: MonitorGroupSpec,
   options: MonitorValuesOptions,
+  finalizingMonitorGroups: WeakSet<ClientMonitoredItemGroup>,
 ) =>
   Effect.acquireRelease(
     Effect.gen(function* () {
@@ -941,7 +969,8 @@ const acquireMonitorGroup = (
       return group;
     }),
     (group) =>
-      terminateMonitorGroup(group).pipe(
+      Effect.sync(() => finalizingMonitorGroups.add(group)).pipe(
+        Effect.andThen(terminateMonitorGroup(group)),
         Effect.tap(() =>
           Effect.sync(() =>
             publishUnsafe(events, {
@@ -1006,6 +1035,7 @@ const wireMonitorGroup = (
     OpcuaMonitorCreateError
   >,
   options: MonitorValuesOptions,
+  finalizingMonitorGroups: WeakSet<ClientMonitoredItemGroup>,
 ) => {
   group.on("changed", (_item, dataValue, index) => {
     const spec = groupSpec.entries[index]?.spec;
@@ -1026,6 +1056,7 @@ const wireMonitorGroup = (
     });
   });
   group.on("terminated", (cause) => {
+    if (finalizingMonitorGroups.has(group)) return;
     publishUnsafe(events, {
       _tag: "MonitorItemsTerminated",
       subscriptionId: subscription.subscriptionId,
@@ -1321,6 +1352,7 @@ const schemaDataTypeError = (
   schema: AnySchema,
   dataType: DataType,
 ) => {
+  // Best-effort compatibility check: unknown schema shapes are accepted.
   const expected = schemaDataTypeCategory(schema);
   if (!expected) return undefined;
   const actual = opcuaDataTypeCategory(dataType);
