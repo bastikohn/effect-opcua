@@ -198,6 +198,34 @@ describe("subscriptions (integration)", () => {
     20_000,
   );
 
+  it("value batching", async () => {
+    const nodeIds = [currentTimeNodeId, secondsTillShutdownNodeId] as const;
+    const values = await runLive(
+      Effect.gen(function* () {
+        const session = yield* OpcuaSession;
+        const subscription = yield* session.createSubscription({
+          publishingInterval: Duration.millis(500),
+        });
+
+        return yield* subscription
+          .monitorValues(
+            [
+              { nodeId: nodeIds[0], schema: Schema.Date },
+              { nodeId: nodeIds[1], schema: Schema.Number },
+            ],
+            {
+              samplingInterval: Duration.millis(50),
+              queueSize: 1,
+              discardOldest: true,
+              clientBuffer: ClientBufferPolicy.latest(),
+            },
+          )
+          .pipe(Stream.take(5), Stream.runCollect);
+      }),
+    );
+    expect(values).toHaveLength(5);
+  }, 20_000);
+
   testIfEndpoint(
     "decodes monitored values with the requested schema",
     async () => {
