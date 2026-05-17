@@ -1,6 +1,7 @@
 import {
   AccessLevelFlag,
   AttributeIds,
+  BrowseDirection,
   ClientSubscription,
   coerceNodeId,
   DataType,
@@ -8,16 +9,26 @@ import {
   DataChangeTrigger,
   DataValue,
   DeadbandType,
+  NodeClass,
+  NodeClassMask,
   NodeId,
   OPCUAClient,
+  ResultMask,
+  resolveNodeId,
   StatusCode,
   StatusCodes,
   TimestampsToReturn,
   Variant,
   VariantArrayType,
+  makeNodeClassMask,
+  makeResultMask,
+  type BrowseDescriptionOptions,
+  type BrowseResult,
   type ClientMonitoredItemGroup,
   type ClientSession,
+  type ExpandedNodeId,
   type OPCUAClientOptions,
+  type ReferenceDescription,
   type ReadValueIdOptions,
   type UserIdentityInfo,
   type WriteValueOptions,
@@ -46,6 +57,14 @@ const DEFAULT_MAX_KEEP_ALIVE_COUNT = 10;
 const DEFAULT_MAX_NOTIFICATIONS_PER_PUBLISH = 0;
 const DEFAULT_PUBLISHING_ENABLED = true;
 const DEFAULT_PRIORITY = 0;
+const DEFAULT_BROWSE_REFERENCE_TYPE_ID = "HierarchicalReferences";
+const DEFAULT_BROWSE_DIRECTION = BrowseDirection.Forward;
+const DEFAULT_BROWSE_INCLUDE_SUBTYPES = true;
+const DEFAULT_BROWSE_NODE_CLASS_MASK = 0;
+const DEFAULT_BROWSE_RESULT_MASK = makeResultMask(
+  "ReferenceType | IsForward | NodeClass | BrowseName | DisplayName | TypeDefinition",
+);
+const DEFAULT_BROWSE_MAX_REFERENCES_PER_NODE = 0;
 
 export const capabilities = <
   const Capabilities extends ReadonlyArray<Capability>,
@@ -245,6 +264,63 @@ export type OpcuaWriteValuesResult<Ids extends string> = {
   readonly [Id in Ids]: StatusCode;
 };
 
+export type ExpandedNodeIdString = string;
+
+export type OpcuaQualifiedName = {
+  readonly namespaceIndex: number;
+  readonly name: string;
+  readonly text: string;
+};
+
+export type OpcuaLocalizedText = {
+  readonly text: string;
+  readonly locale?: string;
+};
+
+export type OpcuaExpandedNodeId = {
+  readonly text: ExpandedNodeIdString;
+  readonly namespace: number;
+  readonly value: unknown;
+  readonly identifierType: string;
+  readonly namespaceUri?: string;
+  readonly serverIndex?: number;
+  readonly raw: ExpandedNodeId;
+};
+
+export type OpcuaBrowseReference = {
+  readonly nodeId: OpcuaExpandedNodeId;
+  readonly referenceTypeId?: NodeIdString;
+  readonly isForward?: boolean;
+  readonly nodeClass?: NodeClass;
+  readonly browseName?: OpcuaQualifiedName;
+  readonly displayName?: OpcuaLocalizedText;
+  readonly typeDefinition?: OpcuaExpandedNodeId;
+  readonly raw: ReferenceDescription;
+};
+
+export type OpcuaBrowseContinuation = {
+  readonly nodeId: NodeIdString;
+  readonly raw: Buffer;
+};
+
+export type OpcuaBrowseResult = {
+  readonly nodeId: NodeIdString;
+  readonly statusCode: StatusCode;
+  readonly references: ReadonlyArray<OpcuaBrowseReference>;
+  readonly continuation?: OpcuaBrowseContinuation;
+  readonly raw: BrowseResult;
+};
+
+export type OpcuaBrowseOptions = {
+  readonly nodeId: NodeIdString;
+  readonly referenceTypeId?: NodeIdString;
+  readonly browseDirection?: BrowseDirection;
+  readonly includeSubtypes?: boolean;
+  readonly nodeClassMask?: number;
+  readonly resultMask?: number;
+  readonly maxReferencesPerNode?: number;
+};
+
 export type OpcuaValueMetadata = {
   readonly nodeId: NodeIdString;
   readonly dataType: DataType;
@@ -373,6 +449,7 @@ export type OpcuaValueHandle<
 } & ReadCapabilityPart<A, Caps> &
   WriteCapabilityPart<A, Caps>;
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type WritableOpcuaValueHandle<A = any, Id extends string = string> =
   | OpcuaValueHandle<A, typeof Capabilities.write, Id>
   | OpcuaValueHandle<A, typeof Capabilities.readWrite, Id>;
@@ -380,7 +457,9 @@ export type WritableOpcuaValueHandle<A = any, Id extends string = string> =
 type ValueOfHandle<H> =
   H extends OpcuaValueHandle<infer A, CapabilitySet, string> ? A : never;
 type NodeIdOfHandle<H> =
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   H extends OpcuaValueHandle<any, CapabilitySet, infer Id> ? Id : never;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type WriteEntry<H extends WritableOpcuaValueHandle<any, string>> = {
   readonly handle: H;
   readonly value: ValueOfHandle<H>;
@@ -463,6 +542,7 @@ export type OpcuaSession = {
     | OpcuaConfigurationError
   >;
   readonly writeValues: <
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const Handles extends ReadonlyArray<WritableOpcuaValueHandle<any>>,
   >(writes: {
     readonly [Index in keyof Handles]: WriteEntry<Handles[Index]>;
@@ -472,6 +552,24 @@ export type OpcuaSession = {
     | OpcuaEncodeError
     | OpcuaServiceError
     | OpcuaAccessDeniedError
+  >;
+  readonly browse: (
+    input: OpcuaBrowseOptions,
+  ) => Effect.Effect<
+    OpcuaBrowseResult,
+    OpcuaConfigurationError | OpcuaServiceError | OpcuaNonGoodStatusError
+  >;
+  readonly browseNext: (
+    continuation: OpcuaBrowseContinuation,
+  ) => Effect.Effect<
+    OpcuaBrowseResult,
+    OpcuaConfigurationError | OpcuaServiceError | OpcuaNonGoodStatusError
+  >;
+  readonly releaseBrowseContinuation: (
+    continuation: OpcuaBrowseContinuation,
+  ) => Effect.Effect<
+    void,
+    OpcuaConfigurationError | OpcuaServiceError | OpcuaNonGoodStatusError
   >;
   readonly createSubscription: (options: {
     readonly publishingInterval: Duration.Duration;
@@ -758,12 +856,107 @@ const makeSession = (
       return makeSubscription(rawSubscription, subscriptionEvents);
     });
 
+  const browse: OpcuaSession["browse"] = (input) =>
+    Effect.gen(function* () {
+      const validationError = browseOptionsError(input);
+      if (validationError) return yield* Effect.fail(validationError);
+
+      const result = yield* Effect.tryPromise({
+        try: () =>
+          browseWithMaxReferences(
+            raw,
+            {
+              nodeId: resolveNodeId(input.nodeId),
+              referenceTypeId: resolveNodeId(
+                input.referenceTypeId ?? DEFAULT_BROWSE_REFERENCE_TYPE_ID,
+              ),
+              browseDirection:
+                input.browseDirection ?? DEFAULT_BROWSE_DIRECTION,
+              includeSubtypes:
+                input.includeSubtypes ?? DEFAULT_BROWSE_INCLUDE_SUBTYPES,
+              nodeClassMask:
+                input.nodeClassMask ?? DEFAULT_BROWSE_NODE_CLASS_MASK,
+              resultMask: input.resultMask ?? DEFAULT_BROWSE_RESULT_MASK,
+            },
+            input.maxReferencesPerNode ??
+              DEFAULT_BROWSE_MAX_REFERENCES_PER_NODE,
+          ),
+        catch: (cause) =>
+          new OpcuaServiceError({
+            operation: "browse",
+            nodeId: input.nodeId,
+            cause,
+          }),
+      });
+
+      return yield* normalizeBrowseResultOrFail("browse", input.nodeId, result);
+    });
+
+  const browseNext: OpcuaSession["browseNext"] = (continuation) =>
+    Effect.gen(function* () {
+      const validationError = browseContinuationError(
+        "browseNext",
+        continuation,
+      );
+      if (validationError) return yield* Effect.fail(validationError);
+
+      const result = yield* Effect.tryPromise({
+        try: () => raw.browseNext(continuation.raw, false),
+        catch: (cause) =>
+          new OpcuaServiceError({
+            operation: "browseNext",
+            nodeId: continuation.nodeId,
+            cause,
+          }),
+      });
+
+      return yield* normalizeBrowseResultOrFail(
+        "browseNext",
+        continuation.nodeId,
+        result,
+      );
+    });
+
+  const releaseBrowseContinuation: OpcuaSession["releaseBrowseContinuation"] = (
+    continuation,
+  ) =>
+    Effect.gen(function* () {
+      const validationError = browseContinuationError(
+        "releaseBrowseContinuation",
+        continuation,
+      );
+      if (validationError) return yield* Effect.fail(validationError);
+
+      const result = yield* Effect.tryPromise({
+        try: () => raw.browseNext(continuation.raw, true),
+        catch: (cause) =>
+          new OpcuaServiceError({
+            operation: "releaseBrowseContinuation",
+            nodeId: continuation.nodeId,
+            cause,
+          }),
+      });
+
+      if (!isGood(result.statusCode)) {
+        return yield* Effect.fail(
+          new OpcuaNonGoodStatusError({
+            operation: "releaseBrowseContinuation",
+            nodeId: continuation.nodeId,
+            statusCode: result.statusCode,
+          }),
+        );
+      }
+    });
+
   return {
     readValue,
     readValues,
     valueHandle,
     writeValues,
     createSubscription,
+    browse,
+    browseNext,
+    releaseBrowseContinuation,
     events: Stream.fromPubSub(events),
     raw,
   };
@@ -1457,6 +1650,144 @@ const duplicateStringError = (
   return undefined;
 };
 
+const browseOptionsError = (input: OpcuaBrowseOptions) => {
+  if (input.nodeId.trim() === "") {
+    return new OpcuaConfigurationError({
+      operation: "browse",
+      nodeId: input.nodeId,
+      cause: "nodeId must not be empty",
+    });
+  }
+  if (
+    input.maxReferencesPerNode !== undefined &&
+    (!Number.isInteger(input.maxReferencesPerNode) ||
+      input.maxReferencesPerNode < 0)
+  ) {
+    return new OpcuaConfigurationError({
+      operation: "browse",
+      nodeId: input.nodeId,
+      cause: "maxReferencesPerNode must be a non-negative integer",
+    });
+  }
+  return undefined;
+};
+
+const browseContinuationError = (
+  operation: string,
+  continuation: OpcuaBrowseContinuation,
+) => {
+  if (continuation.nodeId.trim() === "") {
+    return new OpcuaConfigurationError({
+      operation,
+      nodeId: continuation.nodeId,
+      cause: "nodeId must not be empty",
+    });
+  }
+  if (continuation.raw.length === 0) {
+    return new OpcuaConfigurationError({
+      operation,
+      nodeId: continuation.nodeId,
+      cause: "continuation raw buffer must not be empty",
+    });
+  }
+  return undefined;
+};
+
+const browseWithMaxReferences = async (
+  session: ClientSession,
+  nodeToBrowse: BrowseDescriptionOptions,
+  maxReferencesPerNode: number,
+): Promise<BrowseResult> => {
+  const previousMaxReferencesPerNode = session.requestedMaxReferencesPerNode;
+  session.requestedMaxReferencesPerNode = maxReferencesPerNode;
+  try {
+    return await session.browse(nodeToBrowse);
+  } finally {
+    session.requestedMaxReferencesPerNode = previousMaxReferencesPerNode;
+  }
+};
+
+const normalizeBrowseResultOrFail = (
+  operation: string,
+  nodeId: NodeIdString,
+  result: BrowseResult,
+): Effect.Effect<OpcuaBrowseResult, OpcuaNonGoodStatusError> => {
+  if (!isGood(result.statusCode)) {
+    return Effect.fail(
+      new OpcuaNonGoodStatusError({
+        operation,
+        nodeId,
+        statusCode: result.statusCode,
+      }),
+    );
+  }
+
+  return Effect.succeed(normalizeBrowseResult(nodeId, result));
+};
+
+const normalizeBrowseResult = (
+  nodeId: NodeIdString,
+  result: BrowseResult,
+): OpcuaBrowseResult => ({
+  nodeId,
+  statusCode: result.statusCode,
+  references: result.references?.map(normalizeBrowseReference) ?? [],
+  continuation:
+    result.continuationPoint && result.continuationPoint.length > 0
+      ? { nodeId, raw: result.continuationPoint }
+      : undefined,
+  raw: result,
+});
+
+const normalizeBrowseReference = (
+  reference: ReferenceDescription,
+): OpcuaBrowseReference => ({
+  nodeId: normalizeExpandedNodeId(reference.nodeId),
+  referenceTypeId: reference.referenceTypeId?.toString(),
+  isForward: reference.isForward,
+  nodeClass: reference.nodeClass,
+  browseName: reference.browseName
+    ? normalizeQualifiedName(reference.browseName)
+    : undefined,
+  displayName: reference.displayName
+    ? normalizeLocalizedText(reference.displayName)
+    : undefined,
+  typeDefinition: reference.typeDefinition
+    ? normalizeExpandedNodeId(reference.typeDefinition)
+    : undefined,
+  raw: reference,
+});
+
+const normalizeExpandedNodeId = (
+  nodeId: ExpandedNodeId,
+): OpcuaExpandedNodeId => ({
+  text: nodeId.toString(),
+  namespace: nodeId.namespace,
+  value: nodeId.value,
+  identifierType: String(nodeId.identifierType),
+  namespaceUri: nodeId.namespaceUri ?? undefined,
+  serverIndex: nodeId.serverIndex || undefined,
+  raw: nodeId,
+});
+
+const normalizeQualifiedName = (name: {
+  readonly namespaceIndex?: number;
+  readonly name?: string | null;
+  readonly toString: () => string;
+}): OpcuaQualifiedName => ({
+  namespaceIndex: name.namespaceIndex ?? 0,
+  name: name.name ?? "",
+  text: name.toString(),
+});
+
+const normalizeLocalizedText = (text: {
+  readonly text?: string | null;
+  readonly locale?: string | null;
+}): OpcuaLocalizedText => ({
+  text: text.text ?? "",
+  locale: text.locale ?? undefined,
+});
+
 const durationMillis = (duration: Duration.Duration) =>
   Duration.toMillis(duration);
 const isGood = (statusCode: StatusCode) => statusCode.isGood();
@@ -1644,13 +1975,16 @@ const wireSubscriptionEvents = (
 };
 
 export type {
+  BrowseResult,
   ClientMonitoredItemGroup,
   ClientSession,
   ClientSubscription,
   DataValue,
+  ExpandedNodeId,
   NodeId,
   OPCUAClient,
   OPCUAClientOptions,
+  ReferenceDescription,
   ReadValueIdOptions,
   StatusCode,
   UserIdentityInfo,
@@ -1658,9 +1992,15 @@ export type {
 export {
   AccessLevelFlag,
   AttributeIds,
+  BrowseDirection,
   DataType,
+  NodeClass,
+  NodeClassMask,
+  ResultMask,
   StatusCodes,
   TimestampsToReturn,
   Variant,
   VariantArrayType,
+  makeNodeClassMask,
+  makeResultMask,
 };
