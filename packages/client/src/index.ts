@@ -4,11 +4,13 @@ import {
   BrowseDirection,
   ClientSubscription,
   coerceNodeId,
-  DataType,
   DataChangeFilter,
   DataChangeTrigger,
+  DataType,
   DataValue,
   DeadbandType,
+  makeNodeClassMask,
+  makeResultMask,
   NodeClass,
   NodeClassMask,
   NodeId,
@@ -20,8 +22,6 @@ import {
   TimestampsToReturn,
   Variant,
   VariantArrayType,
-  makeNodeClassMask,
-  makeResultMask,
   type BrowseDescriptionOptions,
   type BrowseResult,
   type ClientMonitoredItemGroup,
@@ -42,12 +42,14 @@ import {
   Layer,
   PubSub,
   Queue,
+  Ref,
   Schema,
   Scope,
   Stream,
 } from "effect";
 
 export type NodeIdString = string;
+export type ExpandedNodeIdString = string;
 export type Capability = "read" | "write";
 export type CapabilitySet = ReadonlyArray<Capability>;
 
@@ -162,23 +164,6 @@ export class OpcuaAccessDeniedError extends Data.TaggedError(
   readonly cause?: unknown;
 }> {}
 
-export class OpcuaSchemaDataTypeMismatchError extends Data.TaggedError(
-  "OpcuaSchemaDataTypeMismatchError",
-)<{
-  readonly nodeId: NodeIdString;
-  readonly expected: string;
-  readonly actual: string;
-  readonly cause?: unknown;
-}> {}
-
-export class OpcuaUnsupportedValueRankError extends Data.TaggedError(
-  "OpcuaUnsupportedValueRankError",
-)<{
-  readonly nodeId: NodeIdString;
-  readonly valueRank: number;
-  readonly cause?: unknown;
-}> {}
-
 export class OpcuaConfigurationError extends Data.TaggedError(
   "OpcuaConfigurationError",
 )<{
@@ -241,61 +226,89 @@ export type OpcuaSubscriptionEvent =
       readonly nodeIds: ReadonlyArray<NodeIdString>;
     };
 
-export type OpcuaValueSample<A, Id extends string> =
-  | {
-      readonly _tag: "Value";
-      readonly nodeId: Id;
-      readonly value: A;
-      readonly dataValue: DataValue;
-    }
-  | {
-      readonly _tag: "NonGoodStatus";
-      readonly nodeId: Id;
-      readonly dataValue: DataValue;
-    }
-  | {
-      readonly _tag: "DecodeError";
-      readonly nodeId: Id;
-      readonly error: Schema.SchemaError;
-      readonly dataValue: DataValue;
-    };
-
-export type OpcuaWriteValuesResult<Ids extends string> = {
-  readonly [Id in Ids]: StatusCode;
+export type OpcuaStatusInfo = {
+  readonly text: string;
+  readonly code: number;
+  readonly isGood: boolean;
+  readonly isUncertain: boolean;
+  readonly isBad: boolean;
 };
 
-export type ExpandedNodeIdString = string;
+export type OpcuaVariantInfo = {
+  readonly dataType: string;
+  readonly arrayType: "Scalar" | "Array" | "Matrix";
+  readonly valueRank?: number;
+  readonly arrayDimensions?: ReadonlyArray<number>;
+};
 
-export type OpcuaQualifiedName = {
+export type OpcuaDynamicValue =
+  | null
+  | boolean
+  | number
+  | string
+  | ReadonlyArray<OpcuaDynamicValue>
+  | { readonly _tag: "DateTime"; readonly iso: string }
+  | { readonly _tag: "ByteString"; readonly base64: string }
+  | { readonly _tag: "Int64"; readonly text: string }
+  | { readonly _tag: "UInt64"; readonly text: string }
+  | {
+      readonly _tag: "LocalizedText";
+      readonly text: string;
+      readonly locale?: string;
+    }
+  | {
+      readonly _tag: "QualifiedName";
+      readonly namespaceIndex: number;
+      readonly name: string;
+      readonly text: string;
+    }
+  | {
+      readonly _tag: "NodeId";
+      readonly text: string;
+      readonly namespace: number;
+      readonly identifierType: string;
+      readonly value: unknown;
+    }
+  | {
+      readonly _tag: "ExtensionObject";
+      readonly typeName?: string;
+      readonly value?: unknown;
+    };
+
+export type OpcuaNodeIdInfo = {
+  readonly text: string;
+  readonly namespace: number;
+  readonly namespaceUri?: string;
+  readonly identifierType: string;
+  readonly value: unknown;
+};
+
+export type OpcuaExpandedNodeIdInfo = OpcuaNodeIdInfo & {
+  readonly serverIndex?: number;
+  readonly isLocal: boolean;
+  readonly isRemote: boolean;
+};
+
+export type OpcuaQualifiedNameInfo = {
   readonly namespaceIndex: number;
   readonly name: string;
   readonly text: string;
 };
 
-export type OpcuaLocalizedText = {
+export type OpcuaLocalizedTextInfo = {
   readonly text: string;
   readonly locale?: string;
 };
 
-export type OpcuaExpandedNodeId = {
-  readonly text: ExpandedNodeIdString;
-  readonly namespace: number;
-  readonly value: unknown;
-  readonly identifierType: string;
-  readonly namespaceUri?: string;
-  readonly serverIndex?: number;
-  readonly raw: ExpandedNodeId;
-};
-
 export type OpcuaBrowseReference = {
-  readonly nodeId: OpcuaExpandedNodeId;
+  readonly nodeId: OpcuaExpandedNodeIdInfo;
   readonly referenceTypeId?: NodeIdString;
   readonly isForward?: boolean;
-  readonly nodeClass?: NodeClass;
-  readonly browseName?: OpcuaQualifiedName;
-  readonly displayName?: OpcuaLocalizedText;
-  readonly typeDefinition?: OpcuaExpandedNodeId;
-  readonly raw: ReferenceDescription;
+  readonly nodeClass?: string;
+  readonly browseName?: OpcuaQualifiedNameInfo;
+  readonly displayName?: OpcuaLocalizedTextInfo;
+  readonly typeDefinition?: OpcuaExpandedNodeIdInfo;
+  readonly raw?: ReferenceDescription;
 };
 
 export type OpcuaBrowseContinuation = {
@@ -305,10 +318,16 @@ export type OpcuaBrowseContinuation = {
 
 export type OpcuaBrowseResult = {
   readonly nodeId: NodeIdString;
-  readonly statusCode: StatusCode;
+  readonly status: OpcuaStatusInfo;
   readonly references: ReadonlyArray<OpcuaBrowseReference>;
   readonly continuation?: OpcuaBrowseContinuation;
-  readonly raw: BrowseResult;
+  readonly raw?: BrowseResult;
+};
+
+export type OpcuaBrowseChildrenResult = {
+  readonly nodeId: NodeIdString;
+  readonly references: ReadonlyArray<OpcuaBrowseReference>;
+  readonly continuation?: OpcuaBrowseContinuation;
 };
 
 export type OpcuaBrowseOptions = {
@@ -319,16 +338,96 @@ export type OpcuaBrowseOptions = {
   readonly nodeClassMask?: number;
   readonly resultMask?: number;
   readonly maxReferencesPerNode?: number;
+  readonly includeRaw?: boolean;
+};
+
+export type OpcuaBrowseChildrenOptions = {
+  readonly mode?: "all" | "page";
+  readonly maxReferencesPerNode?: number;
+  readonly referenceTypeId?: string;
+  readonly includeSubtypes?: boolean;
+  readonly nodeClassMask?: number;
+  readonly includeRaw?: boolean;
+};
+
+export type OpcuaValueSample<A, Id extends string = string> =
+  | {
+      readonly _tag: "Value";
+      readonly nodeId: Id;
+      readonly value: A;
+      readonly status: OpcuaStatusInfo;
+      readonly sourceTimestamp?: string;
+      readonly serverTimestamp?: string;
+      readonly variant?: OpcuaVariantInfo;
+      readonly raw?: {
+        readonly dataValue: DataValue;
+        readonly variant?: Variant;
+      };
+    }
+  | {
+      readonly _tag: "NonGoodStatus";
+      readonly nodeId: Id;
+      readonly status: OpcuaStatusInfo;
+      readonly sourceTimestamp?: string;
+      readonly serverTimestamp?: string;
+      readonly variant?: OpcuaVariantInfo;
+      readonly raw?: {
+        readonly dataValue: DataValue;
+        readonly variant?: Variant;
+      };
+    }
+  | {
+      readonly _tag: "DecodeError";
+      readonly nodeId: Id;
+      readonly error: Schema.SchemaError;
+      readonly status: OpcuaStatusInfo;
+      readonly sourceTimestamp?: string;
+      readonly serverTimestamp?: string;
+      readonly variant?: OpcuaVariantInfo;
+      readonly raw?: {
+        readonly dataValue: DataValue;
+        readonly variant?: Variant;
+      };
+    };
+
+export type OpcuaAnyValueSample =
+  | OpcuaValueSample<unknown, string>
+  | OpcuaValueSample<OpcuaDynamicValue, string>;
+
+export type OpcuaWriteResult<Id extends string = string> =
+  | {
+      readonly _tag: "Written";
+      readonly nodeId: Id;
+      readonly status: OpcuaStatusInfo;
+    }
+  | {
+      readonly _tag: "NonGoodStatus";
+      readonly nodeId: Id;
+      readonly status: OpcuaStatusInfo;
+    };
+
+export type OpcuaWriteValuesResult<Ids extends string> = {
+  readonly [Id in Ids]: OpcuaWriteResult<Id>;
 };
 
 export type OpcuaValueMetadata = {
   readonly nodeId: NodeIdString;
-  readonly dataType: DataType;
-  readonly dataTypeNodeId: NodeId;
+  readonly dataType: string;
+  readonly dataTypeNodeId: OpcuaNodeIdInfo;
   readonly valueRank: number;
   readonly arrayDimensions?: ReadonlyArray<number>;
   readonly accessLevel: number;
   readonly userAccessLevel?: number;
+  readonly access: {
+    readonly readable: boolean;
+    readonly writable: boolean;
+    readonly userReadable: boolean;
+    readonly userWritable: boolean;
+  };
+  readonly raw: {
+    readonly dataType: DataType;
+    readonly dataTypeNodeId: NodeId;
+  };
 };
 
 export type ClientBufferPolicy =
@@ -395,59 +494,67 @@ export const MonitorValueFilter = {
 
 type AnySchema = Schema.Schema<unknown>;
 type SchemaType<S> = S extends Schema.Schema<infer A> ? A : never;
-type ValueSpec<Id extends string = string, S extends AnySchema = AnySchema> = {
+type ValueSpec<
+  Id extends string = string,
+  S extends AnySchema | undefined = AnySchema | undefined,
+> = {
   readonly nodeId: Id;
-  readonly schema: S;
+  readonly schema?: S;
+  readonly includeRaw?: boolean;
 };
+type ValueOfSpec<Spec> = Spec extends { readonly schema: infer S }
+  ? S extends AnySchema
+    ? SchemaType<S>
+    : OpcuaDynamicValue
+  : OpcuaDynamicValue;
 type ReadValuesResult<Specs extends ReadonlyArray<ValueSpec>> = {
-  readonly [Spec in Specs[number] as Spec["nodeId"]]: OpcuaValueSample<
-    SchemaType<Spec["schema"]>,
-    Spec["nodeId"]
-  >;
+  readonly [Index in keyof Specs]: Specs[Index] extends ValueSpec<
+    infer Id,
+    AnySchema | undefined
+  >
+    ? OpcuaValueSample<ValueOfSpec<Specs[Index]>, Id>
+    : never;
 };
 type HasCapability<
   Caps extends CapabilitySet,
   Cap extends Capability,
 > = Cap extends Caps[number] ? unknown : never;
-type ReadCapabilityPart<A, Caps extends CapabilitySet> =
+type ReadCapabilityPart<A, Caps extends CapabilitySet, Id extends string> =
   HasCapability<Caps, "read"> extends never
     ? Record<never, never>
     : {
         readonly read: () => Effect.Effect<
-          A,
-          OpcuaNonGoodStatusError | OpcuaDecodeError | OpcuaServiceError
+          OpcuaValueSample<A, Id>,
+          OpcuaServiceError
         >;
       };
-type WriteCapabilityPart<A, Caps extends CapabilitySet> =
+type WriteCapabilityPart<A, Caps extends CapabilitySet, Id extends string> =
   HasCapability<Caps, "write"> extends never
     ? Record<never, never>
     : {
         readonly write: (
           value: A,
         ) => Effect.Effect<
-          void,
-          | OpcuaEncodeError
-          | OpcuaNonGoodStatusError
-          | OpcuaServiceError
-          | OpcuaAccessDeniedError
+          OpcuaWriteResult<Id>,
+          OpcuaEncodeError | OpcuaServiceError | OpcuaAccessDeniedError
         >;
       };
 
 export type OpcuaValueHandle<
-  A,
-  Caps extends CapabilitySet = typeof Capabilities.readWrite,
+  A = OpcuaDynamicValue,
+  Caps extends CapabilitySet = typeof Capabilities.read,
   Id extends string = string,
 > = {
   readonly nodeId: Id;
-  readonly schema: Schema.Schema<A>;
+  readonly schema?: Schema.Schema<A>;
   readonly metadata: OpcuaValueMetadata;
   readonly capabilities: Caps;
   readonly raw: {
     readonly nodeId: NodeId;
     readonly dataType: DataType;
   };
-} & ReadCapabilityPart<A, Caps> &
-  WriteCapabilityPart<A, Caps>;
+} & ReadCapabilityPart<A, Caps, Id> &
+  WriteCapabilityPart<A, Caps, Id>;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type WritableOpcuaValueHandle<A = any, Id extends string = string> =
@@ -467,10 +574,11 @@ type WriteEntry<H extends WritableOpcuaValueHandle<any, string>> = {
 
 export type MonitorValueSpec<
   Id extends string = string,
-  S extends AnySchema = AnySchema,
+  S extends AnySchema | undefined = AnySchema | undefined,
 > = {
   readonly nodeId: Id;
-  readonly schema: S;
+  readonly schema?: S;
+  readonly includeRaw?: boolean;
   readonly samplingInterval?: Duration.Duration;
   readonly filter?: MonitorValueFilter;
 };
@@ -483,16 +591,87 @@ export type MonitorValuesOptions = {
   readonly filter?: MonitorValueFilter;
 };
 
+export type OpcuaMonitorItemOptions = {
+  readonly samplingInterval: number;
+  readonly filter?: MonitorValueFilter;
+};
+
+export type OpcuaMonitoredItemState = {
+  readonly nodeId: NodeIdString;
+  readonly options: OpcuaMonitorItemOptions;
+};
+
+export type OpcuaMonitorAddResult<Id extends string = string> =
+  | { readonly _tag: "Monitoring"; readonly nodeId: Id }
+  | { readonly _tag: "AlreadyMonitoring"; readonly nodeId: Id }
+  | {
+      readonly _tag: "AlreadyMonitoringWithDifferentOptions";
+      readonly nodeId: Id;
+      readonly current: OpcuaMonitorItemOptions;
+      readonly requested: OpcuaMonitorItemOptions;
+    }
+  | {
+      readonly _tag: "NonGoodStatus";
+      readonly nodeId: Id;
+      readonly status: OpcuaStatusInfo;
+      readonly cause?: unknown;
+    };
+
+export type OpcuaMonitorRemoveResult<Id extends string = string> =
+  | { readonly _tag: "Removed"; readonly nodeId: Id }
+  | { readonly _tag: "NotMonitoring"; readonly nodeId: Id };
+
+export type OpcuaMonitorItemEvent =
+  | OpcuaMonitorAddResult
+  | OpcuaMonitorRemoveResult
+  | {
+      readonly _tag: "Terminated";
+      readonly nodeId: NodeIdString;
+      readonly cause?: unknown;
+    };
+
+export type OpcuaValueMonitor = {
+  readonly add: <const Specs extends ReadonlyArray<MonitorValueSpec>>(
+    specs: Specs,
+  ) => Effect.Effect<
+    ReadonlyArray<
+      Specs[number] extends MonitorValueSpec<infer Id>
+        ? OpcuaMonitorAddResult<Id>
+        : never
+    >,
+    OpcuaConfigurationError | OpcuaServiceError
+  >;
+  readonly remove: <const Ids extends ReadonlyArray<NodeIdString>>(
+    nodeIds: Ids,
+  ) => Effect.Effect<
+    ReadonlyArray<
+      Ids[number] extends infer Id extends string
+        ? OpcuaMonitorRemoveResult<Id>
+        : never
+    >,
+    never
+  >;
+  readonly items: Effect.Effect<ReadonlyMap<string, OpcuaMonitoredItemState>>;
+  readonly itemState: Stream.Stream<
+    ReadonlyMap<string, OpcuaMonitoredItemState>
+  >;
+  readonly itemEvents: Stream.Stream<OpcuaMonitorItemEvent>;
+  readonly samples: Stream.Stream<OpcuaAnyValueSample>;
+};
+
 export type OpcuaSubscription = {
   readonly monitorValues: <const Specs extends ReadonlyArray<MonitorValueSpec>>(
     specs: Specs,
     options: MonitorValuesOptions,
   ) => Stream.Stream<
-    Specs[number] extends MonitorValueSpec<infer Id, infer S>
-      ? OpcuaValueSample<SchemaType<S>, Id>
+    Specs[number] extends MonitorValueSpec<infer Id>
+      ? OpcuaValueSample<ValueOfSpec<Specs[number]>, Id>
       : never,
     OpcuaMonitorCreateError | OpcuaConfigurationError
   >;
+  readonly valueMonitor: (
+    options: MonitorValuesOptions,
+  ) => Effect.Effect<OpcuaValueMonitor, OpcuaConfigurationError, Scope.Scope>;
   readonly events: Stream.Stream<OpcuaSubscriptionEvent>;
   readonly raw: ClientSubscription;
 };
@@ -515,11 +694,14 @@ export type OpcuaClientLayerConfig = {
 };
 
 export type OpcuaSession = {
-  readonly readValue: <S extends AnySchema>(
-    input: ValueSpec<NodeIdString, S>,
+  readonly readValue: <
+    const Id extends NodeIdString,
+    S extends AnySchema | undefined = undefined,
+  >(
+    input: ValueSpec<Id, S>,
   ) => Effect.Effect<
-    SchemaType<S>,
-    OpcuaNonGoodStatusError | OpcuaDecodeError | OpcuaServiceError
+    OpcuaValueSample<ValueOfSpec<ValueSpec<Id, S>>, Id>,
+    OpcuaServiceError
   >;
   readonly readValues: <const Specs extends ReadonlyArray<ValueSpec>>(
     specs: Specs,
@@ -529,17 +711,27 @@ export type OpcuaSession = {
   >;
   readonly valueHandle: <
     const Id extends NodeIdString,
-    S extends AnySchema,
-    const Caps extends CapabilitySet = typeof Capabilities.readWrite,
+    S extends AnySchema | undefined = undefined,
+    const Caps extends CapabilitySet = typeof Capabilities.read,
   >(
     input: ValueSpec<Id, S> & { readonly capabilities?: Caps },
   ) => Effect.Effect<
-    OpcuaValueHandle<SchemaType<S>, Caps, Id>,
+    OpcuaValueHandle<ValueOfSpec<ValueSpec<Id, S>>, Caps, Id>,
+    OpcuaServiceError | OpcuaAccessDeniedError | OpcuaConfigurationError
+  >;
+  readonly writeValue: <
+    const Id extends NodeIdString,
+    S extends AnySchema | undefined = undefined,
+  >(
+    input: ValueSpec<Id, S> & {
+      readonly value: ValueOfSpec<ValueSpec<Id, S>>;
+    },
+  ) => Effect.Effect<
+    OpcuaWriteResult<Id>,
+    | OpcuaConfigurationError
+    | OpcuaEncodeError
     | OpcuaServiceError
     | OpcuaAccessDeniedError
-    | OpcuaUnsupportedValueRankError
-    | OpcuaSchemaDataTypeMismatchError
-    | OpcuaConfigurationError
   >;
   readonly writeValues: <
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -560,7 +752,7 @@ export type OpcuaSession = {
     OpcuaConfigurationError | OpcuaServiceError | OpcuaNonGoodStatusError
   >;
   readonly browseNext: (
-    continuation: OpcuaBrowseContinuation,
+    continuation: OpcuaBrowseContinuation & { readonly includeRaw?: boolean },
   ) => Effect.Effect<
     OpcuaBrowseResult,
     OpcuaConfigurationError | OpcuaServiceError | OpcuaNonGoodStatusError
@@ -569,6 +761,13 @@ export type OpcuaSession = {
     continuation: OpcuaBrowseContinuation,
   ) => Effect.Effect<
     void,
+    OpcuaConfigurationError | OpcuaServiceError | OpcuaNonGoodStatusError
+  >;
+  readonly browseChildren: (
+    nodeId: NodeIdString,
+    options?: OpcuaBrowseChildrenOptions,
+  ) => Effect.Effect<
+    OpcuaBrowseChildrenResult,
     OpcuaConfigurationError | OpcuaServiceError | OpcuaNonGoodStatusError
   >;
   readonly createSubscription: (options: {
@@ -691,22 +890,23 @@ const makeSession = (
   raw: ClientSession,
   events: PubSub.PubSub<OpcuaSessionEvent>,
 ): OpcuaSession => {
-  const readValue = <S extends AnySchema>(input: ValueSpec<NodeIdString, S>) =>
+  const readValue = <
+    const Id extends NodeIdString,
+    S extends AnySchema | undefined = undefined,
+  >(
+    input: ValueSpec<Id, S>,
+  ) =>
     readDataValue(raw, input.nodeId).pipe(
-      Effect.flatMap((dataValue) =>
-        strictDecode(input.nodeId, input.schema, dataValue),
-      ),
+      Effect.map((dataValue) => sampleFromDataValue(input, dataValue)),
     ) as Effect.Effect<
-      SchemaType<S>,
-      OpcuaNonGoodStatusError | OpcuaDecodeError | OpcuaServiceError
+      OpcuaValueSample<ValueOfSpec<ValueSpec<Id, S>>, Id>,
+      OpcuaServiceError
     >;
 
   const readValues = <const Specs extends ReadonlyArray<ValueSpec>>(
     specs: Specs,
   ) =>
     Effect.gen(function* () {
-      const duplicate = duplicateNodeIdError("readValues", specs);
-      if (duplicate) return yield* Effect.fail(duplicate);
       const dataValues = yield* Effect.tryPromise({
         try: () =>
           raw.read(
@@ -719,60 +919,65 @@ const makeSession = (
         catch: (cause) =>
           new OpcuaServiceError({ operation: "readValues", cause }),
       });
-      const out: Record<string, OpcuaValueSample<unknown, string>> = {};
-      for (let index = 0; index < specs.length; index++) {
-        out[specs[index]!.nodeId] = sampleFromDataValue(
-          specs[index]!,
-          dataValues[index]!,
-        );
-      }
-      return out as ReadValuesResult<Specs>;
+      return specs.map((spec, index) =>
+        sampleFromDataValue(spec, dataValues[index]!),
+      ) as ReadValuesResult<Specs>;
     });
 
   const valueHandle = <
     const Id extends NodeIdString,
-    S extends AnySchema,
-    const Caps extends CapabilitySet = typeof Capabilities.readWrite,
+    S extends AnySchema | undefined = undefined,
+    const Caps extends CapabilitySet = typeof Capabilities.read,
   >(
     input: ValueSpec<Id, S> & { readonly capabilities?: Caps },
   ) =>
     Effect.gen(function* () {
-      const requested = (input.capabilities ?? Capabilities.readWrite) as Caps;
+      const requested = (input.capabilities ?? Capabilities.read) as Caps;
       const metadata = yield* discoverMetadata(raw, input.nodeId, requested);
-      const rankError = schemaRankError(
-        input.nodeId,
-        input.schema,
-        metadata.valueRank,
-      );
-      if (rankError) return yield* Effect.fail(rankError);
-      const dataTypeError = schemaDataTypeError(
-        input.nodeId,
-        input.schema,
-        metadata.dataType,
-      );
-      if (dataTypeError) return yield* Effect.fail(dataTypeError);
       const nodeId = coerceNodeId(input.nodeId);
       const base = {
         nodeId: input.nodeId,
         schema: input.schema,
         metadata,
         capabilities: requested,
-        raw: { nodeId, dataType: metadata.dataType },
+        raw: { nodeId, dataType: metadata.raw.dataType },
       };
       const handle: Record<string, unknown> = { ...base };
       if (hasCapability(requested, "read")) {
         handle.read = () => readValue(input);
       }
       if (hasCapability(requested, "write")) {
-        handle.write = (value: SchemaType<S>) =>
-          writeOne(
-            raw,
-            base as unknown as OpcuaValueHandle<SchemaType<S>, Caps, Id>,
+        handle.write = (value: unknown) =>
+          writeByMetadata(raw, {
+            nodeId: input.nodeId,
+            schema: input.schema,
             value,
-            true,
-          );
+            metadata,
+          });
       }
-      return handle as OpcuaValueHandle<SchemaType<S>, Caps, Id>;
+      return handle as OpcuaValueHandle<
+        ValueOfSpec<ValueSpec<Id, S>>,
+        Caps,
+        Id
+      >;
+    });
+
+  const writeValue = <
+    const Id extends NodeIdString,
+    S extends AnySchema | undefined = undefined,
+  >(
+    input: ValueSpec<Id, S> & {
+      readonly value: ValueOfSpec<ValueSpec<Id, S>>;
+    },
+  ) =>
+    Effect.gen(function* () {
+      const metadata = yield* discoverMetadata(raw, input.nodeId, [
+        "write",
+      ] as const);
+      return (yield* writeByMetadata(raw, {
+        ...input,
+        metadata,
+      })) as OpcuaWriteResult<Id>;
     });
 
   const writeValues: OpcuaSession["writeValues"] = (writes) =>
@@ -780,6 +985,7 @@ const makeSession = (
       const nodeIds = writes.map((write) => write.handle.nodeId);
       const duplicate = duplicateStringError("writeValues", nodeIds);
       if (duplicate) return yield* Effect.fail(duplicate);
+      const writePayloads: Array<WriteValueOptions> = [];
       for (const write of writes) {
         if (!hasCapability(write.handle.capabilities, "write")) {
           return yield* Effect.fail(
@@ -791,11 +997,9 @@ const makeSession = (
             }),
           );
         }
-      }
-      const writePayloads: Array<WriteValueOptions> = [];
-      for (const write of writes) {
-        const encoded = yield* encodeHandleValue(
-          write.handle as OpcuaValueHandle<unknown, CapabilitySet>,
+        const encoded = yield* encodeValue(
+          write.handle.nodeId,
+          write.handle.schema,
           write.value,
         );
         writePayloads.push({
@@ -811,9 +1015,10 @@ const makeSession = (
         catch: (cause) =>
           new OpcuaServiceError({ operation: "writeValues", cause }),
       });
-      const result: Record<string, StatusCode> = {};
+      const result: Record<string, OpcuaWriteResult> = {};
       for (let index = 0; index < writes.length; index++) {
-        result[writes[index]!.handle.nodeId] = statusCodes[index]!;
+        const nodeId = writes[index]!.handle.nodeId;
+        result[nodeId] = writeResult(nodeId, statusCodes[index]!);
       }
       return result as OpcuaWriteValuesResult<
         (typeof writes)[number]["handle"]["nodeId"]
@@ -889,7 +1094,12 @@ const makeSession = (
           }),
       });
 
-      return yield* normalizeBrowseResultOrFail("browse", input.nodeId, result);
+      return yield* normalizeBrowseResultOrFail(
+        "browse",
+        input.nodeId,
+        result,
+        input.includeRaw ?? false,
+      );
     });
 
   const browseNext: OpcuaSession["browseNext"] = (continuation) =>
@@ -914,6 +1124,7 @@ const makeSession = (
         "browseNext",
         continuation.nodeId,
         result,
+        continuation.includeRaw ?? false,
       );
     });
 
@@ -948,15 +1159,53 @@ const makeSession = (
       }
     });
 
+  const browseChildren: OpcuaSession["browseChildren"] = (nodeId, options) =>
+    Effect.gen(function* () {
+      const mode = options?.mode ?? "all";
+      const first = yield* browse({
+        nodeId,
+        referenceTypeId:
+          options?.referenceTypeId ?? DEFAULT_BROWSE_REFERENCE_TYPE_ID,
+        includeSubtypes:
+          options?.includeSubtypes ?? DEFAULT_BROWSE_INCLUDE_SUBTYPES,
+        nodeClassMask: options?.nodeClassMask ?? DEFAULT_BROWSE_NODE_CLASS_MASK,
+        maxReferencesPerNode:
+          options?.maxReferencesPerNode ??
+          DEFAULT_BROWSE_MAX_REFERENCES_PER_NODE,
+        includeRaw: options?.includeRaw,
+      });
+      if (mode === "page") {
+        return {
+          nodeId,
+          references: first.references,
+          continuation: first.continuation,
+        };
+      }
+
+      const references = [...first.references];
+      let continuation = first.continuation;
+      while (continuation) {
+        const next = yield* browseNext({
+          ...continuation,
+          includeRaw: options?.includeRaw,
+        });
+        references.push(...next.references);
+        continuation = next.continuation;
+      }
+      return { nodeId, references };
+    });
+
   return {
     readValue,
     readValues,
     valueHandle,
+    writeValue,
     writeValues,
     createSubscription,
     browse,
     browseNext,
     releaseBrowseContinuation,
+    browseChildren,
     events: Stream.fromPubSub(events),
     raw,
   };
@@ -980,7 +1229,7 @@ const makeSubscription = (
           const bufferError = bufferPolicyError(options.clientBuffer);
           if (bufferError) return yield* Effect.fail(bufferError);
           const queue = yield* makeQueue<
-            OpcuaValueSample<unknown, string>,
+            OpcuaAnyValueSample,
             OpcuaMonitorCreateError
           >(options.clientBuffer);
           const monitorGroups = groupMonitorSpecs(
@@ -1017,14 +1266,220 @@ const makeSubscription = (
         }),
       ),
     ) as Stream.Stream<
-      Specs[number] extends MonitorValueSpec<infer Id, infer S>
-        ? OpcuaValueSample<SchemaType<S>, Id>
+      Specs[number] extends MonitorValueSpec<infer Id>
+        ? OpcuaValueSample<ValueOfSpec<Specs[number]>, Id>
         : never,
       OpcuaMonitorCreateError | OpcuaConfigurationError
     >) as OpcuaSubscription["monitorValues"];
 
+  const valueMonitor: OpcuaSubscription["valueMonitor"] = (options) =>
+    Effect.gen(function* () {
+      const bufferError = bufferPolicyError(options.clientBuffer);
+      if (bufferError) return yield* Effect.fail(bufferError);
+      const sampleQueue = yield* makeQueue<OpcuaAnyValueSample, never>(
+        options.clientBuffer,
+      );
+      const itemEvents =
+        yield* PubSub.sliding<OpcuaMonitorItemEvent>(EVENT_BUFFER_SIZE);
+      const itemState =
+        yield* PubSub.sliding<ReadonlyMap<string, OpcuaMonitoredItemState>>(
+          EVENT_BUFFER_SIZE,
+        );
+      type ActiveItem = {
+        readonly spec: MonitorValueSpec;
+        readonly options: OpcuaMonitorItemOptions;
+        readonly group: ClientMonitoredItemGroup;
+      };
+      const registry = yield* Ref.make(new Map<string, ActiveItem>());
+
+      const publishState = Ref.get(registry).pipe(
+        Effect.flatMap((map) =>
+          PubSub.publish(
+            itemState,
+            new Map(
+              Array.from(map, ([nodeId, item]) => [
+                nodeId,
+                { nodeId, options: item.options },
+              ]),
+            ),
+          ),
+        ),
+      );
+
+      const add: OpcuaValueMonitor["add"] = (specs) =>
+        Effect.gen(function* () {
+          const results: Array<OpcuaMonitorAddResult> = [];
+          for (const spec of specs) {
+            const effective = effectiveMonitorOptions(spec, options);
+            const current = (yield* Ref.get(registry)).get(spec.nodeId);
+            if (current) {
+              const result = monitorOptionsEqual(current.options, effective)
+                ? ({
+                    _tag: "AlreadyMonitoring",
+                    nodeId: spec.nodeId,
+                  } as const)
+                : ({
+                    _tag: "AlreadyMonitoringWithDifferentOptions",
+                    nodeId: spec.nodeId,
+                    current: current.options,
+                    requested: effective,
+                  } as const);
+              results.push(result);
+              yield* PubSub.publish(itemEvents, result);
+              continue;
+            }
+
+            const groupSpec: MonitorGroupSpec = {
+              samplingInterval: effective.samplingInterval,
+              filter: effective.filter,
+              entries: [{ spec }],
+            };
+            const group = yield* Effect.tryPromise({
+              try: () =>
+                raw.monitorItems(
+                  [
+                    {
+                      nodeId: coerceNodeId(spec.nodeId),
+                      attributeId: AttributeIds.Value,
+                    },
+                  ],
+                  {
+                    samplingInterval: effective.samplingInterval,
+                    filter: toNodeOpcuaDataChangeFilter(effective.filter),
+                    queueSize: options.queueSize,
+                    discardOldest: options.discardOldest,
+                  },
+                  TimestampsToReturn.Both,
+                ),
+              catch: (cause) =>
+                new OpcuaServiceError({
+                  operation: "valueMonitor.add",
+                  nodeId: spec.nodeId,
+                  cause,
+                }),
+            });
+            const failure = monitorCreateFailures(group, groupSpec)[0];
+            if (failure) {
+              yield* terminateMonitorGroup(group);
+              const result = {
+                _tag: "NonGoodStatus",
+                nodeId: spec.nodeId,
+                status: normalizeStatusCode(
+                  failure.statusCode ?? StatusCodes.Bad,
+                ),
+                cause: failure.cause,
+              } as const;
+              results.push(result);
+              yield* PubSub.publish(itemEvents, result);
+              continue;
+            }
+            group.on("changed", (_item, dataValue) => {
+              offerMonitorSample(
+                raw,
+                events,
+                sampleQueue,
+                options.clientBuffer,
+                sampleFromDataValue(spec, dataValue),
+              );
+            });
+            group.on("terminated", (cause) => {
+              Effect.runFork(
+                Ref.update(registry, (map) => {
+                  const next = new Map(map);
+                  next.delete(spec.nodeId);
+                  return next;
+                }).pipe(
+                  Effect.andThen(publishState),
+                  Effect.andThen(
+                    PubSub.publish(itemEvents, {
+                      _tag: "Terminated",
+                      nodeId: spec.nodeId,
+                      cause,
+                    }),
+                  ),
+                ),
+              );
+            });
+            yield* Ref.update(registry, (map) => {
+              const next = new Map(map);
+              next.set(spec.nodeId, { spec, options: effective, group });
+              return next;
+            });
+            const result = {
+              _tag: "Monitoring",
+              nodeId: spec.nodeId,
+            } as const;
+            results.push(result);
+            yield* PubSub.publish(itemEvents, result);
+            yield* publishState;
+          }
+          return results as never;
+        });
+
+      const remove: OpcuaValueMonitor["remove"] = (nodeIds) =>
+        Effect.gen(function* () {
+          const results: Array<OpcuaMonitorRemoveResult> = [];
+          for (const nodeId of nodeIds) {
+            const current = (yield* Ref.get(registry)).get(nodeId);
+            if (!current) {
+              const result = { _tag: "NotMonitoring", nodeId } as const;
+              results.push(result);
+              yield* PubSub.publish(itemEvents, result);
+              continue;
+            }
+            yield* Ref.update(registry, (map) => {
+              const next = new Map(map);
+              next.delete(nodeId);
+              return next;
+            });
+            yield* terminateMonitorGroup(current.group);
+            const result = { _tag: "Removed", nodeId } as const;
+            results.push(result);
+            yield* PubSub.publish(itemEvents, result);
+            yield* publishState;
+          }
+          return results as never;
+        });
+
+      yield* Effect.addFinalizer(() =>
+        Ref.get(registry).pipe(
+          Effect.flatMap((map) =>
+            Effect.forEach(
+              Array.from(map.values()),
+              (item) => terminateMonitorGroup(item.group),
+              { discard: true },
+            ),
+          ),
+          Effect.andThen(Queue.shutdown(sampleQueue)),
+          Effect.andThen(PubSub.shutdown(itemEvents)),
+          Effect.andThen(PubSub.shutdown(itemState)),
+          Effect.ignore,
+        ),
+      );
+
+      return {
+        add,
+        remove,
+        items: Ref.get(registry).pipe(
+          Effect.map(
+            (map) =>
+              new Map(
+                Array.from(map, ([nodeId, item]) => [
+                  nodeId,
+                  { nodeId, options: item.options },
+                ]),
+              ),
+          ),
+        ),
+        itemState: Stream.fromPubSub(itemState),
+        itemEvents: Stream.fromPubSub(itemEvents),
+        samples: Stream.fromQueue(sampleQueue),
+      };
+    });
+
   return {
     monitorValues,
+    valueMonitor,
     events: Stream.fromPubSub(events),
     raw,
   };
@@ -1072,6 +1527,23 @@ const groupMonitorSpecs = (
   });
   return Array.from(groups.values());
 };
+
+const effectiveMonitorOptions = (
+  spec: MonitorValueSpec,
+  options: MonitorValuesOptions,
+): OpcuaMonitorItemOptions => ({
+  samplingInterval: spec.samplingInterval
+    ? durationMillis(spec.samplingInterval)
+    : durationMillis(options.samplingInterval),
+  filter: spec.filter ?? options.filter,
+});
+
+const monitorOptionsEqual = (
+  left: OpcuaMonitorItemOptions,
+  right: OpcuaMonitorItemOptions,
+) =>
+  left.samplingInterval === right.samplingInterval &&
+  monitorValueFilterKey(left.filter) === monitorValueFilterKey(right.filter);
 
 const monitorValueFilterKey = (filter: MonitorValueFilter | undefined) => {
   if (!filter) return "None";
@@ -1173,7 +1645,7 @@ const acquireMonitorGroup = (
       });
       const failures = monitorCreateFailures(group, groupSpec);
       if (failures.length > 0) {
-        yield* terminateMonitorGroup(group).pipe(Effect.ignore);
+        yield* terminateMonitorGroup(group);
         return yield* Effect.fail(
           monitorCreateError(
             subscription,
@@ -1247,10 +1719,7 @@ const wireMonitorGroup = (
   events: PubSub.PubSub<OpcuaSubscriptionEvent>,
   group: ClientMonitoredItemGroup,
   groupSpec: MonitorGroupSpec,
-  queue: Queue.Queue<
-    OpcuaValueSample<unknown, string>,
-    OpcuaMonitorCreateError
-  >,
+  queue: Queue.Queue<OpcuaAnyValueSample, OpcuaMonitorCreateError>,
   options: MonitorValuesOptions,
   finalizingMonitorGroups: WeakSet<ClientMonitoredItemGroup>,
 ) => {
@@ -1285,15 +1754,12 @@ const wireMonitorGroup = (
   });
 };
 
-const offerMonitorSample = (
+const offerMonitorSample = <E>(
   subscription: ClientSubscription,
   events: PubSub.PubSub<OpcuaSubscriptionEvent>,
-  queue: Queue.Queue<
-    OpcuaValueSample<unknown, string>,
-    OpcuaMonitorCreateError
-  >,
+  queue: Queue.Queue<OpcuaAnyValueSample, E>,
   policy: ClientBufferPolicy,
-  sample: OpcuaValueSample<unknown, string>,
+  sample: OpcuaAnyValueSample,
 ) => {
   const willDrop =
     policy._tag === "Sliding" && Queue.sizeUnsafe(queue) >= policy.capacity;
@@ -1321,53 +1787,52 @@ const readDataValue = (session: ClientSession, nodeId: NodeIdString) =>
       new OpcuaServiceError({ operation: "readValue", nodeId, cause }),
   });
 
-const strictDecode = <S extends AnySchema>(
-  nodeId: NodeIdString,
-  schema: S,
-  dataValue: DataValue,
-): Effect.Effect<SchemaType<S>, OpcuaNonGoodStatusError | OpcuaDecodeError> => {
-  if (!isGood(dataValue.statusCode)) {
-    return Effect.fail(
-      new OpcuaNonGoodStatusError({
-        operation: "readValue",
-        nodeId,
-        statusCode: dataValue.statusCode,
-        dataValue,
-      }),
-    );
-  }
-  return Effect.sync(() =>
-    decodeWithSchema(schema, dataValue.value?.value),
-  ).pipe(
-    Effect.mapError(
-      (error) => new OpcuaDecodeError({ nodeId, error, dataValue }),
-    ),
-  );
-};
-
-const sampleFromDataValue = <Id extends string, S extends AnySchema>(
+const sampleFromDataValue = <
+  Id extends string,
+  S extends AnySchema | undefined,
+>(
   spec: ValueSpec<Id, S>,
   dataValue: DataValue,
-): OpcuaValueSample<SchemaType<S>, Id> => {
+): OpcuaValueSample<ValueOfSpec<ValueSpec<Id, S>>, Id> => {
+  const base = sampleBase(spec.nodeId, dataValue, spec.includeRaw ?? false);
   if (!isGood(dataValue.statusCode)) {
-    return { _tag: "NonGoodStatus", nodeId: spec.nodeId, dataValue };
+    return { _tag: "NonGoodStatus", ...base };
   }
   try {
+    const value = spec.schema
+      ? decodeWithSchema(spec.schema, dataValue.value?.value)
+      : normalizeDynamicValue(dataValue.value?.value, dataValue.value);
     return {
       _tag: "Value",
-      nodeId: spec.nodeId,
-      value: decodeWithSchema(spec.schema, dataValue.value?.value),
-      dataValue,
+      ...base,
+      value: value as ValueOfSpec<ValueSpec<Id, S>>,
     };
   } catch (error) {
     return {
       _tag: "DecodeError",
-      nodeId: spec.nodeId,
+      ...base,
       error: error as Schema.SchemaError,
-      dataValue,
     };
   }
 };
+
+const sampleBase = <Id extends string>(
+  nodeId: Id,
+  dataValue: DataValue,
+  includeRaw: boolean,
+) => ({
+  nodeId,
+  status: normalizeStatusCode(dataValue.statusCode),
+  sourceTimestamp: normalizeTimestamp(dataValue.sourceTimestamp),
+  serverTimestamp: normalizeTimestamp(dataValue.serverTimestamp),
+  variant: dataValue.value ? normalizeVariantInfo(dataValue.value) : undefined,
+  raw: includeRaw
+    ? {
+        dataValue,
+        variant: dataValue.value,
+      }
+    : undefined,
+});
 
 const discoverMetadata = (
   session: ClientSession,
@@ -1436,12 +1901,6 @@ const discoverMetadata = (
         }),
       );
     }
-    const valueRank = valueRankValue.value.value as number;
-    if (!isSupportedValueRank(valueRank)) {
-      return yield* Effect.fail(
-        new OpcuaUnsupportedValueRankError({ nodeId, valueRank }),
-      );
-    }
     const builtInDataType = yield* Effect.tryPromise({
       try: () => session.getBuiltInDataType(coerceNodeId(nodeId)),
       catch: (cause) =>
@@ -1467,11 +1926,12 @@ const discoverMetadata = (
       );
       if (accessError) return yield* Effect.fail(accessError);
     }
+    const dataTypeNodeId = dataTypeValue.value.value as NodeId;
     return {
       nodeId,
-      dataTypeNodeId: dataTypeValue.value.value as NodeId,
-      dataType: builtInDataType,
-      valueRank,
+      dataType: DataType[builtInDataType] ?? String(builtInDataType),
+      dataTypeNodeId: normalizeNodeId(dataTypeNodeId),
+      valueRank: valueRankValue.value.value as number,
       arrayDimensions:
         arrayDimensionsValue &&
         isGood(arrayDimensionsValue.statusCode) &&
@@ -1480,108 +1940,87 @@ const discoverMetadata = (
           : undefined,
       accessLevel,
       userAccessLevel,
+      access: {
+        readable: hasAccess(accessLevel, "read"),
+        writable: hasAccess(accessLevel, "write"),
+        userReadable:
+          userAccessLevel === undefined || hasAccess(userAccessLevel, "read"),
+        userWritable:
+          userAccessLevel === undefined || hasAccess(userAccessLevel, "write"),
+      },
+      raw: {
+        dataType: builtInDataType,
+        dataTypeNodeId,
+      },
     };
   });
 
-const writeOne = <A, Caps extends CapabilitySet>(
+const writeByMetadata = (
   session: ClientSession,
-  handle: OpcuaValueHandle<A, Caps>,
-  value: A,
-  strictStatus: boolean,
+  input: {
+    readonly nodeId: NodeIdString;
+    readonly schema?: AnySchema;
+    readonly value: unknown;
+    readonly metadata: OpcuaValueMetadata;
+  },
 ) =>
   Effect.gen(function* () {
-    if (!hasCapability(handle.capabilities, "write")) {
-      return yield* Effect.fail(
-        new OpcuaAccessDeniedError({
-          nodeId: handle.nodeId,
-          requestedCapability: "write",
-        }),
-      );
-    }
-    const encoded = yield* encodeHandleValue(handle, value);
+    const encoded = yield* encodeValue(input.nodeId, input.schema, input.value);
     const statusCode = yield* Effect.tryPromise({
       try: () =>
         session.write({
-          nodeId: coerceNodeId(handle.nodeId),
+          nodeId: coerceNodeId(input.nodeId),
           attributeId: AttributeIds.Value,
           value: {
-            value: makeVariant(handle.metadata, encoded),
+            value: makeVariant(input.metadata, encoded),
           },
         }),
       catch: (cause) =>
         new OpcuaServiceError({
           operation: "writeValue",
-          nodeId: handle.nodeId,
+          nodeId: input.nodeId,
           cause,
         }),
     });
-    if (strictStatus && !isGood(statusCode)) {
-      return yield* Effect.fail(
-        new OpcuaNonGoodStatusError({
-          operation: "writeValue",
-          nodeId: handle.nodeId,
-          statusCode,
-        }),
-      );
-    }
+    return writeResult(input.nodeId, statusCode);
   });
 
-const encodeHandleValue = <A, Caps extends CapabilitySet>(
-  handle: OpcuaValueHandle<A, Caps>,
-  value: A,
+const encodeValue = (
+  nodeId: NodeIdString,
+  schema: AnySchema | undefined,
+  value: unknown,
 ) =>
-  Effect.sync(() =>
-    Schema.encodeUnknownSync(handle.schema as Schema.Encoder<unknown>)(value),
-  ).pipe(
-    Effect.mapError(
-      (error) => new OpcuaEncodeError({ nodeId: handle.nodeId, value, error }),
-    ),
-  );
+  schema
+    ? Effect.sync(() =>
+        Schema.encodeUnknownSync(schema as Schema.Encoder<unknown>)(value),
+      ).pipe(
+        Effect.mapError(
+          (error) => new OpcuaEncodeError({ nodeId, value, error }),
+        ),
+      )
+    : Effect.sync(() => denormalizeDynamicValue(value));
 
 const makeVariant = (metadata: OpcuaValueMetadata, value: unknown) =>
   new Variant({
-    dataType: metadata.dataType,
-    arrayType: isArrayRank(metadata.valueRank)
-      ? VariantArrayType.Array
-      : VariantArrayType.Scalar,
+    dataType: metadata.raw.dataType,
+    arrayType:
+      Array.isArray(value) || isArrayRank(metadata.valueRank)
+        ? VariantArrayType.Array
+        : VariantArrayType.Scalar,
     value: value as Variant["value"],
   });
 
-const schemaRankError = (
-  nodeId: NodeIdString,
-  schema: AnySchema,
-  valueRank: number,
-) => {
-  const schemaIsArray = schemaShape(schema) === "array";
-  const valueIsArray = isArrayRank(valueRank);
-  if (schemaIsArray !== valueIsArray) {
-    return new OpcuaSchemaDataTypeMismatchError({
-      nodeId,
-      expected: schemaIsArray ? "array" : "scalar",
-      actual: valueIsArray ? "array" : "scalar",
-    });
-  }
-  return undefined;
-};
-
-const schemaDataTypeError = (
-  nodeId: NodeIdString,
-  schema: AnySchema,
-  dataType: DataType,
-) => {
-  // Best-effort compatibility check: unknown schema shapes are accepted.
-  const expected = schemaDataTypeCategory(schema);
-  if (!expected) return undefined;
-  const actual = opcuaDataTypeCategory(dataType);
-  if (expected !== actual) {
-    return new OpcuaSchemaDataTypeMismatchError({
-      nodeId,
-      expected,
-      actual,
-    });
-  }
-  return undefined;
-};
+const writeResult = <Id extends string>(
+  nodeId: Id,
+  statusCode: StatusCode,
+): OpcuaWriteResult<Id> =>
+  isGood(statusCode)
+    ? { _tag: "Written", nodeId, status: normalizeStatusCode(statusCode) }
+    : {
+        _tag: "NonGoodStatus",
+        nodeId,
+        status: normalizeStatusCode(statusCode),
+      };
 
 const accessDeniedError = (
   nodeId: NodeIdString,
@@ -1589,13 +2028,10 @@ const accessDeniedError = (
   accessLevel: number,
   userAccessLevel?: number,
 ) => {
-  const flag =
-    requestedCapability === "read"
-      ? AccessLevelFlag.CurrentRead
-      : AccessLevelFlag.CurrentWrite;
-  const hasNodeAccess = (accessLevel & flag) !== 0;
+  const hasNodeAccess = hasAccess(accessLevel, requestedCapability);
   const hasUserAccess =
-    userAccessLevel === undefined || (userAccessLevel & flag) !== 0;
+    userAccessLevel === undefined ||
+    hasAccess(userAccessLevel, requestedCapability);
   if (!hasNodeAccess || !hasUserAccess) {
     return new OpcuaAccessDeniedError({
       nodeId,
@@ -1605,6 +2041,14 @@ const accessDeniedError = (
     });
   }
   return undefined;
+};
+
+const hasAccess = (accessLevel: number, capability: Capability) => {
+  const flag =
+    capability === "read"
+      ? AccessLevelFlag.CurrentRead
+      : AccessLevelFlag.CurrentWrite;
+  return (accessLevel & flag) !== 0;
 };
 
 const bufferPolicyError = (policy: ClientBufferPolicy) => {
@@ -1711,6 +2155,7 @@ const normalizeBrowseResultOrFail = (
   operation: string,
   nodeId: NodeIdString,
   result: BrowseResult,
+  includeRaw: boolean,
 ): Effect.Effect<OpcuaBrowseResult, OpcuaNonGoodStatusError> => {
   if (!isGood(result.statusCode)) {
     return Effect.fail(
@@ -1722,30 +2167,38 @@ const normalizeBrowseResultOrFail = (
     );
   }
 
-  return Effect.succeed(normalizeBrowseResult(nodeId, result));
+  return Effect.succeed(normalizeBrowseResult(nodeId, result, includeRaw));
 };
 
 const normalizeBrowseResult = (
   nodeId: NodeIdString,
   result: BrowseResult,
+  includeRaw: boolean,
 ): OpcuaBrowseResult => ({
   nodeId,
-  statusCode: result.statusCode,
-  references: result.references?.map(normalizeBrowseReference) ?? [],
+  status: normalizeStatusCode(result.statusCode),
+  references:
+    result.references?.map((reference) =>
+      normalizeBrowseReference(reference, includeRaw),
+    ) ?? [],
   continuation:
     result.continuationPoint && result.continuationPoint.length > 0
       ? { nodeId, raw: result.continuationPoint }
       : undefined,
-  raw: result,
+  raw: includeRaw ? result : undefined,
 });
 
 const normalizeBrowseReference = (
   reference: ReferenceDescription,
+  includeRaw: boolean,
 ): OpcuaBrowseReference => ({
   nodeId: normalizeExpandedNodeId(reference.nodeId),
   referenceTypeId: reference.referenceTypeId?.toString(),
   isForward: reference.isForward,
-  nodeClass: reference.nodeClass,
+  nodeClass:
+    typeof reference.nodeClass === "number"
+      ? NodeClass[reference.nodeClass]
+      : undefined,
   browseName: reference.browseName
     ? normalizeQualifiedName(reference.browseName)
     : undefined,
@@ -1755,26 +2208,37 @@ const normalizeBrowseReference = (
   typeDefinition: reference.typeDefinition
     ? normalizeExpandedNodeId(reference.typeDefinition)
     : undefined,
-  raw: reference,
+  raw: includeRaw ? reference : undefined,
 });
 
-const normalizeExpandedNodeId = (
-  nodeId: ExpandedNodeId,
-): OpcuaExpandedNodeId => ({
+const normalizeNodeId = (nodeId: NodeId): OpcuaNodeIdInfo => ({
   text: nodeId.toString(),
   namespace: nodeId.namespace,
   value: nodeId.value,
   identifierType: String(nodeId.identifierType),
-  namespaceUri: nodeId.namespaceUri ?? undefined,
-  serverIndex: nodeId.serverIndex || undefined,
-  raw: nodeId,
 });
+
+const normalizeExpandedNodeId = (
+  nodeId: ExpandedNodeId,
+): OpcuaExpandedNodeIdInfo => {
+  const isRemote = Boolean(nodeId.namespaceUri) || Boolean(nodeId.serverIndex);
+  return {
+    text: nodeId.toString(),
+    namespace: nodeId.namespace,
+    value: nodeId.value,
+    identifierType: String(nodeId.identifierType),
+    namespaceUri: nodeId.namespaceUri ?? undefined,
+    serverIndex: nodeId.serverIndex || undefined,
+    isLocal: !isRemote,
+    isRemote,
+  };
+};
 
 const normalizeQualifiedName = (name: {
   readonly namespaceIndex?: number;
   readonly name?: string | null;
   readonly toString: () => string;
-}): OpcuaQualifiedName => ({
+}): OpcuaQualifiedNameInfo => ({
   namespaceIndex: name.namespaceIndex ?? 0,
   name: name.name ?? "",
   text: name.toString(),
@@ -1783,16 +2247,129 @@ const normalizeQualifiedName = (name: {
 const normalizeLocalizedText = (text: {
   readonly text?: string | null;
   readonly locale?: string | null;
-}): OpcuaLocalizedText => ({
+}): OpcuaLocalizedTextInfo => ({
   text: text.text ?? "",
   locale: text.locale ?? undefined,
 });
 
+const normalizeStatusCode = (statusCode: StatusCode): OpcuaStatusInfo => ({
+  text: statusCode.toString(),
+  code: statusCode.value,
+  isGood: statusCode.isGood(),
+  isUncertain: !statusCode.isGood() && !statusCode.isBad(),
+  isBad: statusCode.isBad(),
+});
+
+const normalizeVariantInfo = (variant: Variant): OpcuaVariantInfo => ({
+  dataType: DataType[variant.dataType] ?? String(variant.dataType),
+  arrayType: VariantArrayType[variant.arrayType] as
+    | "Scalar"
+    | "Array"
+    | "Matrix",
+  arrayDimensions: variant.dimensions ?? undefined,
+});
+
+const normalizeDynamicValue = (
+  value: unknown,
+  variant?: Variant,
+): OpcuaDynamicValue => {
+  if (value === null || value === undefined) return null;
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeDynamicValue(item));
+  }
+  if (Buffer.isBuffer(value) || value instanceof Uint8Array) {
+    return {
+      _tag: "ByteString",
+      base64: Buffer.from(value).toString("base64"),
+    };
+  }
+  if (value instanceof Date) {
+    return { _tag: "DateTime", iso: value.toISOString() };
+  }
+  if (value instanceof NodeId) {
+    return { _tag: "NodeId", ...normalizeNodeId(value) };
+  }
+  if (typeof value === "bigint") {
+    return variant?.dataType === DataType.UInt64
+      ? { _tag: "UInt64", text: value.toString() }
+      : { _tag: "Int64", text: value.toString() };
+  }
+  if (
+    typeof value === "boolean" ||
+    typeof value === "number" ||
+    typeof value === "string"
+  ) {
+    if (variant?.dataType === DataType.Int64) {
+      return { _tag: "Int64", text: String(value) };
+    }
+    if (variant?.dataType === DataType.UInt64) {
+      return { _tag: "UInt64", text: String(value) };
+    }
+    return value;
+  }
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    if ("text" in record && !("name" in record)) {
+      return {
+        _tag: "LocalizedText",
+        text: String(record.text ?? ""),
+        locale: typeof record.locale === "string" ? record.locale : undefined,
+      };
+    }
+    if ("name" in record && "namespaceIndex" in record) {
+      return {
+        _tag: "QualifiedName",
+        namespaceIndex:
+          typeof record.namespaceIndex === "number" ? record.namespaceIndex : 0,
+        name: String(record.name ?? ""),
+        text:
+          typeof record.toString === "function"
+            ? String(record.toString())
+            : `${String(record.namespaceIndex ?? 0)}:${String(record.name ?? "")}`,
+      };
+    }
+    return {
+      _tag: "ExtensionObject",
+      typeName: value.constructor?.name,
+      value: normalizePlainObject(record),
+    };
+  }
+  return String(value);
+};
+
+const normalizePlainObject = (record: Record<string, unknown>) =>
+  Object.fromEntries(
+    Object.entries(record)
+      .filter(([key]) => !key.startsWith("_"))
+      .map(([key, value]) => [key, normalizeDynamicValue(value)]),
+  );
+
+const denormalizeDynamicValue = (value: unknown): unknown => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+  const tagged = value as { readonly _tag?: string };
+  switch (tagged._tag) {
+    case "DateTime":
+      return new Date((value as { readonly iso: string }).iso);
+    case "ByteString":
+      return Buffer.from(
+        (value as { readonly base64: string }).base64,
+        "base64",
+      );
+    case "Int64":
+    case "UInt64":
+      return (value as { readonly text: string }).text;
+    default:
+      return value;
+  }
+};
+
+const normalizeTimestamp = (timestamp: Date | null | undefined) =>
+  timestamp instanceof Date ? timestamp.toISOString() : undefined;
 const durationMillis = (duration: Duration.Duration) =>
   Duration.toMillis(duration);
 const isGood = (statusCode: StatusCode) => statusCode.isGood();
-const isSupportedValueRank = (valueRank: number) =>
-  valueRank === -1 || valueRank === 1;
 const isArrayRank = (valueRank: number) => valueRank === 1;
 const hasCapability = (capabilities: CapabilitySet, capability: Capability) =>
   capabilities.includes(capability);
@@ -1803,97 +2380,6 @@ const decodeWithSchema = <S extends AnySchema>(
   Schema.decodeUnknownSync(schema as unknown as Schema.Decoder<unknown>)(
     value,
   ) as SchemaType<S>;
-
-type SchemaAst = {
-  readonly _tag?: string;
-  readonly literal?: unknown;
-  readonly members?: ReadonlyArray<SchemaAst>;
-  readonly rest?: ReadonlyArray<SchemaAst>;
-  readonly annotations?: {
-    readonly typeConstructor?: { readonly _tag?: string };
-  };
-};
-
-const schemaAst = (schema: AnySchema) =>
-  (schema as unknown as { readonly ast?: SchemaAst }).ast;
-
-const schemaShape = (schema: AnySchema): "scalar" | "array" =>
-  schemaAst(schema)?._tag === "Arrays" ? "array" : "scalar";
-
-const schemaDataTypeCategory = (schema: AnySchema) => {
-  const ast = schemaAst(schema);
-  if (!ast) return undefined;
-  if (ast._tag === "Arrays") {
-    return schemaAstDataTypeCategory(ast.rest?.[0]);
-  }
-  return schemaAstDataTypeCategory(ast);
-};
-
-const schemaAstDataTypeCategory = (
-  ast: SchemaAst | undefined,
-): "boolean" | "number" | "string" | "date" | undefined => {
-  switch (ast?._tag) {
-    case "Boolean":
-      return "boolean";
-    case "Number":
-      return "number";
-    case "String":
-      return "string";
-    case "Literal":
-      switch (typeof ast.literal) {
-        case "boolean":
-          return "boolean";
-        case "number":
-          return "number";
-        case "string":
-          return "string";
-        default:
-          return undefined;
-      }
-    case "Declaration":
-      return ast.annotations?.typeConstructor?._tag === "Date"
-        ? "date"
-        : undefined;
-    case "Union": {
-      const categories = ast.members
-        ?.map(schemaAstDataTypeCategory)
-        .filter((category) => category !== undefined);
-      if (!categories || categories.length !== ast.members?.length) {
-        return undefined;
-      }
-      const [first] = categories;
-      return categories.every((category) => category === first)
-        ? first
-        : undefined;
-    }
-    default:
-      return undefined;
-  }
-};
-
-const opcuaDataTypeCategory = (dataType: DataType) => {
-  switch (dataType) {
-    case DataType.Boolean:
-      return "boolean";
-    case DataType.SByte:
-    case DataType.Byte:
-    case DataType.Int16:
-    case DataType.UInt16:
-    case DataType.Int32:
-    case DataType.UInt32:
-    case DataType.Int64:
-    case DataType.UInt64:
-    case DataType.Float:
-    case DataType.Double:
-      return "number";
-    case DataType.String:
-      return "string";
-    case DataType.DateTime:
-      return "date";
-    default:
-      return DataType[dataType] ?? String(dataType);
-  }
-};
 
 const publishUnsafe = <A>(pubsub: PubSub.PubSub<A>, event: A) => {
   Effect.runFork(PubSub.publish(pubsub, event));

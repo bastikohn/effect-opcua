@@ -1,4 +1,4 @@
-import { Config } from "effect";
+import { Config, Schema } from "effect";
 import { expect, it } from "vitest";
 
 import {
@@ -25,6 +25,17 @@ const expectWriteValuesTypes = (
 
 void expectWriteValuesTypes;
 
+const expectReadValueTypes = (session: OpcuaSession) => {
+  session.readValue({ nodeId: "ns=1;s=Dynamic" });
+  session.readValue({ nodeId: "ns=1;s=Number", schema: Schema.Number });
+  session.readValues([
+    { nodeId: "ns=1;s=Dynamic" },
+    { nodeId: "ns=1;s=Number", schema: Schema.Number },
+  ] as const);
+};
+
+void expectReadValueTypes;
+
 const expectLayerConfigTypes = () => {
   OpcuaClient.layerConfig({
     endpointUrl: Config.string("OPCUA_ENDPOINT_URL"),
@@ -46,6 +57,6 @@ const expectLayerConfigTypes = () => {
 
 void expectLayerConfigTypes;
 
-it("keeps compile-time writeValues checks", () => {
+it("keeps compile-time API checks", () => {
   expect(true).toBe(true);
 });
