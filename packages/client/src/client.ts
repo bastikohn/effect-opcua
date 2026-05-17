@@ -90,7 +90,7 @@ export const makeOpcuaClient = (options: OpcuaClientLayerOptions) =>
               endpointUrl: options.endpointUrl,
               cause,
             }),
-        }).pipe(Effect.ignore),
+        }).pipe(Effect.ignore, Effect.andThen(PubSub.shutdown(events))),
     );
     return {
       events: Stream.fromPubSub(events),

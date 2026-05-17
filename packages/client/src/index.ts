@@ -47,9 +47,16 @@ export type {
   OpcuaValueHandle,
   OpcuaValueMetadata,
   OpcuaValueSample,
+  OpcuaValueSpec,
   OpcuaWriteResult,
+  OpcuaWriteValueSpec,
   OpcuaWriteValuesResult,
+  ReadValuesResult,
+  ValueSpec,
   WritableOpcuaValueHandle,
+  WriteEntry,
+  WriteValueSpec,
+  WriteValuesResult,
 } from "./values.js";
 export {
   ClientBufferPolicy,
@@ -59,6 +66,7 @@ export {
 export type {
   MonitorValueSpec,
   MonitorValuesOptions,
+  MonitorValueSpec as OpcuaMonitorValueSpec,
   OpcuaMonitorAddResult,
   OpcuaMonitorItemEvent,
   OpcuaMonitorItemOptions,

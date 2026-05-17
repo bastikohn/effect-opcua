@@ -6,21 +6,43 @@ import {
   OpcuaClient,
   type OpcuaSession,
   type OpcuaValueHandle,
+  type OpcuaWriteValueSpec,
   type WritableOpcuaValueHandle,
 } from "../src/index.js";
 
-const expectWriteValuesTypes = (
+const expectWriteHandleValuesTypes = (
   session: OpcuaSession,
   numberHandle: WritableOpcuaValueHandle<number>,
   readOnlyHandle: OpcuaValueHandle<number, typeof Capabilities.read>,
 ) => {
-  session.writeValues([{ handle: numberHandle, value: 123 }]);
+  session.writeHandleValues([{ handle: numberHandle, value: 123 }]);
 
   // @ts-expect-error value must match the handle schema type
-  session.writeValues([{ handle: numberHandle, value: "wrong" }]);
+  session.writeHandleValues([{ handle: numberHandle, value: "wrong" }]);
 
   // @ts-expect-error read-only handles are not accepted for writes
-  session.writeValues([{ handle: readOnlyHandle, value: 123 }]);
+  session.writeHandleValues([{ handle: readOnlyHandle, value: 123 }]);
+};
+
+void expectWriteHandleValuesTypes;
+
+const expectWriteValuesTypes = (session: OpcuaSession) => {
+  const spec = {
+    nodeId: "ns=1;s=Number",
+    schema: Schema.Number,
+    value: 123,
+  } satisfies OpcuaWriteValueSpec<"ns=1;s=Number", typeof Schema.Number>;
+
+  session.writeValues([spec]);
+
+  const badSpec = {
+    nodeId: "ns=1;s=Number",
+    schema: Schema.Number,
+    value: "wrong",
+  };
+
+  // @ts-expect-error schema-backed values must match the schema type
+  session.writeValues([badSpec]);
 };
 
 void expectWriteValuesTypes;

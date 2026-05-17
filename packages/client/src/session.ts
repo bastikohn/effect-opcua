@@ -13,6 +13,7 @@ import {
   Effect,
   Layer,
   PubSub,
+  Semaphore,
   Scope,
   Stream,
 } from "effect";
@@ -64,11 +65,7 @@ import {
   wireSessionEvents,
   wireSubscriptionEvents,
 } from "./events.js";
-import {
-  makeSubscription,
-  type MonitorValueSpec,
-  type OpcuaSubscription,
-} from "./monitoring.js";
+import { makeSubscription, type OpcuaSubscription } from "./monitoring.js";
 import { isGood } from "./normalize.js";
 import {
   discoverMetadata,
@@ -81,12 +78,11 @@ import {
   writeResult,
   type AnySchema,
   type OpcuaValueHandle,
-  type OpcuaValueMetadata,
   type OpcuaValueSample,
   type OpcuaWriteResult,
   type OpcuaWriteValuesResult,
+  type WriteValuesResult,
   type ReadValuesResult,
-  type ValueOfHandle,
   type ValueOfSpec,
   type ValueSpec,
   type WritableOpcuaValueHandle,
@@ -134,7 +130,18 @@ export type OpcuaSession = {
     | OpcuaServiceError
     | OpcuaAccessDeniedError
   >;
-  readonly writeValues: <
+  readonly writeValues: <const Specs extends ReadonlyArray<ValueSpec>>(specs: {
+    readonly [Index in keyof Specs]: Specs[Index] & {
+      readonly value: ValueOfSpec<Specs[Index]>;
+    };
+  }) => Effect.Effect<
+    WriteValuesResult<Specs>,
+    | OpcuaConfigurationError
+    | OpcuaEncodeError
+    | OpcuaServiceError
+    | OpcuaAccessDeniedError
+  >;
+  readonly writeHandleValues: <
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const Handles extends ReadonlyArray<WritableOpcuaValueHandle<any>>,
   >(writes: {
@@ -206,7 +213,7 @@ export const OpcuaSession = Object.assign(
               Effect.tryPromise({
                 try: () => session.close(true),
                 catch: (cause) => new OpcuaSessionCloseError({ cause }),
-              }).pipe(Effect.ignore),
+              }).pipe(Effect.ignore, Effect.andThen(PubSub.shutdown(events))),
           );
           wireSessionEvents(raw, events);
           return makeSession(raw, events);
@@ -219,6 +226,8 @@ export const makeSession = (
   raw: ClientSession,
   events: PubSub.PubSub<OpcuaSessionEvent>,
 ): OpcuaSession => {
+  const browseSemaphore = Semaphore.makeUnsafe(1);
+
   const readValue = <
     const Id extends NodeIdString,
     S extends AnySchema | undefined = undefined,
@@ -309,10 +318,43 @@ export const makeSession = (
       })) as OpcuaWriteResult<Id>;
     });
 
-  const writeValues: OpcuaSession["writeValues"] = (writes) =>
+  const writeValues: OpcuaSession["writeValues"] = (specs) =>
+    Effect.gen(function* () {
+      const writePayloads: Array<WriteValueOptions> = [];
+      for (const spec of specs) {
+        const metadata = yield* discoverMetadata(raw, spec.nodeId, [
+          "write",
+        ] as const);
+        const encoded = yield* encodeValue(
+          spec.nodeId,
+          spec.schema,
+          spec.value,
+          metadata,
+        );
+        writePayloads.push({
+          nodeId: coerceNodeId(spec.nodeId),
+          attributeId: AttributeIds.Value,
+          value: {
+            value: makeVariant(metadata, encoded),
+          },
+        });
+      }
+
+      const statusCodes = yield* Effect.tryPromise({
+        try: () => raw.write(writePayloads),
+        catch: (cause) =>
+          new OpcuaServiceError({ operation: "writeValues", cause }),
+      });
+
+      return specs.map((spec, index) =>
+        writeResult(spec.nodeId, statusCodes[index]!),
+      ) as WriteValuesResult<typeof specs>;
+    });
+
+  const writeHandleValues: OpcuaSession["writeHandleValues"] = (writes) =>
     Effect.gen(function* () {
       const nodeIds = writes.map((write) => write.handle.nodeId);
-      const duplicate = duplicateStringError("writeValues", nodeIds);
+      const duplicate = duplicateStringError("writeHandleValues", nodeIds);
       if (duplicate) return yield* Effect.fail(duplicate);
       const writePayloads: Array<WriteValueOptions> = [];
       for (const write of writes) {
@@ -330,6 +372,7 @@ export const makeSession = (
           write.handle.nodeId,
           write.handle.schema,
           write.value,
+          write.handle.metadata,
         );
         writePayloads.push({
           nodeId: coerceNodeId(write.handle.nodeId),
@@ -342,7 +385,7 @@ export const makeSession = (
       const statusCodes = yield* Effect.tryPromise({
         try: () => raw.write(writePayloads),
         catch: (cause) =>
-          new OpcuaServiceError({ operation: "writeValues", cause }),
+          new OpcuaServiceError({ operation: "writeHandleValues", cause }),
       });
       const result: Record<string, OpcuaWriteResult> = {};
       for (let index = 0; index < writes.length; index++) {
@@ -385,7 +428,10 @@ export const makeSession = (
           Effect.tryPromise({
             try: () => subscription.terminate(),
             catch: (cause) => new OpcuaSubscriptionCreateError({ cause }),
-          }).pipe(Effect.ignore),
+          }).pipe(
+            Effect.ignore,
+            Effect.andThen(PubSub.shutdown(subscriptionEvents)),
+          ),
       );
       return makeSubscription(rawSubscription, subscriptionEvents);
     });
@@ -421,7 +467,7 @@ export const makeSession = (
             nodeId: input.nodeId,
             cause,
           }),
-      });
+      }).pipe(browseSemaphore.withPermits(1));
 
       return yield* normalizeBrowseResultOrFail(
         "browse",
@@ -530,6 +576,7 @@ export const makeSession = (
     valueHandle,
     writeValue,
     writeValues,
+    writeHandleValues,
     createSubscription,
     browse,
     browseNext,

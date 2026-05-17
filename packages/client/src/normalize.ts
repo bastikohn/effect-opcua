@@ -1,16 +1,14 @@
 import {
+  coerceNodeId,
   DataType,
-  NodeClass,
+  LocalizedText,
   NodeId,
+  QualifiedName,
   VariantArrayType,
   type ExpandedNodeId,
-  type ReferenceDescription,
   type StatusCode,
   type Variant,
 } from "node-opcua";
-
-import type { ExpandedNodeIdString, NodeIdString } from "./capabilities.js";
-import type { OpcuaBrowseReference } from "./browse.js";
 
 export type OpcuaStatusInfo = {
   readonly text: string;
@@ -214,6 +212,13 @@ export const normalizeDynamicValue = (
   return String(value);
 };
 
+export type OpcuaDynamicValueMetadata = {
+  readonly raw: {
+    readonly dataType: DataType;
+  };
+  readonly valueRank: number;
+};
+
 const normalizePlainObject = (record: Record<string, unknown>) =>
   Object.fromEntries(
     Object.entries(record)
@@ -221,28 +226,72 @@ const normalizePlainObject = (record: Record<string, unknown>) =>
       .map(([key, value]) => [key, normalizeDynamicValue(value)]),
   );
 
-export const denormalizeDynamicValue = (value: unknown): unknown => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+export const denormalizeDynamicValue = (
+  value: unknown,
+  metadata?: OpcuaDynamicValueMetadata,
+): unknown => {
+  if (Array.isArray(value)) {
+    return value.map((item) => denormalizeDynamicValue(item, metadata));
+  }
+  if (!value || typeof value !== "object") {
     return value;
   }
   const tagged = value as { readonly _tag?: string };
   switch (tagged._tag) {
     case "DateTime":
+      assertDynamicDataType(value, metadata, DataType.DateTime);
       return new Date((value as { readonly iso: string }).iso);
     case "ByteString":
+      assertDynamicDataType(value, metadata, DataType.ByteString);
       return Buffer.from(
         (value as { readonly base64: string }).base64,
         "base64",
       );
     case "Int64":
-    case "UInt64":
+      assertDynamicDataType(value, metadata, DataType.Int64);
       return (value as { readonly text: string }).text;
+    case "UInt64":
+      assertDynamicDataType(value, metadata, DataType.UInt64);
+      return (value as { readonly text: string }).text;
+    case "NodeId":
+      assertDynamicDataType(value, metadata, DataType.NodeId);
+      return coerceNodeId((value as { readonly text: string }).text);
+    case "LocalizedText": {
+      assertDynamicDataType(value, metadata, DataType.LocalizedText);
+      const text = value as { readonly text: string; readonly locale?: string };
+      return new LocalizedText({ text: text.text, locale: text.locale });
+    }
+    case "QualifiedName": {
+      assertDynamicDataType(value, metadata, DataType.QualifiedName);
+      const name = value as {
+        readonly namespaceIndex: number;
+        readonly name: string;
+      };
+      return new QualifiedName({
+        namespaceIndex: name.namespaceIndex,
+        name: name.name,
+      });
+    }
+    case "ExtensionObject":
+      throw new TypeError("ExtensionObject dynamic writes require a schema");
     default:
       return value;
+  }
+};
+
+const assertDynamicDataType = (
+  value: unknown,
+  metadata: OpcuaDynamicValueMetadata | undefined,
+  expected: DataType,
+) => {
+  if (metadata && metadata.raw.dataType !== expected) {
+    throw new TypeError(
+      `Cannot write ${(value as { readonly _tag?: string })._tag ?? "value"} to DataType.${DataType[metadata.raw.dataType]}`,
+    );
   }
 };
 
 export const normalizeTimestamp = (timestamp: Date | null | undefined) =>
   timestamp instanceof Date ? timestamp.toISOString() : undefined;
 export const isGood = (statusCode: StatusCode) => statusCode.isGood();
-export const isArrayRank = (valueRank: number) => valueRank === 1;
+export const isArrayRank = (valueRank: number) => valueRank >= 1;

@@ -9,7 +9,6 @@ import {
   type ClientSession,
   type DataValue,
   type StatusCode,
-  type WriteValueOptions,
 } from "node-opcua";
 import { Effect, Schema } from "effect";
 
@@ -99,6 +98,24 @@ export type OpcuaWriteResult<Id extends string = string> =
 export type OpcuaWriteValuesResult<Ids extends string> = {
   readonly [Id in Ids]: OpcuaWriteResult<Id>;
 };
+export type OpcuaWriteValueSpec<
+  Id extends string = string,
+  S extends AnySchema | undefined = AnySchema | undefined,
+> = ValueSpec<Id, S> & {
+  readonly value: ValueOfSpec<ValueSpec<Id, S>>;
+};
+export type WriteValueSpec<
+  Id extends string = string,
+  S extends AnySchema | undefined = AnySchema | undefined,
+> = OpcuaWriteValueSpec<Id, S>;
+export type WriteValuesResult<Specs extends ReadonlyArray<ValueSpec>> = {
+  readonly [Index in keyof Specs]: Specs[Index] extends ValueSpec<
+    infer Id,
+    AnySchema | undefined
+  >
+    ? OpcuaWriteResult<Id>
+    : never;
+};
 
 export type OpcuaValueMetadata = {
   readonly nodeId: NodeIdString;
@@ -122,7 +139,7 @@ export type OpcuaValueMetadata = {
 
 export type AnySchema = Schema.Schema<unknown>;
 export type SchemaType<S> = S extends Schema.Schema<infer A> ? A : never;
-export type ValueSpec<
+export type OpcuaValueSpec<
   Id extends string = string,
   S extends AnySchema | undefined = AnySchema | undefined,
 > = {
@@ -130,6 +147,10 @@ export type ValueSpec<
   readonly schema?: S;
   readonly includeRaw?: boolean;
 };
+export type ValueSpec<
+  Id extends string = string,
+  S extends AnySchema | undefined = AnySchema | undefined,
+> = OpcuaValueSpec<Id, S>;
 export type ValueOfSpec<Spec> = Spec extends { readonly schema: infer S }
   ? S extends AnySchema
     ? SchemaType<S>
@@ -392,7 +413,12 @@ export const writeByMetadata = (
   },
 ) =>
   Effect.gen(function* () {
-    const encoded = yield* encodeValue(input.nodeId, input.schema, input.value);
+    const encoded = yield* encodeValue(
+      input.nodeId,
+      input.schema,
+      input.value,
+      input.metadata,
+    );
     const statusCode = yield* Effect.tryPromise({
       try: () =>
         session.write({
@@ -416,6 +442,7 @@ export const encodeValue = (
   nodeId: NodeIdString,
   schema: AnySchema | undefined,
   value: unknown,
+  metadata: OpcuaValueMetadata,
 ) =>
   schema
     ? Effect.sync(() =>
@@ -425,17 +452,63 @@ export const encodeValue = (
           (error) => new OpcuaEncodeError({ nodeId, value, error }),
         ),
       )
-    : Effect.sync(() => denormalizeDynamicValue(value));
+    : Effect.suspend(() => {
+        try {
+          return Effect.succeed(denormalizeDynamicValue(value, metadata));
+        } catch (error) {
+          return Effect.fail(new OpcuaEncodeError({ nodeId, value, error }));
+        }
+      });
 
 export const makeVariant = (metadata: OpcuaValueMetadata, value: unknown) =>
   new Variant({
     dataType: metadata.raw.dataType,
-    arrayType:
-      Array.isArray(value) || isArrayRank(metadata.valueRank)
-        ? VariantArrayType.Array
-        : VariantArrayType.Scalar,
-    value: value as Variant["value"],
+    arrayType: variantArrayType(metadata, value),
+    dimensions:
+      variantArrayType(metadata, value) === VariantArrayType.Matrix
+        ? matrixDimensions(metadata, value)
+        : undefined,
+    value: flattenMatrixValue(metadata, value) as Variant["value"],
   });
+
+const variantArrayType = (metadata: OpcuaValueMetadata, value: unknown) =>
+  metadata.valueRank > 1
+    ? VariantArrayType.Matrix
+    : Array.isArray(value) || isArrayRank(metadata.valueRank)
+      ? VariantArrayType.Array
+      : VariantArrayType.Scalar;
+
+const flattenMatrixValue = (
+  metadata: OpcuaValueMetadata,
+  value: unknown,
+): unknown => {
+  if (metadata.valueRank <= 1 || !Array.isArray(value)) return value;
+  return value.flat(metadata.valueRank - 1);
+};
+
+const matrixDimensions = (
+  metadata: OpcuaValueMetadata,
+  value: unknown,
+): Array<number> | undefined => {
+  if (metadata.arrayDimensions && metadata.arrayDimensions.length > 0) {
+    return [...metadata.arrayDimensions];
+  }
+  return inferArrayDimensions(value, metadata.valueRank);
+};
+
+const inferArrayDimensions = (
+  value: unknown,
+  rank: number,
+): Array<number> | undefined => {
+  const dimensions: Array<number> = [];
+  let current = value;
+  for (let depth = 0; depth < rank; depth++) {
+    if (!Array.isArray(current)) return undefined;
+    dimensions.push(current.length);
+    current = current[0];
+  }
+  return dimensions;
+};
 
 export const writeResult = <Id extends string>(
   nodeId: Id,

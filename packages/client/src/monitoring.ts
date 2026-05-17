@@ -10,7 +10,16 @@ import {
   type ClientMonitoredItemGroup,
   type StatusCode,
 } from "node-opcua";
-import { Duration, Effect, PubSub, Queue, Ref, Scope, Stream } from "effect";
+import {
+  Duration,
+  Effect,
+  PubSub,
+  Queue,
+  Ref,
+  Scope,
+  Semaphore,
+  Stream,
+} from "effect";
 
 import { EVENT_BUFFER_SIZE } from "./constants.js";
 import { type NodeIdString } from "./capabilities.js";
@@ -279,6 +288,7 @@ export const makeSubscription = (
         readonly group: ClientMonitoredItemGroup;
       };
       const registry = yield* Ref.make(new Map<string, ActiveItem>());
+      const mutationLock = yield* Semaphore.make(1);
 
       const publishState = Ref.get(registry).pipe(
         Effect.flatMap((map) =>
@@ -371,6 +381,7 @@ export const makeSubscription = (
               );
             });
             group.on("terminated", (cause) => {
+              if (finalizingMonitorGroups.has(group)) return;
               Effect.runFork(
                 Ref.update(registry, (map) => {
                   const next = new Map(map);
@@ -402,7 +413,7 @@ export const makeSubscription = (
             yield* publishState;
           }
           return results as never;
-        });
+        }).pipe(mutationLock.withPermits(1));
 
       const remove: OpcuaValueMonitor["remove"] = (nodeIds) =>
         Effect.gen(function* () {
@@ -420,6 +431,9 @@ export const makeSubscription = (
               next.delete(nodeId);
               return next;
             });
+            yield* Effect.sync(() =>
+              finalizingMonitorGroups.add(current.group),
+            );
             yield* terminateMonitorGroup(current.group);
             const result = { _tag: "Removed", nodeId } as const;
             results.push(result);
@@ -427,14 +441,17 @@ export const makeSubscription = (
             yield* publishState;
           }
           return results as never;
-        });
+        }).pipe(mutationLock.withPermits(1));
 
       yield* Effect.addFinalizer(() =>
         Ref.get(registry).pipe(
           Effect.flatMap((map) =>
             Effect.forEach(
               Array.from(map.values()),
-              (item) => terminateMonitorGroup(item.group),
+              (item) =>
+                Effect.sync(() => finalizingMonitorGroups.add(item.group)).pipe(
+                  Effect.andThen(terminateMonitorGroup(item.group)),
+                ),
               { discard: true },
             ),
           ),
