@@ -22,13 +22,51 @@ const optionValue = (name: string) => {
   return index >= 0 ? args[index + 1] : undefined;
 };
 
-const passwordEnv = optionValue("--password-env");
-const runtime = await createTuiRuntime({
-  endpointUrl,
-  startNode: optionValue("--start-node") ?? "i=85",
-  user: optionValue("--user"),
-  password: passwordEnv ? process.env[passwordEnv] : undefined,
-  enableWrites: args.includes("--enable-writes"),
-});
+const createPassthroughStream = (
+  stream: NodeJS.WriteStream,
+): NodeJS.WriteStream => {
+  const output = Object.create(stream) as NodeJS.WriteStream;
+  output.write = stream.write.bind(stream) as NodeJS.WriteStream["write"];
+  output.on = stream.on.bind(stream) as NodeJS.WriteStream["on"];
+  output.off = stream.off.bind(stream) as NodeJS.WriteStream["off"];
+  return output;
+};
 
-render(<App runtime={runtime} />);
+const muteProcessOutput = () => {
+  const stdoutWrite = process.stdout.write;
+  const stderrWrite = process.stderr.write;
+  const mutedWrite = (() => true) as typeof process.stdout.write;
+  process.stdout.write = mutedWrite;
+  process.stderr.write = mutedWrite as typeof process.stderr.write;
+  return () => {
+    process.stdout.write = stdoutWrite;
+    process.stderr.write = stderrWrite;
+  };
+};
+
+const passwordEnv = optionValue("--password-env");
+const terminalStdout = createPassthroughStream(process.stdout);
+const terminalStderr = createPassthroughStream(process.stderr);
+const restoreProcessOutput = muteProcessOutput();
+
+try {
+  const runtime = await createTuiRuntime({
+    endpointUrl,
+    startNode: optionValue("--start-node") ?? "i=85",
+    user: optionValue("--user"),
+    password: passwordEnv ? process.env[passwordEnv] : undefined,
+    enableWrites: args.includes("--enable-writes"),
+  });
+  const instance = render(<App runtime={runtime} />, {
+    stdout: terminalStdout,
+    stderr: terminalStderr,
+    patchConsole: false,
+  });
+  await instance.waitUntilExit();
+} catch (error) {
+  restoreProcessOutput();
+  process.stderr.write(`${String(error)}\n`);
+  process.exitCode = 1;
+} finally {
+  restoreProcessOutput();
+}

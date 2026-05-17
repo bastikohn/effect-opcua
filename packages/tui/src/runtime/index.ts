@@ -10,7 +10,15 @@ import {
   type OpcuaValueSample,
   type OpcuaWriteResult,
 } from "@effect-opcua/client";
-import { Duration, Effect, Layer, ManagedRuntime, Stream } from "effect";
+import {
+  Cause,
+  Duration,
+  Effect,
+  Fiber,
+  Layer,
+  ManagedRuntime,
+  Stream,
+} from "effect";
 
 export type TreeEntryId = string;
 
@@ -64,6 +72,7 @@ export type TuiRuntime = {
   readonly writeSelected: (value: unknown) => Promise<OpcuaWriteResult>;
   readonly monitorSelected: () => Promise<void>;
   readonly unmonitorSelected: () => Promise<void>;
+  readonly reportError: (message: string) => void;
   readonly dispose: () => Promise<void>;
 };
 
@@ -98,6 +107,7 @@ export const createTuiRuntime = async (
     memoMap: Layer.makeMemoMapUnsafe(),
   });
   const listeners = new Set<(state: TuiState) => void>();
+  const monitorFibers = new Map<NodeIdString, Fiber.Fiber<void, unknown>>();
   let state: TuiState = {
     connection: "Connecting",
     tree: { entries: [], selectedEntryId: undefined },
@@ -225,6 +235,37 @@ export const createTuiRuntime = async (
       },
     }));
 
+  const collapseNode = async (entryId: TreeEntryId) => {
+    const descendantPrefix = `${entryId}/`;
+    setState((current) => {
+      const selectedEntryId = current.tree.selectedEntryId?.startsWith(
+        descendantPrefix,
+      )
+        ? entryId
+        : current.tree.selectedEntryId;
+      const selectedEntry =
+        selectedEntryId === current.tree.selectedEntryId
+          ? current.selectedNode?.entry
+          : current.tree.entries.find((entry) => entry.entryId === entryId);
+      return {
+        ...current,
+        tree: {
+          ...current.tree,
+          selectedEntryId,
+          entries: current.tree.entries
+            .filter((entry) => !entry.entryId.startsWith(descendantPrefix))
+            .map((entry) =>
+              entry.entryId === entryId ? { ...entry, expanded: false } : entry,
+            ),
+        },
+        selectedNode:
+          selectedEntryId === current.tree.selectedEntryId
+            ? current.selectedNode
+            : { entry: selectedEntry },
+      };
+    });
+  };
+
   const selectNode = async (entryId: TreeEntryId) => {
     const entry = state.tree.entries.find(
       (candidate) => candidate.entryId === entryId,
@@ -256,14 +297,15 @@ export const createTuiRuntime = async (
   const monitorSelected = async () => {
     const entry = state.selectedNode?.entry;
     if (!entry || entry.nodeClass !== "Variable") return;
-    const samples = await runtime.runPromise(
+    if (monitorFibers.has(entry.nodeId)) return;
+    const fiber = runtime.runFork(
       Effect.scoped(
         Effect.gen(function* () {
           const session = yield* OpcuaSession;
           const subscription = yield* session.createSubscription({
             publishingInterval: Duration.millis(250),
           });
-          return yield* subscription
+          yield* subscription
             .monitorValues([{ nodeId: entry.nodeId }], {
               samplingInterval: Duration.millis(250),
               queueSize: 5,
@@ -271,17 +313,35 @@ export const createTuiRuntime = async (
               clientBuffer: ClientBufferPolicy.latest(),
               filter: MonitorValueFilter.statusValue(),
             })
-            .pipe(Stream.take(1), Stream.runCollect);
+            .pipe(
+              Stream.runForEach((sample) =>
+                Effect.sync(() => {
+                  setState((current) => {
+                    const latest = new Map(current.monitors.latest);
+                    latest.set(entry.nodeId, sample);
+                    return {
+                      ...current,
+                      monitors: { ...current.monitors, latest },
+                    };
+                  });
+                }),
+              ),
+            );
         }),
+      ).pipe(
+        Effect.catchCause((cause) =>
+          Effect.sync(() => {
+            monitorFibers.delete(entry.nodeId);
+            log(`Monitor ${entry.label} failed: ${Cause.pretty(cause)}`);
+          }),
+        ),
       ),
     );
-    const sample = samples[0];
+    monitorFibers.set(entry.nodeId, fiber);
     setState((current) => {
       const desired = new Set(current.monitors.desired);
-      const latest = new Map(current.monitors.latest);
       desired.add(entry.nodeId);
-      if (sample) latest.set(entry.nodeId, sample);
-      return { ...current, monitors: { desired, latest } };
+      return { ...current, monitors: { ...current.monitors, desired } };
     });
     log(`Monitoring ${entry.label}`);
   };
@@ -294,7 +354,7 @@ export const createTuiRuntime = async (
     },
     getState: () => state,
     expandNode: (entryId) => loadChildren(entryId, false),
-    collapseNode: async (entryId) => setExpanded(entryId, false),
+    collapseNode,
     selectNode,
     refreshNode: (entryId) => loadChildren(entryId, true),
     writeSelected: async (value) => {
@@ -305,24 +365,41 @@ export const createTuiRuntime = async (
       if (!state.writesEnabled) {
         throw new Error("Writes disabled; restart with --enable-writes");
       }
-      const result = await run(
+      const { result, sample } = await run(
         Effect.gen(function* () {
           const session = yield* OpcuaSession;
           const handle = yield* session.valueHandle({
             nodeId: entry.nodeId,
             capabilities: Capabilities.readWrite,
           });
-          return yield* handle.write(value as OpcuaDynamicValue);
+          const result = yield* handle.write(value as OpcuaDynamicValue);
+          const sample = yield* handle.read();
+          return { result, sample };
         }),
       );
       log(`${entry.label} write ${result._tag}`);
-      await selectNode(entry.entryId);
+      setState((current) => {
+        const latest = new Map(current.monitors.latest);
+        if (current.monitors.desired.has(entry.nodeId)) {
+          latest.set(entry.nodeId, sample);
+        }
+        return {
+          ...current,
+          selectedNode: { entry, sample },
+          monitors: { ...current.monitors, latest },
+        };
+      });
       return result;
     },
     monitorSelected,
     unmonitorSelected: async () => {
       const entry = state.selectedNode?.entry;
       if (!entry) return;
+      const fiber = monitorFibers.get(entry.nodeId);
+      if (fiber) {
+        monitorFibers.delete(entry.nodeId);
+        await Effect.runPromise(Fiber.interrupt(fiber));
+      }
       setState((current) => {
         const desired = new Set(current.monitors.desired);
         const latest = new Map(current.monitors.latest);
@@ -332,6 +409,12 @@ export const createTuiRuntime = async (
       });
       log(`Unmonitored ${entry.label}`);
     },
-    dispose: () => runtime.dispose(),
+    reportError: log,
+    dispose: async () => {
+      const fibers = Array.from(monitorFibers.values());
+      monitorFibers.clear();
+      await Effect.runPromise(Fiber.interruptAll(fibers));
+      await runtime.dispose();
+    },
   };
 };

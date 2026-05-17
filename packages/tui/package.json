@@ -9,6 +9,7 @@
   "scripts": {
     "build": "tsdown --config-loader unrun",
     "dev": "tsdown --watch --config-loader unrun",
+    "start": "node dist/cli.mjs",
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "test": "vitest run --passWithNoTests",
     "clean": "rm -rf dist coverage node_modules"

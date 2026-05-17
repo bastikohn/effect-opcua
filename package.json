@@ -11,7 +11,7 @@
     "build": "pnpm -r --filter='@effect-opcua/*' build",
     "dev": "pnpm -r --filter='@effect-opcua/*' dev",
     "dev:server": "pnpm --filter @effect-opcua/demo-server start",
-    "dev:tui": "pnpm --filter @effect-opcua/tui dev",
+    "dev:tui": "pnpm --filter @effect-opcua/tui start",
     "test:integration": "pnpm --filter @effect-opcua/client test",
     "typecheck": "pnpm -r --filter='@effect-opcua/*' typecheck",
     "test": "pnpm -r --filter='@effect-opcua/*' test",
