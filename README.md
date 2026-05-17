@@ -6,6 +6,11 @@ Local-first workspace for an Effect v4 OPC-UA client wrapper around node-opcua.
 
 - `@effect-opcua/client`
 
+## Examples
+
+- `@effect-opcua/demo-server`
+- `@effect-opcua/tui`
+
 ## Development
 
 ```sh
