@@ -61,14 +61,24 @@ export type {
   WriteValuesResult,
 } from "./values.js";
 export type {
+  InputOfMethodHandle,
+  InputOfMethodSpec,
+  MethodCallEntry,
+  MethodCallHandlesResult,
+  MethodIdOfMethodHandle,
+  ObjectIdOfMethodHandle,
+  OpcuaMethodArgumentMap,
   OpcuaMethodArgumentMapping,
   OpcuaMethodArgumentMetadata,
   OpcuaMethodArgumentResult,
+  OpcuaMethodCallRaw,
   OpcuaMethodCallOptions,
   OpcuaMethodCallResult,
   OpcuaMethodHandle,
   OpcuaMethodMetadata,
   OpcuaMethodSpec,
+  OutputOfMethodHandle,
+  OutputOfMethodSpec,
 } from "./methods.js";
 export {
   ClientBufferPolicy,

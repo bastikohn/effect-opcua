@@ -1,5 +1,6 @@
 import {
   DataType,
+  coerceNodeId,
   OPCUAServer,
   StatusCodes,
   Variant,
@@ -177,6 +178,7 @@ const installDemoAddressSpace = (addressSpace: AddressSpace) => {
   addRejectIfNegativeMethod(namespace, machine);
   addDisabledCommandMethod(namespace, machine);
   addInvalidArgumentNameMethods(namespace, machine);
+  addCustomDataTypeMethod(namespace, machine);
 
   const large = namespace.addObject({
     browseName: "LargeFolder",
@@ -518,6 +520,45 @@ const addInvalidArgumentNameMethods = (
           dataType: DataType.String,
           value: `${inputArguments[0]?.value ?? ""}${inputArguments[1]?.value ?? ""}`,
         }),
+      ],
+    };
+  });
+};
+
+const addCustomDataTypeMethod = (
+  namespace: ReturnType<AddressSpace["getOwnNamespace"]>,
+  parent: Parameters<typeof namespace.addMethod>[0],
+) => {
+  const customDataType = namespace.createDataType({
+    browseName: "CustomCommand",
+    nodeId: "s=CustomCommand",
+    isAbstract: false,
+    subtypeOf: coerceNodeId("i=22"),
+  });
+
+  const method = namespace.addMethod(parent, {
+    browseName: "CustomCommand",
+    nodeId: "s=MyMachine.CustomCommand",
+    inputArguments: [
+      { name: "Command", dataType: customDataType.nodeId },
+      { name: "When", dataType: DataType.DateTime },
+      { name: "Payload", dataType: DataType.ByteString },
+      { name: "Values", dataType: DataType.Double, valueRank: 1 },
+    ],
+    outputArguments: [{ name: "Accepted", dataType: DataType.Boolean }],
+  });
+  method.bindMethod(async function (
+    this: UAMethod,
+    inputArguments: ReadonlyArray<Variant>,
+    context: ISessionContext,
+  ): Promise<CallMethodResultOptions> {
+    void this;
+    void inputArguments;
+    void context;
+    return {
+      statusCode: StatusCodes.Good,
+      outputArguments: [
+        new Variant({ dataType: DataType.Boolean, value: true }),
       ],
     };
   });

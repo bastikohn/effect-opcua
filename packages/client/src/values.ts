@@ -202,7 +202,7 @@ export type OpcuaValueHandle<
   Id extends string = string,
 > = {
   readonly nodeId: Id;
-  readonly schema?: Schema.Schema<A>;
+  readonly schema?: AnySchema;
   readonly metadata: OpcuaValueMetadata;
   readonly capabilities: Caps;
   readonly raw: {

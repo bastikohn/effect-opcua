@@ -9,8 +9,9 @@ import {
   type OpcuaDynamicValueMetadata,
 } from "./normalize.js";
 
-export type AnySchema = Schema.Schema<unknown>;
-export type SchemaType<S> = S extends Schema.Schema<infer A> ? A : never;
+// Sync encode/decode helpers only support schemas without contextual services.
+export type AnySchema = Schema.Codec<unknown, unknown, never, never>;
+export type SchemaType<S extends AnySchema> = Schema.Schema.Type<S>;
 
 export const encodeWithSchema = <S extends AnySchema>(
   schema: S,

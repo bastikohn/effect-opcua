@@ -102,7 +102,7 @@ export class OpcuaMethodInputError extends Data.TaggedError(
   readonly methodId: NodeIdString;
   readonly input: unknown;
   readonly phase:
-    | "SchemaValidation"
+    | "SchemaEncoding"
     | "MissingInputKey"
     | "UnknownInputKey"
     | "ArgumentMapping"

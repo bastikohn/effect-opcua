@@ -1,9 +1,14 @@
 import {
   AttributeIds,
+  BrowseDirection,
   DataType,
+  DataTypeIds,
   NodeId,
+  NodeIdType,
+  ReferenceTypeIds,
   coerceNodeId,
   type Argument,
+  type BrowseDescriptionOptions,
   type CallMethodRequestLike,
   type CallMethodResult,
   type ClientSession,
@@ -164,6 +169,7 @@ export type OpcuaMethodHandle<
   readonly methodId: MethodId;
   readonly inputSchema?: AnySchema;
   readonly outputSchema?: AnySchema;
+  readonly includeRaw?: boolean;
   readonly metadata: OpcuaMethodMetadata;
   readonly capabilities: typeof Capabilities.call;
   readonly raw: {
@@ -199,6 +205,7 @@ export type MethodCallEntry<
 > = {
   readonly handle: H;
   readonly input: InputOfMethodHandle<H>;
+  readonly options?: OpcuaMethodCallOptions;
 };
 
 export type InputOfMethodHandle<H> =
@@ -232,8 +239,14 @@ export const makeMethodHandle = <const Spec extends OpcuaMethodSpec>(
   spec: Spec,
 ) =>
   Effect.gen(function* () {
-    const objectId = coerceNodeId(spec.objectId);
-    const methodId = coerceNodeId(spec.methodId);
+    const objectId = yield* coerceNodeIdOrFail(
+      "methodHandle.objectId",
+      spec.objectId,
+    );
+    const methodId = yield* coerceNodeIdOrFail(
+      "methodHandle.methodId",
+      spec.methodId,
+    );
     const argumentDefinition = yield* Effect.tryPromise({
       try: () => session.getArgumentDefinition(methodId),
       catch: (cause) =>
@@ -356,13 +369,25 @@ export const callMethodHandles = <
   Effect.gen(function* () {
     const preflights: Array<MethodPreflight> = [];
     for (const entry of entries) {
-      preflights.push(yield* preflightMethodCall(entry.handle, entry.input));
+      preflights.push(
+        yield* preflightMethodCall(entry.handle, entry.input, entry.options),
+      );
     }
     const results = yield* Effect.tryPromise({
       try: () => session.call(preflights.map((preflight) => preflight.request)),
       catch: (cause) =>
         new OpcuaServiceError({ operation: "callMethodHandles", cause }),
     });
+    if (!Array.isArray(results) || results.length !== entries.length) {
+      return yield* Effect.fail(
+        new OpcuaServiceError({
+          operation: "callMethodHandles",
+          cause: `Expected ${entries.length} call results, got ${
+            Array.isArray(results) ? results.length : "non-array"
+          }`,
+        }),
+      );
+    }
     return entries.map((entry, index) =>
       methodResultFromRaw(entry.handle, preflights[index]!, results[index]!),
     ) as MethodCallHandlesResult<Handles>;
@@ -410,7 +435,7 @@ const preflightMethodCall = <
           objectId: handle.objectId,
           methodId: handle.methodId,
           input,
-          phase: handle.inputSchema ? "SchemaValidation" : "Encoding",
+          phase: handle.inputSchema ? "SchemaEncoding" : "Encoding",
           error,
         }),
       );
@@ -451,10 +476,7 @@ const preflightMethodCall = <
         methodId: handle.raw.methodId,
         inputArguments,
       },
-      includeRaw:
-        options?.includeRaw ??
-        (handle as { readonly includeRaw?: boolean }).includeRaw ??
-        false,
+      includeRaw: options?.includeRaw ?? handle.includeRaw ?? false,
     });
   });
 
@@ -585,21 +607,16 @@ const normalizeArguments = (
       const dataTypeNodeId =
         argument.dataType instanceof NodeId
           ? argument.dataType
-          : coerceNodeId(argument.dataType);
-      const builtInDataType =
-        dataTypeNodeId.namespace === 0 &&
-        typeof dataTypeNodeId.value === "number" &&
-        DataType[dataTypeNodeId.value] !== undefined
-          ? (dataTypeNodeId.value as DataType)
-          : yield* Effect.tryPromise({
-              try: () => session.getBuiltInDataType(dataTypeNodeId),
-              catch: (cause) =>
-                new OpcuaServiceError({
-                  operation: `methodHandle.${operation}.getBuiltInDataType`,
-                  nodeId,
-                  cause,
-                }),
-            });
+          : yield* coerceNodeIdOrFail(
+              `methodHandle.${operation}.dataType`,
+              String(argument.dataType),
+            );
+      const builtInDataType = yield* resolveBuiltInDataTypeFromArgumentDataType(
+        session,
+        dataTypeNodeId,
+        nodeId,
+        operation,
+      );
       return {
         name: argument.name ?? "",
         description: argument.description
@@ -700,8 +717,115 @@ const explicitMapping = (
       argumentName: arguments_[index]!.name,
     });
   }
+  if (usedIndexes.size !== arguments_.length) {
+    return new OpcuaConfigurationError({
+      operation: "methodHandle.argumentMap",
+      cause: "Explicit argument map must cover every argument",
+    });
+  }
   return mapping;
 };
+
+const coerceNodeIdOrFail = (operation: string, nodeId: unknown) =>
+  Effect.try({
+    try: () => coerceNodeId(nodeId),
+    catch: (cause) =>
+      new OpcuaConfigurationError({ operation, nodeId: String(nodeId), cause }),
+  });
+
+const resolveBuiltInDataTypeFromArgumentDataType = (
+  session: ClientSession,
+  dataTypeNodeId: NodeId,
+  methodNodeId: NodeIdString,
+  operation: string,
+): Effect.Effect<DataType, OpcuaConfigurationError | OpcuaServiceError> =>
+  Effect.gen(function* () {
+    let current = dataTypeNodeId;
+    const visited = new Set<string>();
+    while (true) {
+      const builtIn = builtInDataTypeFromNodeId(current);
+      if (builtIn !== undefined) return builtIn;
+
+      const key = current.toString();
+      if (visited.has(key)) {
+        return yield* Effect.fail(
+          new OpcuaConfigurationError({
+            operation: `methodHandle.${operation}.dataType`,
+            nodeId: methodNodeId,
+            cause: `DataType hierarchy contains a cycle at ${key}`,
+          }),
+        );
+      }
+      visited.add(key);
+
+      const superType = yield* browseDataTypeSuperType(
+        session,
+        current,
+        methodNodeId,
+        operation,
+      );
+      if (!superType) {
+        return yield* Effect.fail(
+          new OpcuaConfigurationError({
+            operation: `methodHandle.${operation}.dataType`,
+            nodeId: methodNodeId,
+            cause: `Could not resolve built-in DataType for ${dataTypeNodeId.toString()}`,
+          }),
+        );
+      }
+      current = superType;
+    }
+  });
+
+const builtInDataTypeFromNodeId = (nodeId: NodeId): DataType | undefined => {
+  if (
+    nodeId.identifierType === NodeIdType.NUMERIC &&
+    nodeId.namespace === 0 &&
+    nodeId.value === DataTypeIds.Enumeration
+  ) {
+    return DataType.Int32;
+  }
+  if (
+    nodeId.identifierType === NodeIdType.NUMERIC &&
+    nodeId.namespace === 0 &&
+    typeof nodeId.value === "number" &&
+    nodeId.value <= DataType.DiagnosticInfo &&
+    DataType[nodeId.value] !== undefined
+  ) {
+    return nodeId.value as DataType;
+  }
+  return undefined;
+};
+
+const browseDataTypeSuperType = (
+  session: ClientSession,
+  dataTypeNodeId: NodeId,
+  methodNodeId: NodeIdString,
+  operation: string,
+) =>
+  Effect.tryPromise({
+    try: async () => {
+      const browse: BrowseDescriptionOptions = {
+        browseDirection: BrowseDirection.Inverse,
+        includeSubtypes: false,
+        nodeId: dataTypeNodeId,
+        referenceTypeId: coerceNodeId(ReferenceTypeIds.HasSubtype),
+        resultMask: 1,
+      };
+      const result = await session.browse(browse);
+      if (!isGood(result.statusCode)) {
+        throw new Error(result.statusCode.toString());
+      }
+      const nodeId = result.references?.[0]?.nodeId;
+      return nodeId ? coerceNodeId(nodeId) : undefined;
+    },
+    catch: (cause) =>
+      new OpcuaServiceError({
+        operation: `methodHandle.${operation}.browseDataTypeSuperType`,
+        nodeId: methodNodeId,
+        cause,
+      }),
+  });
 
 const validateInputKeys = (
   handle: AnyMethodHandle,

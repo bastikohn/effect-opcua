@@ -86,6 +86,76 @@ describe("methods", () => {
     });
   });
 
+  it("rejects incomplete explicit input and output maps", async () => {
+    await expect(
+      runLive(
+        Effect.gen(function* () {
+          const session = yield* OpcuaSession;
+          return yield* session.methodHandle({
+            objectId: "ns=1;s=MyMachine",
+            methodId: "ns=1;s=MyMachine.Start",
+            inputArgumentMap: { startSpeed: "StartSpeed" },
+          });
+        }),
+      ),
+    ).rejects.toMatchObject({
+      _tag: "OpcuaConfigurationError",
+      cause: "Explicit argument map must cover every argument",
+    });
+
+    await expect(
+      runLive(
+        Effect.gen(function* () {
+          const session = yield* OpcuaSession;
+          return yield* session.methodHandle({
+            objectId: "ns=1;s=MyMachine",
+            methodId: "ns=1;s=MyMachine.Start",
+            outputArgumentMap: { accepted: "Accepted" },
+          });
+        }),
+      ),
+    ).rejects.toMatchObject({
+      _tag: "OpcuaConfigurationError",
+      cause: "Explicit argument map must cover every argument",
+    });
+  });
+
+  it("resolves method argument datatypes without treating datatype nodes as variables", async () => {
+    const metadata = await runLive(
+      Effect.gen(function* () {
+        const session = yield* OpcuaSession;
+        const start = yield* session.methodHandle(StartMethod);
+        const custom = yield* session.methodHandle({
+          objectId: "ns=1;s=MyMachine",
+          methodId: "ns=1;s=MyMachine.CustomCommand",
+        });
+        return {
+          start: start.metadata.inputArguments.map((argument) => ({
+            name: argument.name,
+            dataType: argument.dataType,
+            valueRank: argument.valueRank,
+          })),
+          custom: custom.metadata.inputArguments.map((argument) => ({
+            name: argument.name,
+            dataType: argument.dataType,
+            valueRank: argument.valueRank,
+          })),
+        };
+      }),
+    );
+
+    expect(metadata.start).toEqual([
+      { name: "StartSpeed", dataType: "Double", valueRank: -1 },
+      { name: "Force", dataType: "Boolean", valueRank: -1 },
+    ]);
+    expect(metadata.custom).toEqual([
+      { name: "Command", dataType: "ExtensionObject", valueRank: -1 },
+      { name: "When", dataType: "DateTime", valueRank: -1 },
+      { name: "Payload", dataType: "ByteString", valueRank: -1 },
+      { name: "Values", dataType: "Double", valueRank: 1 },
+    ]);
+  });
+
   it("rejects unusable default argument names unless explicit maps are provided", async () => {
     await expect(
       runLive(
@@ -261,7 +331,11 @@ describe("methods", () => {
         }) as typeof session.raw.call;
 
         const batch = yield* session.callMethodHandles([
-          { handle: echo, input: { Value: "a" } },
+          {
+            handle: echo,
+            input: { Value: "a" },
+            options: { includeRaw: true },
+          },
           { handle: echo, input: { Value: "b" } },
         ] as const);
         return { oneOff, batch, batchCalls };
@@ -278,7 +352,33 @@ describe("methods", () => {
     ]);
     expect(result.batch[0]).toMatchObject({ output: { Value: "a" } });
     expect(result.batch[1]).toMatchObject({ output: { Value: "b" } });
+    expect(result.batch[0].raw).toBeDefined();
+    expect(result.batch[1].raw).toBeUndefined();
     expect(result.batchCalls).toBe(1);
+  });
+
+  it("rejects malformed batch call service responses", async () => {
+    const error = await runLive(
+      Effect.gen(function* () {
+        const session = yield* OpcuaSession;
+        const echo = yield* session.methodHandle({
+          objectId: "ns=1;s=MyMachine",
+          methodId: "ns=1;s=MyMachine.Echo",
+        });
+        (session.raw as { call: typeof session.raw.call }).call =
+          (async () => ({})) as unknown as typeof session.raw.call;
+
+        return yield* session
+          .callMethodHandles([{ handle: echo, input: { Value: "a" } }] as const)
+          .pipe(Effect.flip);
+      }),
+    );
+
+    expect(error).toMatchObject({
+      _tag: "OpcuaServiceError",
+      operation: "callMethodHandles",
+      cause: "Expected 1 call results, got non-array",
+    });
   });
 
   it("preflights all batch entries before sending method calls", async () => {
