@@ -2,26 +2,13 @@ import { Effect } from "effect";
 import {
   BrowseDirection,
   NodeClass,
-  resolveNodeId,
   type BrowseDescriptionOptions,
   type BrowseResult,
   type ClientSession,
   type ReferenceDescription,
 } from "node-opcua";
 
-import {
-  DEFAULT_BROWSE_MAX_REFERENCES_PER_NODE,
-  DEFAULT_BROWSE_DIRECTION,
-  DEFAULT_BROWSE_INCLUDE_SUBTYPES,
-  DEFAULT_BROWSE_NODE_CLASS_MASK,
-  DEFAULT_BROWSE_REFERENCE_TYPE_ID,
-  DEFAULT_BROWSE_RESULT_MASK,
-} from "./constants.js";
-import {
-  OpcuaConfigurationError,
-  OpcuaNonGoodStatusError,
-  OpcuaServiceError,
-} from "./errors.js";
+import { OpcuaConfigurationError, OpcuaNonGoodStatusError } from "./errors.js";
 import {
   isGood,
   normalizeExpandedNodeId,

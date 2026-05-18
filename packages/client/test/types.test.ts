@@ -5,6 +5,7 @@ import {
   Capabilities,
   OpcuaClient,
   type OpcuaSession,
+  type OpcuaMethodSpec,
   type OpcuaValueHandle,
   type OpcuaWriteValueSpec,
   type WritableOpcuaValueHandle,
@@ -57,6 +58,30 @@ const expectReadValueTypes = (session: OpcuaSession) => {
 };
 
 void expectReadValueTypes;
+
+const expectMethodTypes = (session: OpcuaSession) => {
+  const start = {
+    objectId: "ns=1;s=MyMachine",
+    methodId: "ns=1;s=MyMachine.Start",
+    inputSchema: Schema.Struct({
+      StartSpeed: Schema.Number,
+      Force: Schema.Boolean,
+    }),
+    outputSchema: Schema.Struct({
+      Accepted: Schema.Boolean,
+    }),
+  } as const satisfies OpcuaMethodSpec;
+
+  session.callMethod({
+    ...start,
+    input: { StartSpeed: 1, Force: false },
+  });
+
+  // @ts-expect-error method input must match the input schema
+  session.callMethod({ ...start, input: { StartSpeed: "wrong", Force: false } });
+};
+
+void expectMethodTypes;
 
 const expectLayerConfigTypes = () => {
   OpcuaClient.layerConfig({

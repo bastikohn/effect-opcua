@@ -217,6 +217,7 @@ export type OpcuaDynamicValueMetadata = {
     readonly dataType: DataType;
   };
   readonly valueRank: number;
+  readonly arrayDimensions?: ReadonlyArray<number>;
 };
 
 const normalizePlainObject = (record: Record<string, unknown>) =>

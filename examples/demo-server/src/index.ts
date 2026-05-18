@@ -171,8 +171,12 @@ const installDemoAddressSpace = (addressSpace: AddressSpace) => {
     changing.highFrequency,
   );
 
-  addMethod(namespace, machine, "Start", "s=MyMachine.Start");
-  addMethod(namespace, machine, "Stop", "s=MyMachine.Stop");
+  addStartMethod(namespace, machine);
+  addResetMethod(namespace, machine);
+  addEchoMethod(namespace, machine);
+  addRejectIfNegativeMethod(namespace, machine);
+  addDisabledCommandMethod(namespace, machine);
+  addInvalidArgumentNameMethods(namespace, machine);
 
   const large = namespace.addObject({
     browseName: "LargeFolder",
@@ -323,15 +327,21 @@ const addByteString = (
     },
   });
 
-const addMethod = (
+const addStartMethod = (
   namespace: ReturnType<AddressSpace["getOwnNamespace"]>,
   parent: Parameters<typeof namespace.addMethod>[0],
-  browseName: string,
-  nodeId: string,
 ) => {
   const method = namespace.addMethod(parent, {
-    browseName,
-    nodeId,
+    browseName: "Start",
+    nodeId: "s=MyMachine.Start",
+    inputArguments: [
+      { name: "StartSpeed", dataType: DataType.Double },
+      { name: "Force", dataType: DataType.Boolean },
+    ],
+    outputArguments: [
+      { name: "Accepted", dataType: DataType.Boolean },
+      { name: "JobId", dataType: DataType.String },
+    ],
   });
   method.bindMethod(function (
     this: UAMethod,
@@ -339,8 +349,176 @@ const addMethod = (
     context: ISessionContext,
     callback: CallbackT<CallMethodResultOptions>,
   ) {
+    void context;
+    const speed = Number(inputArguments[0]?.value ?? 0);
+    const force = Boolean(inputArguments[1]?.value);
+    callback(null, {
+      statusCode: StatusCodes.Good,
+      outputArguments: [
+        new Variant({ dataType: DataType.Boolean, value: speed > 0 || force }),
+        new Variant({
+          dataType: DataType.String,
+          value: `job-${Math.trunc(speed)}`,
+        }),
+      ],
+    });
+  });
+};
+
+const addResetMethod = (
+  namespace: ReturnType<AddressSpace["getOwnNamespace"]>,
+  parent: Parameters<typeof namespace.addMethod>[0],
+) => {
+  const method = namespace.addMethod(parent, {
+    browseName: "Reset",
+    nodeId: "s=MyMachine.Reset",
+    inputArguments: [],
+    outputArguments: [{ name: "Accepted", dataType: DataType.Boolean }],
+  });
+  method.bindMethod(async function (
+    this: UAMethod,
+    inputArguments: ReadonlyArray<Variant>,
+    context: ISessionContext,
+  ): Promise<CallMethodResultOptions> {
+    void this;
     void inputArguments;
     void context;
-    callback(null, { statusCode: StatusCodes.Good });
+    return {
+      statusCode: StatusCodes.Good,
+      outputArguments: [
+        new Variant({ dataType: DataType.Boolean, value: true }),
+      ],
+    };
+  });
+};
+
+const addEchoMethod = (
+  namespace: ReturnType<AddressSpace["getOwnNamespace"]>,
+  parent: Parameters<typeof namespace.addMethod>[0],
+) => {
+  const method = namespace.addMethod(parent, {
+    browseName: "Echo",
+    nodeId: "s=MyMachine.Echo",
+    inputArguments: [{ name: "Value", dataType: DataType.String }],
+    outputArguments: [{ name: "Value", dataType: DataType.String }],
+  });
+  method.bindMethod(async function (
+    this: UAMethod,
+    inputArguments: ReadonlyArray<Variant>,
+    context: ISessionContext,
+  ): Promise<CallMethodResultOptions> {
+    void this;
+    void context;
+    return {
+      statusCode: StatusCodes.Good,
+      outputArguments: [
+        new Variant({
+          dataType: DataType.String,
+          value: String(inputArguments[0]?.value ?? ""),
+        }),
+      ],
+    };
+  });
+};
+
+const addRejectIfNegativeMethod = (
+  namespace: ReturnType<AddressSpace["getOwnNamespace"]>,
+  parent: Parameters<typeof namespace.addMethod>[0],
+) => {
+  const method = namespace.addMethod(parent, {
+    browseName: "RejectIfNegative",
+    nodeId: "s=MyMachine.RejectIfNegative",
+    inputArguments: [{ name: "Value", dataType: DataType.Double }],
+    outputArguments: [{ name: "Accepted", dataType: DataType.Boolean }],
+  });
+  method.bindMethod(async function (
+    this: UAMethod,
+    inputArguments: ReadonlyArray<Variant>,
+    context: ISessionContext,
+  ): Promise<CallMethodResultOptions> {
+    void this;
+    void context;
+    const value = Number(inputArguments[0]?.value ?? 0);
+    if (value < 0) {
+      return { statusCode: StatusCodes.BadInvalidArgument };
+    }
+    return {
+      statusCode: StatusCodes.Good,
+      outputArguments: [
+        new Variant({ dataType: DataType.Boolean, value: true }),
+      ],
+    };
+  });
+};
+
+const addDisabledCommandMethod = (
+  namespace: ReturnType<AddressSpace["getOwnNamespace"]>,
+  parent: Parameters<typeof namespace.addMethod>[0],
+) => {
+  namespace.addMethod(parent, {
+    browseName: "DisabledCommand",
+    nodeId: "s=MyMachine.DisabledCommand",
+    executable: true,
+    inputArguments: [],
+    outputArguments: [{ name: "Accepted", dataType: DataType.Boolean }],
+  });
+};
+
+const addInvalidArgumentNameMethods = (
+  namespace: ReturnType<AddressSpace["getOwnNamespace"]>,
+  parent: Parameters<typeof namespace.addMethod>[0],
+) => {
+  const unnamed = namespace.addMethod(parent, {
+    browseName: "UnnamedArguments",
+    nodeId: "s=MyMachine.UnnamedArguments",
+    inputArguments: [
+      { name: "", dataType: DataType.String },
+      { name: "Named", dataType: DataType.String },
+    ],
+    outputArguments: [{ name: "Result", dataType: DataType.String }],
+  });
+  unnamed.bindMethod(async function (
+    this: UAMethod,
+    inputArguments: ReadonlyArray<Variant>,
+    context: ISessionContext,
+  ): Promise<CallMethodResultOptions> {
+    void this;
+    void context;
+    return {
+      statusCode: StatusCodes.Good,
+      outputArguments: [
+        new Variant({
+          dataType: DataType.String,
+          value: `${inputArguments[0]?.value ?? ""}${inputArguments[1]?.value ?? ""}`,
+        }),
+      ],
+    };
+  });
+
+  const duplicate = namespace.addMethod(parent, {
+    browseName: "DuplicateArguments",
+    nodeId: "s=MyMachine.DuplicateArguments",
+    inputArguments: [
+      { name: "Value", dataType: DataType.String },
+      { name: "Value", dataType: DataType.String },
+    ],
+    outputArguments: [{ name: "Value", dataType: DataType.String }],
+  });
+  duplicate.bindMethod(async function (
+    this: UAMethod,
+    inputArguments: ReadonlyArray<Variant>,
+    context: ISessionContext,
+  ): Promise<CallMethodResultOptions> {
+    void this;
+    void context;
+    return {
+      statusCode: StatusCodes.Good,
+      outputArguments: [
+        new Variant({
+          dataType: DataType.String,
+          value: `${inputArguments[0]?.value ?? ""}${inputArguments[1]?.value ?? ""}`,
+        }),
+      ],
+    };
   });
 };

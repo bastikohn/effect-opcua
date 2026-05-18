@@ -94,3 +94,31 @@ export class OpcuaConfigurationError extends Data.TaggedError(
   readonly nodeId?: NodeIdString;
   readonly cause?: unknown;
 }> {}
+
+export class OpcuaMethodInputError extends Data.TaggedError(
+  "OpcuaMethodInputError",
+)<{
+  readonly objectId: NodeIdString;
+  readonly methodId: NodeIdString;
+  readonly input: unknown;
+  readonly phase:
+    | "SchemaValidation"
+    | "MissingInputKey"
+    | "UnknownInputKey"
+    | "ArgumentMapping"
+    | "Encoding";
+  readonly argumentKey?: string;
+  readonly argumentIndex?: number;
+  readonly error?: unknown;
+  readonly cause?: unknown;
+}> {}
+
+export class OpcuaMethodNotExecutableError extends Data.TaggedError(
+  "OpcuaMethodNotExecutableError",
+)<{
+  readonly objectId: NodeIdString;
+  readonly methodId: NodeIdString;
+  readonly executable?: boolean;
+  readonly userExecutable?: boolean;
+  readonly cause?: unknown;
+}> {}

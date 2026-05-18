@@ -3,12 +3,11 @@ import {
   AttributeIds,
   DataType,
   NodeId,
-  Variant,
-  VariantArrayType,
   coerceNodeId,
   type ClientSession,
   type DataValue,
   type StatusCode,
+  type Variant,
 } from "node-opcua";
 import { Effect, Schema } from "effect";
 
@@ -25,10 +24,7 @@ import {
   OpcuaServiceError,
 } from "./errors.js";
 import {
-  denormalizeDynamicValue,
-  isArrayRank,
   isGood,
-  normalizeDynamicValue,
   normalizeNodeId,
   normalizeStatusCode,
   normalizeTimestamp,
@@ -38,6 +34,17 @@ import {
   type OpcuaStatusInfo,
   type OpcuaVariantInfo,
 } from "./normalize.js";
+import {
+  decodeDynamicValue,
+  decodeWithSchema,
+  encodeDynamicValue,
+  encodeWithSchema,
+  makeVariantFromMetadata,
+  type AnySchema,
+  type SchemaType,
+} from "./codecs.js";
+
+export type { AnySchema, SchemaType } from "./codecs.js";
 
 export type OpcuaValueSample<A, Id extends string = string> =
   | {
@@ -95,8 +102,10 @@ export type OpcuaWriteResult<Id extends string = string> =
       readonly status: OpcuaStatusInfo;
     };
 
-export type OpcuaWriteValuesResult<Ids extends string> = {
-  readonly [Id in Ids]: OpcuaWriteResult<Id>;
+export type OpcuaWriteValuesResult<Ids extends ReadonlyArray<string>> = {
+  readonly [Index in keyof Ids]: Ids[Index] extends string
+    ? OpcuaWriteResult<Ids[Index]>
+    : never;
 };
 export type OpcuaWriteValueSpec<
   Id extends string = string,
@@ -137,8 +146,6 @@ export type OpcuaValueMetadata = {
   };
 };
 
-export type AnySchema = Schema.Schema<unknown>;
-export type SchemaType<S> = S extends Schema.Schema<infer A> ? A : never;
 export type OpcuaValueSpec<
   Id extends string = string,
   S extends AnySchema | undefined = AnySchema | undefined,
@@ -215,6 +222,9 @@ export type ValueOfHandle<H> =
 export type NodeIdOfHandle<H> =
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   H extends OpcuaValueHandle<any, CapabilitySet, infer Id> ? Id : never;
+export type NodeIdsOfHandles<Handles extends ReadonlyArray<unknown>> = {
+  readonly [Index in keyof Handles]: NodeIdOfHandle<Handles[Index]>;
+};
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type WriteEntry<H extends WritableOpcuaValueHandle<any, string>> = {
   readonly handle: H;
@@ -249,7 +259,7 @@ export const sampleFromDataValue = <
   try {
     const value = spec.schema
       ? decodeWithSchema(spec.schema, dataValue.value?.value)
-      : normalizeDynamicValue(dataValue.value?.value, dataValue.value);
+      : decodeDynamicValue(dataValue.value?.value, dataValue.value);
     return {
       _tag: "Value",
       ...base,
@@ -445,70 +455,21 @@ export const encodeValue = (
   metadata: OpcuaValueMetadata,
 ) =>
   schema
-    ? Effect.sync(() =>
-        Schema.encodeUnknownSync(schema as Schema.Encoder<unknown>)(value),
-      ).pipe(
+    ? Effect.sync(() => encodeWithSchema(schema, value)).pipe(
         Effect.mapError(
           (error) => new OpcuaEncodeError({ nodeId, value, error }),
         ),
       )
     : Effect.suspend(() => {
         try {
-          return Effect.succeed(denormalizeDynamicValue(value, metadata));
+          return Effect.succeed(encodeDynamicValue(value, metadata));
         } catch (error) {
           return Effect.fail(new OpcuaEncodeError({ nodeId, value, error }));
         }
       });
 
 export const makeVariant = (metadata: OpcuaValueMetadata, value: unknown) =>
-  new Variant({
-    dataType: metadata.raw.dataType,
-    arrayType: variantArrayType(metadata, value),
-    dimensions:
-      variantArrayType(metadata, value) === VariantArrayType.Matrix
-        ? matrixDimensions(metadata, value)
-        : undefined,
-    value: flattenMatrixValue(metadata, value) as Variant["value"],
-  });
-
-const variantArrayType = (metadata: OpcuaValueMetadata, value: unknown) =>
-  metadata.valueRank > 1
-    ? VariantArrayType.Matrix
-    : Array.isArray(value) || isArrayRank(metadata.valueRank)
-      ? VariantArrayType.Array
-      : VariantArrayType.Scalar;
-
-const flattenMatrixValue = (
-  metadata: OpcuaValueMetadata,
-  value: unknown,
-): unknown => {
-  if (metadata.valueRank <= 1 || !Array.isArray(value)) return value;
-  return value.flat(metadata.valueRank - 1);
-};
-
-const matrixDimensions = (
-  metadata: OpcuaValueMetadata,
-  value: unknown,
-): Array<number> | undefined => {
-  if (metadata.arrayDimensions && metadata.arrayDimensions.length > 0) {
-    return [...metadata.arrayDimensions];
-  }
-  return inferArrayDimensions(value, metadata.valueRank);
-};
-
-const inferArrayDimensions = (
-  value: unknown,
-  rank: number,
-): Array<number> | undefined => {
-  const dimensions: Array<number> = [];
-  let current = value;
-  for (let depth = 0; depth < rank; depth++) {
-    if (!Array.isArray(current)) return undefined;
-    dimensions.push(current.length);
-    current = current[0];
-  }
-  return dimensions;
-};
+  makeVariantFromMetadata(metadata, value);
 
 export const writeResult = <Id extends string>(
   nodeId: Id,
@@ -547,17 +508,11 @@ export const hasAccess = (accessLevel: number, capability: Capability) => {
   const flag =
     capability === "read"
       ? AccessLevelFlag.CurrentRead
-      : AccessLevelFlag.CurrentWrite;
+      : capability === "write"
+        ? AccessLevelFlag.CurrentWrite
+        : 0;
   return (accessLevel & flag) !== 0;
 };
-
-const decodeWithSchema = <S extends AnySchema>(
-  schema: S,
-  value: unknown,
-): SchemaType<S> =>
-  Schema.decodeUnknownSync(schema as unknown as Schema.Decoder<unknown>)(
-    value,
-  ) as SchemaType<S>;
 
 export const hasCapability = (
   capabilities: CapabilitySet,

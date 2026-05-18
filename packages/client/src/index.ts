@@ -13,6 +13,8 @@ export {
   OpcuaDecodeError,
   OpcuaDisconnectError,
   OpcuaEncodeError,
+  OpcuaMethodInputError,
+  OpcuaMethodNotExecutableError,
   OpcuaMonitorCreateError,
   OpcuaNonGoodStatusError,
   OpcuaServiceError,
@@ -58,6 +60,16 @@ export type {
   WriteValueSpec,
   WriteValuesResult,
 } from "./values.js";
+export type {
+  OpcuaMethodArgumentMapping,
+  OpcuaMethodArgumentMetadata,
+  OpcuaMethodArgumentResult,
+  OpcuaMethodCallOptions,
+  OpcuaMethodCallResult,
+  OpcuaMethodHandle,
+  OpcuaMethodMetadata,
+  OpcuaMethodSpec,
+} from "./methods.js";
 export {
   ClientBufferPolicy,
   MonitorValueDeadband,

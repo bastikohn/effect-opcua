@@ -93,6 +93,43 @@ describe("values", () => {
     });
   });
 
+  it("returns writeHandleValues results in input order and rejects duplicates", async () => {
+    const result = await runLive(
+      Effect.gen(function* () {
+        const session = yield* OpcuaSession;
+        const a = yield* session.valueHandle({
+          nodeId: "ns=1;s=MyMachine.SpeedSetpoint",
+          capabilities: Capabilities.readWrite,
+        });
+        const b = yield* session.valueHandle({
+          nodeId: "ns=1;s=MyMachine.Axis1.Enabled",
+          capabilities: Capabilities.readWrite,
+        });
+        const writes = yield* session.writeHandleValues([
+          { handle: a, value: 1001 },
+          { handle: b, value: false },
+        ] as const);
+        const duplicate = yield* session
+          .writeHandleValues([
+            { handle: a, value: 1002 },
+            { handle: a, value: 1003 },
+          ] as const)
+          .pipe(Effect.flip);
+        return { writes, duplicate };
+      }),
+    );
+
+    expect(Array.isArray(result.writes)).toBe(true);
+    expect(result.writes).toMatchObject([
+      { _tag: "Written", nodeId: "ns=1;s=MyMachine.SpeedSetpoint" },
+      { _tag: "Written", nodeId: "ns=1;s=MyMachine.Axis1.Enabled" },
+    ]);
+    expect(result.duplicate).toMatchObject({
+      _tag: "OpcuaConfigurationError",
+      operation: "writeHandleValues",
+    });
+  });
+
   it("enforces requested write access during handle creation", async () => {
     await expect(
       runLive(

@@ -53,6 +53,8 @@ import {
   OpcuaAccessDeniedError,
   OpcuaConfigurationError,
   OpcuaEncodeError,
+  OpcuaMethodInputError,
+  OpcuaMethodNotExecutableError,
   OpcuaNonGoodStatusError,
   OpcuaServiceError,
   OpcuaSessionCloseError,
@@ -87,8 +89,20 @@ import {
   type ValueSpec,
   type WritableOpcuaValueHandle,
   type WriteEntry,
-  type NodeIdOfHandle,
+  type NodeIdsOfHandles,
 } from "./values.js";
+import {
+  callMethodHandles,
+  makeMethodHandle,
+  type InputOfMethodSpec,
+  type MethodCallEntry,
+  type MethodCallHandlesResult,
+  type OpcuaMethodCallOptions,
+  type OpcuaMethodCallResult,
+  type OpcuaMethodHandle,
+  type OpcuaMethodSpec,
+  type OutputOfMethodSpec,
+} from "./methods.js";
 
 export type OpcuaSession = {
   readonly readValue: <
@@ -147,10 +161,51 @@ export type OpcuaSession = {
   >(writes: {
     readonly [Index in keyof Handles]: WriteEntry<Handles[Index]>;
   }) => Effect.Effect<
-    OpcuaWriteValuesResult<NodeIdOfHandle<Handles[number]>>,
+    OpcuaWriteValuesResult<NodeIdsOfHandles<Handles>>,
     | OpcuaConfigurationError
     | OpcuaEncodeError
     | OpcuaServiceError
+    | OpcuaAccessDeniedError
+  >;
+  readonly methodHandle: <const Spec extends OpcuaMethodSpec>(
+    spec: Spec,
+  ) => Effect.Effect<
+    OpcuaMethodHandle<
+      InputOfMethodSpec<Spec>,
+      OutputOfMethodSpec<Spec>,
+      Spec["objectId"],
+      Spec["methodId"]
+    >,
+    | OpcuaConfigurationError
+    | OpcuaServiceError
+    | OpcuaMethodNotExecutableError
+    | OpcuaAccessDeniedError
+  >;
+  readonly callMethod: <const Spec extends OpcuaMethodSpec>(
+    spec: Spec & { readonly input: InputOfMethodSpec<Spec> },
+    options?: OpcuaMethodCallOptions,
+  ) => Effect.Effect<
+    OpcuaMethodCallResult<
+      OutputOfMethodSpec<Spec>,
+      Spec["objectId"],
+      Spec["methodId"]
+    >,
+    | OpcuaConfigurationError
+    | OpcuaServiceError
+    | OpcuaMethodInputError
+    | OpcuaMethodNotExecutableError
+    | OpcuaAccessDeniedError
+  >;
+  readonly callMethodHandles: <
+    const Handles extends ReadonlyArray<OpcuaMethodHandle>,
+  >(entries: {
+    readonly [Index in keyof Handles]: MethodCallEntry<Handles[Index]>;
+  }) => Effect.Effect<
+    MethodCallHandlesResult<Handles>,
+    | OpcuaConfigurationError
+    | OpcuaServiceError
+    | OpcuaMethodInputError
+    | OpcuaMethodNotExecutableError
     | OpcuaAccessDeniedError
   >;
   readonly browse: (
@@ -351,7 +406,12 @@ export const makeSession = (
       ) as WriteValuesResult<typeof specs>;
     });
 
-  const writeHandleValues: OpcuaSession["writeHandleValues"] = (writes) =>
+  const writeHandleValues = <
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const Handles extends ReadonlyArray<WritableOpcuaValueHandle<any>>,
+  >(writes: {
+    readonly [Index in keyof Handles]: WriteEntry<Handles[Index]>;
+  }) =>
     Effect.gen(function* () {
       const nodeIds = writes.map((write) => write.handle.nodeId);
       const duplicate = duplicateStringError("writeHandleValues", nodeIds);
@@ -387,15 +447,22 @@ export const makeSession = (
         catch: (cause) =>
           new OpcuaServiceError({ operation: "writeHandleValues", cause }),
       });
-      const result: Record<string, OpcuaWriteResult> = {};
-      for (let index = 0; index < writes.length; index++) {
-        const nodeId = writes[index]!.handle.nodeId;
-        result[nodeId] = writeResult(nodeId, statusCodes[index]!);
-      }
-      return result as OpcuaWriteValuesResult<
-        (typeof writes)[number]["handle"]["nodeId"]
-      >;
+      return writes.map((write, index) =>
+        writeResult(write.handle.nodeId, statusCodes[index]!),
+      ) as OpcuaWriteValuesResult<NodeIdsOfHandles<Handles>>;
     });
+
+  const methodHandle: OpcuaSession["methodHandle"] = (spec) =>
+    makeMethodHandle(raw, spec);
+
+  const callMethod: OpcuaSession["callMethod"] = (spec, options) =>
+    Effect.gen(function* () {
+      const handle = yield* methodHandle(spec);
+      return yield* handle.call(spec.input, options);
+    });
+
+  const callMethodHandles_: OpcuaSession["callMethodHandles"] = (entries) =>
+    callMethodHandles(raw, entries);
 
   const createSubscription: OpcuaSession["createSubscription"] = (options) =>
     Effect.gen(function* () {
@@ -577,6 +644,9 @@ export const makeSession = (
     writeValue,
     writeValues,
     writeHandleValues,
+    methodHandle,
+    callMethod,
+    callMethodHandles: callMethodHandles_,
     createSubscription,
     browse,
     browseNext,
