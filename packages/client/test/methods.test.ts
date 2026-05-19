@@ -447,6 +447,37 @@ describe("methods", () => {
     });
   });
 
+  it("decodes structure and structure array method outputs", async () => {
+    const settings = { duration: 100, cycles: 3, dataAvailable: true };
+    const jobs = [
+      { duration: 10, cycles: 1, dataAvailable: true },
+      { duration: 20, cycles: 2, dataAvailable: false },
+    ];
+    const result = await runLive(
+      Effect.gen(function* () {
+        const session = yield* OpcuaSession;
+        const echoScan = yield* session.methodHandle({
+          objectId: "ns=1;s=MyMachine",
+          methodId: "ns=1;s=MyMachine.EchoScan",
+          input: {
+            Settings: ScanSettings,
+            Jobs: OpcuaStructure.array(ScanSettings),
+          },
+          output: {
+            Settings: ScanSettings,
+            Jobs: OpcuaStructure.array(ScanSettings),
+          },
+        });
+        return yield* echoScan.call({ Settings: settings, Jobs: jobs });
+      }),
+    );
+
+    expect(result).toMatchObject({
+      _tag: "Called",
+      output: { Settings: settings, Jobs: jobs },
+    });
+  });
+
   it("rejects malformed batch call service responses", async () => {
     const error = await runLive(
       Effect.gen(function* () {

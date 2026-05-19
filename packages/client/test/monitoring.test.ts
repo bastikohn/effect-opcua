@@ -178,4 +178,36 @@ describe("monitoring", () => {
       value: expect.objectContaining({ cycles: expect.any(Number) }),
     });
   }, 20_000);
+
+  it("rejects invalid structure specs before creating monitored items", async () => {
+    await expect(
+      runLive(
+        Effect.gen(function* () {
+          const session = yield* OpcuaSession;
+          const subscription = yield* session.createSubscription({
+            publishingInterval: Duration.millis(100),
+          });
+          return yield* subscription
+            .monitorValues(
+              [
+                {
+                  nodeId: "ns=1;s=MyMachine.Temperature",
+                  structure: ScanSettings,
+                },
+              ] as const,
+              {
+                samplingInterval: Duration.millis(50),
+                queueSize: 5,
+                discardOldest: true,
+                clientBuffer: ClientBufferPolicy.sliding(10),
+              },
+            )
+            .pipe(Stream.take(1), Stream.runCollect);
+        }),
+      ),
+    ).rejects.toMatchObject({
+      _tag: "OpcuaConfigurationError",
+      operation: "monitorValues.structure",
+    });
+  }, 20_000);
 });

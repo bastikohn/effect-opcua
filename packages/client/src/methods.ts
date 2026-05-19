@@ -6,6 +6,7 @@ import {
   NodeId,
   NodeIdType,
   ReferenceTypeIds,
+  VariantArrayType,
   coerceNodeId,
   type Argument,
   type BrowseDescriptionOptions,
@@ -197,7 +198,7 @@ export type OpcuaMethodCallResult<
       readonly objectId: ObjectId;
       readonly methodId: MethodId;
       readonly status: OpcuaStatusInfo;
-      readonly error: Schema.SchemaError;
+      readonly error: unknown;
       readonly raw?: OpcuaMethodCallRaw;
     };
 
@@ -642,7 +643,7 @@ const methodResultFromRaw = <
       objectId: handle.objectId,
       methodId: handle.methodId,
       status,
-      error: error as Schema.SchemaError,
+      error,
       raw,
     };
   }
@@ -759,7 +760,7 @@ const mappingOrFail = (
 ) =>
   Effect.suspend(() => {
     const result = fields
-      ? explicitMapping(arguments_, fields)
+      ? explicitMapping(operation, nodeId, arguments_, fields)
       : defaultMapping(arguments_);
     if (result instanceof OpcuaConfigurationError) {
       return Effect.fail(
@@ -798,6 +799,8 @@ const defaultMapping = (
 };
 
 const explicitMapping = (
+  operation: string,
+  nodeId: NodeIdString,
   arguments_: ReadonlyArray<OpcuaMethodArgumentMetadata>,
   fields: Readonly<Record<string, OpcuaMethodFieldSpec<unknown>>>,
 ) => {
@@ -838,19 +841,30 @@ const explicitMapping = (
     usedIndexes.add(index);
     const normalized = field.normalized;
     if (normalized._tag === "Structure") {
+      const argument = arguments_[index]!;
       const structureError = validateStructureMetadata(
-        "methodHandle.argumentMap",
-        arguments_[index]!.name,
+        operation,
+        nodeId,
         {
-          valueRank: arguments_[index]!.valueRank,
+          valueRank: argument.valueRank,
           raw: {
-            declaredDataType: arguments_[index]!.raw.declaredDataType,
-            builtInDataType: arguments_[index]!.raw.builtInDataType,
+            declaredDataType: argument.raw.declaredDataType,
+            builtInDataType: argument.raw.builtInDataType,
           },
         },
         normalized.structure,
       );
-      if (structureError) return structureError;
+      if (structureError) {
+        return new OpcuaConfigurationError({
+          operation,
+          nodeId,
+          cause: {
+            argumentName: argument.name,
+            argumentIndex: index,
+            cause: structureError.cause,
+          },
+        });
+      }
     }
     mapping.push({
       key,
@@ -1083,17 +1097,12 @@ const outputObjectFromResult = (
         );
         break;
       case "Structure":
-        output[mapping.key] = isOpcuaStructureArrayCodec(
+        output[mapping.key] = decodeStructureOutput(
+          mapping,
           mapping.field.structure,
-        )
-          ? structureRuntime.decodeStructureArray(
-              mapping.field.structure,
-              variant?.value,
-            )
-          : structureRuntime.decodeStructure(
-              mapping.field.structure,
-              variant?.value,
-            );
+          variant,
+          structureRuntime,
+        );
         break;
       case "Dynamic":
         output[mapping.key] = decodeDynamicValue(variant?.value, variant);
@@ -1101,6 +1110,33 @@ const outputObjectFromResult = (
     }
   }
   return output;
+};
+
+const decodeStructureOutput = (
+  mapping: OpcuaMethodArgumentMapping,
+  structure: AnyStructureSpec,
+  variant: Variant | undefined,
+  structureRuntime: OpcuaStructureRuntime,
+) => {
+  if (variant?.dataType !== DataType.ExtensionObject) {
+    throw new TypeError(
+      `Expected ExtensionObject output Variant for ${mapping.argumentName}`,
+    );
+  }
+  if (isOpcuaStructureArrayCodec(structure)) {
+    if (variant.arrayType !== VariantArrayType.Array) {
+      throw new TypeError(
+        `Expected ExtensionObject array output Variant for ${mapping.argumentName}`,
+      );
+    }
+    return structureRuntime.decodeStructureArray(structure, variant.value);
+  }
+  if (variant.arrayType !== VariantArrayType.Scalar) {
+    throw new TypeError(
+      `Expected scalar ExtensionObject output Variant for ${mapping.argumentName}`,
+    );
+  }
+  return structureRuntime.decodeStructure(structure, variant.value);
 };
 
 const normalizeInputArgumentResults = (

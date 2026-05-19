@@ -6,7 +6,6 @@ export type OpcuaStructureCodec<A> = {
   readonly _tag: "OpcuaStructureCodec";
   readonly name: string;
   readonly dataTypeId: NodeIdString;
-  readonly binaryEncodingId?: NodeIdString;
   readonly schema: Schema.Codec<unknown, A, never, never>;
 };
 
@@ -19,7 +18,6 @@ export const OpcuaStructure = {
   make: <A>(options: {
     readonly name: string;
     readonly dataTypeId: NodeIdString;
-    readonly binaryEncodingId?: NodeIdString;
     readonly schema: Schema.Codec<unknown, A, never, never>;
   }): OpcuaStructureCodec<A> => ({
     _tag: "OpcuaStructureCodec",

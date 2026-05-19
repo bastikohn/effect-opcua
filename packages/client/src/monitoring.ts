@@ -7,6 +7,7 @@ import {
   StatusCodes,
   TimestampsToReturn,
   coerceNodeId,
+  type ClientSession,
   type ClientMonitoredItemGroup,
   type StatusCode,
 } from "node-opcua";
@@ -36,7 +37,9 @@ import {
 } from "./normalize.js";
 import {
   hasStructureSpec,
+  discoverMetadata,
   sampleFromDataValue,
+  validateValueStructureSpec,
   type OpcuaAnyValueSample,
   type OpcuaValueSample,
   type ValueSpec,
@@ -117,6 +120,7 @@ export type MonitorValuesOptions = {
   readonly discardOldest: boolean;
   readonly clientBuffer: ClientBufferPolicy;
   readonly filter?: MonitorValueFilter;
+  readonly validateStructureMetadata?: boolean;
 };
 
 export type OpcuaMonitorItemOptions = {
@@ -224,6 +228,12 @@ export const makeSubscription = (
           if (bufferError) return yield* Effect.fail(bufferError);
           if (structureRuntime && specs.some(hasStructureSpec)) {
             yield* structureRuntime.ensureInitialized();
+            yield* validateMonitorStructureSpecs(
+              raw.session,
+              "monitorValues.structure",
+              specs,
+              options.validateStructureMetadata,
+            );
           }
           const queue = yield* makeQueue<
             OpcuaAnyValueSample,
@@ -311,6 +321,12 @@ export const makeSubscription = (
           for (const spec of specs) {
             if (structureRuntime && hasStructureSpec(spec)) {
               yield* structureRuntime.ensureInitialized();
+              yield* validateMonitorStructureSpecs(
+                raw.session,
+                "valueMonitor.add.structure",
+                [spec],
+                options.validateStructureMetadata,
+              );
             }
             const effective = effectiveMonitorOptions(spec, options);
             const current = (yield* Ref.get(registry)).get(spec.nodeId);
@@ -679,6 +695,52 @@ const acquireMonitorGroup = (
           ),
         ),
       ),
+  );
+
+const validateMonitorStructureSpecs = (
+  session: ClientSession,
+  operation: string,
+  specs: ReadonlyArray<ValueSpec>,
+  enabled: boolean | undefined,
+) =>
+  enabled === false
+    ? Effect.void
+    : Effect.forEach(
+        specs.filter(hasStructureSpec),
+        (spec) =>
+          Effect.gen(function* () {
+            const metadata = yield* discoverMetadata(
+              session,
+              spec.nodeId,
+              [] as const,
+            ).pipe(
+              Effect.mapError((error) =>
+                isAccessDeniedError(error)
+                  ? new OpcuaConfigurationError({
+                      operation,
+                      nodeId: spec.nodeId,
+                      cause: error,
+                    })
+                  : error,
+              ),
+            );
+            const structureError = validateValueStructureSpec(
+              operation,
+              spec,
+              metadata,
+            );
+            if (structureError) return yield* Effect.fail(structureError);
+          }),
+        { discard: true },
+      );
+
+const isAccessDeniedError = (
+  error: unknown,
+): error is { readonly _tag: "OpcuaAccessDeniedError" } =>
+  Boolean(
+    error &&
+    typeof error === "object" &&
+    (error as { readonly _tag?: string })._tag === "OpcuaAccessDeniedError",
   );
 
 const terminateMonitorGroup = (group: ClientMonitoredItemGroup) =>

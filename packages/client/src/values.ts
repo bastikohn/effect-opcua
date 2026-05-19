@@ -87,7 +87,7 @@ export type OpcuaValueSample<A, Id extends string = string> =
   | {
       readonly _tag: "DecodeError";
       readonly nodeId: Id;
-      readonly error: Schema.SchemaError;
+      readonly error: unknown;
       readonly status: OpcuaStatusInfo;
       readonly sourceTimestamp?: string;
       readonly serverTimestamp?: string;
@@ -286,7 +286,7 @@ export const sampleFromDataValue = <Id extends string>(
     return {
       _tag: "DecodeError",
       ...base,
-      error: error as Schema.SchemaError,
+      error,
     };
   }
 };

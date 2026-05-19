@@ -3,8 +3,10 @@ import {
   Variant,
   VariantArrayType,
   coerceNodeId,
+  sameNodeId,
   type ClientSession,
   type ExtensionObject,
+  type NodeId,
 } from "node-opcua";
 import { Effect } from "effect";
 
@@ -55,22 +57,13 @@ export type OpcuaStructureRuntime = {
 export const makeStructureRuntime = (
   session: ClientSession,
 ): OpcuaStructureRuntime => {
-  let initialized = false;
+  let initializeOnce = makeInitializeOnce(session);
 
-  const ensureInitialized = () =>
-    initialized
-      ? Effect.void
-      : Effect.tryPromise({
-          try: async () => {
-            await session.extractNamespaceDataType();
-            initialized = true;
-          },
-          catch: (cause) =>
-            new OpcuaServiceError({
-              operation: "structure.extractNamespaceDataType",
-              cause,
-            }),
-        });
+  session.on("session_restored", () => {
+    initializeOnce = makeInitializeOnce(session);
+  });
+
+  const ensureInitialized = () => initializeOnce;
 
   const encodeStructure = <A>(
     nodeId: NodeIdString,
@@ -128,29 +121,27 @@ export const makeStructureRuntime = (
     codec: AnyStructureSpec,
     value: A,
   ) =>
-    Effect.suspend(() =>
-      isOpcuaStructureArrayCodec(codec)
-        ? encodeStructureArray(nodeId, codec, arrayValue(nodeId, value)).pipe(
-            Effect.map(
-              (extensionObjects) =>
-                new Variant({
-                  dataType: DataType.ExtensionObject,
-                  arrayType: VariantArrayType.Array,
-                  value: [...extensionObjects],
-                }),
-            ),
-          )
-        : encodeStructure(nodeId, codec, value).pipe(
-            Effect.map(
-              (extensionObject) =>
-                new Variant({
-                  dataType: DataType.ExtensionObject,
-                  arrayType: VariantArrayType.Scalar,
-                  value: extensionObject,
-                }),
-            ),
-          ),
-    );
+    Effect.gen(function* () {
+      if (isOpcuaStructureArrayCodec(codec)) {
+        const values = yield* arrayValue(nodeId, value);
+        const extensionObjects = yield* encodeStructureArray(
+          nodeId,
+          codec,
+          values,
+        );
+        return new Variant({
+          dataType: DataType.ExtensionObject,
+          arrayType: VariantArrayType.Array,
+          value: [...extensionObjects],
+        });
+      }
+      const extensionObject = yield* encodeStructure(nodeId, codec, value);
+      return new Variant({
+        dataType: DataType.ExtensionObject,
+        arrayType: VariantArrayType.Scalar,
+        value: extensionObject,
+      });
+    });
 
   return {
     ensureInitialized,
@@ -162,8 +153,22 @@ export const makeStructureRuntime = (
   };
 };
 
+const makeInitializeOnce = (session: ClientSession) =>
+  Effect.runSync(
+    Effect.cached(
+      Effect.tryPromise({
+        try: () => session.extractNamespaceDataType(),
+        catch: (cause) =>
+          new OpcuaServiceError({
+            operation: "structure.extractNamespaceDataType",
+            cause,
+          }),
+      }),
+    ),
+  );
+
 const pojoRecord = (value: unknown): Record<string, unknown> => {
-  if (value && typeof value === "object" && !Array.isArray(value)) {
+  if (isPlainRecord(value)) {
     return value as Record<string, unknown>;
   }
   throw new TypeError("Structure schema must encode to a plain object");
@@ -172,14 +177,16 @@ const pojoRecord = (value: unknown): Record<string, unknown> => {
 const arrayValue = <A>(
   nodeId: NodeIdString,
   value: A,
-): ReadonlyArray<unknown> => {
-  if (Array.isArray(value)) return value;
-  throw new OpcuaEncodeError({
-    nodeId,
-    value,
-    error: "Structure array value must be an array",
-  });
-};
+): Effect.Effect<ReadonlyArray<unknown>, OpcuaEncodeError> =>
+  Array.isArray(value)
+    ? Effect.succeed(value)
+    : Effect.fail(
+        new OpcuaEncodeError({
+          nodeId,
+          value,
+          error: "Structure array value must be an array",
+        }),
+      );
 
 export const extractStructurePojo = (value: unknown): unknown => {
   if (!value || typeof value !== "object") {
@@ -222,7 +229,7 @@ export const validateStructureMetadata = (
   metadata: {
     readonly valueRank: number;
     readonly raw: {
-      readonly declaredDataType: { readonly toString: () => string };
+      readonly declaredDataType: NodeId;
       readonly builtInDataType: DataType;
     };
   },
@@ -238,11 +245,12 @@ export const validateStructureMetadata = (
       cause: `Expected built-in DataType.ExtensionObject for ${codec.name}`,
     });
   }
-  if (metadata.raw.declaredDataType.toString() !== codec.dataTypeId) {
+  const expectedDataType = coerceNodeId(codec.dataTypeId);
+  if (!sameNodeId(metadata.raw.declaredDataType, expectedDataType)) {
     return new OpcuaConfigurationError({
       operation,
       nodeId,
-      cause: `Expected declared DataType ${codec.dataTypeId}, got ${metadata.raw.declaredDataType.toString()}`,
+      cause: `Expected exact declared DataType ${expectedDataType.toString()} for ${codec.name}, got ${metadata.raw.declaredDataType.toString()}`,
     });
   }
   if (metadata.valueRank > 1) {
@@ -253,14 +261,14 @@ export const validateStructureMetadata = (
     });
   }
   if (isOpcuaStructureArrayCodec(structure)) {
-    if (metadata.valueRank < 1) {
+    if (!isOneDimArrayCompatibleRank(metadata.valueRank)) {
       return new OpcuaConfigurationError({
         operation,
         nodeId,
         cause: "Expected one-dimensional structure array metadata",
       });
     }
-  } else if (metadata.valueRank >= 1) {
+  } else if (!isScalarCompatibleRank(metadata.valueRank)) {
     return new OpcuaConfigurationError({
       operation,
       nodeId,
@@ -269,3 +277,9 @@ export const validateStructureMetadata = (
   }
   return undefined;
 };
+
+const isScalarCompatibleRank = (rank: number) =>
+  rank === -1 || rank === -2 || rank === -3;
+
+const isOneDimArrayCompatibleRank = (rank: number) =>
+  rank === 1 || rank === 0 || rank === -2 || rank === -3;

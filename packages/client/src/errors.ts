@@ -1,5 +1,5 @@
 import type { DataValue, StatusCode } from "node-opcua";
-import { Data, Schema } from "effect";
+import { Data } from "effect";
 
 import type { Capability, NodeIdString } from "./capabilities.js";
 
@@ -65,7 +65,7 @@ export class OpcuaNonGoodStatusError extends Data.TaggedError(
 
 export class OpcuaDecodeError extends Data.TaggedError("OpcuaDecodeError")<{
   readonly nodeId: NodeIdString;
-  readonly error: Schema.SchemaError;
+  readonly error: unknown;
   readonly dataValue: DataValue;
   readonly cause?: unknown;
 }> {}

@@ -504,6 +504,45 @@ const addScanSettingsDemo = async (
       ],
     };
   });
+
+  const echoScan = namespace.addMethod(parent as never, {
+    browseName: "EchoScan",
+    nodeId: "s=MyMachine.EchoScan",
+    inputArguments: [
+      { name: "Settings", dataType: scanSettingsType.nodeId },
+      { name: "Jobs", dataType: scanSettingsType.nodeId, valueRank: 1 },
+    ],
+    outputArguments: [
+      { name: "Settings", dataType: scanSettingsType.nodeId },
+      { name: "Jobs", dataType: scanSettingsType.nodeId, valueRank: 1 },
+    ],
+  });
+  echoScan.bindMethod(async function (
+    this: UAMethod,
+    inputArguments: ReadonlyArray<Variant>,
+    context: ISessionContext,
+  ): Promise<CallMethodResultOptions> {
+    void this;
+    void context;
+    const settings = structureRecord(inputArguments[0]?.value);
+    const jobs = Array.isArray(inputArguments[1]?.value)
+      ? inputArguments[1]!.value.map(structureRecord)
+      : [];
+    return {
+      statusCode: StatusCodes.Good,
+      outputArguments: [
+        new Variant({
+          dataType: DataType.ExtensionObject,
+          value: makeScanSettings(settings),
+        }),
+        new Variant({
+          dataType: DataType.ExtensionObject,
+          arrayType: VariantArrayType.Array,
+          value: jobs.map(makeScanSettings),
+        }),
+      ],
+    };
+  });
 };
 
 const structureRecord = (value: unknown): Record<string, unknown> =>
