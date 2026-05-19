@@ -26,8 +26,18 @@ import {
   encodeWithSchema,
   makeVariantFromMetadata,
   type AnySchema,
-  type SchemaType,
 } from "./codecs.js";
+import {
+  validateStructureMetadata,
+  type OpcuaStructureRuntime,
+} from "./structure-runtime.js";
+import {
+  isOpcuaStructureArrayCodec,
+  isOpcuaStructureCodec,
+  type AnyStructureSpec,
+  type OpcuaStructureArrayCodec,
+  type OpcuaStructureCodec,
+} from "./structures.js";
 import {
   OpcuaAccessDeniedError,
   OpcuaConfigurationError,
@@ -47,37 +57,63 @@ import {
   type OpcuaDynamicValueMetadata,
 } from "./normalize.js";
 
-export type OpcuaMethodArgumentMap = Readonly<Record<string, string | number>>;
-
 export type OpcuaMethodSpec<
   ObjectId extends NodeIdString = NodeIdString,
   MethodId extends NodeIdString = NodeIdString,
-  InputSchema extends AnySchema | undefined = AnySchema | undefined,
-  OutputSchema extends AnySchema | undefined = AnySchema | undefined,
 > = {
   readonly objectId: ObjectId;
   readonly methodId: MethodId;
-  readonly inputSchema?: InputSchema;
-  readonly outputSchema?: OutputSchema;
-  readonly inputArgumentMap?: OpcuaMethodArgumentMap;
-  readonly outputArgumentMap?: OpcuaMethodArgumentMap;
+  readonly input?: Readonly<Record<string, OpcuaMethodFieldSpec<unknown>>>;
+  readonly output?: Readonly<Record<string, OpcuaMethodFieldSpec<unknown>>>;
   readonly includeRaw?: boolean;
 };
 
+export type OpcuaMethodFieldSpec<A> =
+  | AnySchema
+  | OpcuaStructureCodec<A>
+  | OpcuaStructureArrayCodec<A>
+  | {
+      readonly opcuaArgumentName?: string;
+      readonly opcuaArgumentIndex?: number;
+      readonly schema: AnySchema;
+      readonly structure?: never;
+    }
+  | {
+      readonly opcuaArgumentName?: string;
+      readonly opcuaArgumentIndex?: number;
+      readonly structure: AnyStructureSpec;
+      readonly schema?: never;
+    };
+
+export type FieldType<Spec> =
+  Spec extends OpcuaStructureCodec<infer A>
+    ? A
+    : Spec extends OpcuaStructureArrayCodec<infer A>
+      ? ReadonlyArray<A>
+      : Spec extends { readonly structure: OpcuaStructureCodec<infer A> }
+        ? A
+        : Spec extends {
+              readonly structure: OpcuaStructureArrayCodec<infer A>;
+            }
+          ? ReadonlyArray<A>
+          : Spec extends Schema.Codec<unknown, infer A, never, never>
+            ? A
+            : Spec extends { readonly schema: infer S }
+              ? S extends Schema.Codec<unknown, infer A, never, never>
+                ? A
+                : OpcuaDynamicValue
+              : OpcuaDynamicValue;
+
 export type InputOfMethodSpec<Spec> = Spec extends {
-  readonly inputSchema?: infer S;
+  readonly input: infer Fields extends Readonly<Record<string, unknown>>;
 }
-  ? S extends AnySchema
-    ? SchemaType<S>
-    : Record<string, OpcuaDynamicValue>
+  ? { readonly [Key in keyof Fields]: FieldType<Fields[Key]> }
   : Record<string, OpcuaDynamicValue>;
 
 export type OutputOfMethodSpec<Spec> = Spec extends {
-  readonly outputSchema?: infer S;
+  readonly output: infer Fields extends Readonly<Record<string, unknown>>;
 }
-  ? S extends AnySchema
-    ? SchemaType<S>
-    : Record<string, OpcuaDynamicValue>
+  ? { readonly [Key in keyof Fields]: FieldType<Fields[Key]> }
   : Record<string, OpcuaDynamicValue>;
 
 export type OpcuaMethodMetadata = {
@@ -95,18 +131,24 @@ export type OpcuaMethodArgumentMapping = {
   readonly key: string;
   readonly index: number;
   readonly argumentName: string;
+  readonly field: NormalizedMethodFieldSpec;
 };
+
+export type NormalizedMethodFieldSpec =
+  | { readonly _tag: "Dynamic" }
+  | { readonly _tag: "Schema"; readonly schema: AnySchema }
+  | { readonly _tag: "Structure"; readonly structure: AnyStructureSpec };
 
 export type OpcuaMethodArgumentMetadata = {
   readonly name: string;
   readonly description?: OpcuaLocalizedTextInfo;
-  readonly dataTypeNodeId: OpcuaNodeIdInfo;
-  readonly dataType: string;
+  readonly declaredDataType: OpcuaNodeIdInfo;
+  readonly builtInDataType: string;
   readonly valueRank: number;
   readonly arrayDimensions?: ReadonlyArray<number>;
   readonly raw: {
     readonly argument: Argument;
-    readonly dataType: NodeId;
+    readonly declaredDataType: NodeId;
     readonly builtInDataType: DataType;
   };
 };
@@ -167,8 +209,8 @@ export type OpcuaMethodHandle<
 > = {
   readonly objectId: ObjectId;
   readonly methodId: MethodId;
-  readonly inputSchema?: AnySchema;
-  readonly outputSchema?: AnySchema;
+  readonly input?: Readonly<Record<string, OpcuaMethodFieldSpec<unknown>>>;
+  readonly output?: Readonly<Record<string, OpcuaMethodFieldSpec<unknown>>>;
   readonly includeRaw?: boolean;
   readonly metadata: OpcuaMethodMetadata;
   readonly capabilities: typeof Capabilities.call;
@@ -237,6 +279,7 @@ export type MethodCallHandlesResult<Handles extends ReadonlyArray<unknown>> = {
 export const makeMethodHandle = <const Spec extends OpcuaMethodSpec>(
   session: ClientSession,
   spec: Spec,
+  structureRuntime: OpcuaStructureRuntime,
 ) =>
   Effect.gen(function* () {
     const objectId = yield* coerceNodeIdOrFail(
@@ -274,16 +317,16 @@ export const makeMethodHandle = <const Spec extends OpcuaMethodSpec>(
       argumentDefinition.outputArguments ?? [],
     );
     const inputMapping = yield* mappingOrFail(
-      "methodHandle.inputArgumentMap",
+      "methodHandle.input",
       spec.methodId,
       inputArguments,
-      spec.inputArgumentMap,
+      spec.input,
     );
     const outputMapping = yield* mappingOrFail(
-      "methodHandle.outputArgumentMap",
+      "methodHandle.output",
       spec.methodId,
       outputArguments,
-      spec.outputArgumentMap,
+      spec.output,
     );
     if (!executable || userExecutable === false) {
       return yield* Effect.fail(
@@ -309,8 +352,8 @@ export const makeMethodHandle = <const Spec extends OpcuaMethodSpec>(
     const handle = {
       objectId: spec.objectId,
       methodId: spec.methodId,
-      inputSchema: spec.inputSchema,
-      outputSchema: spec.outputSchema,
+      input: spec.input,
+      output: spec.output,
       includeRaw: spec.includeRaw,
       metadata,
       capabilities: Capabilities.call,
@@ -323,7 +366,7 @@ export const makeMethodHandle = <const Spec extends OpcuaMethodSpec>(
       call: (
         input: InputOfMethodSpec<Spec>,
         options?: OpcuaMethodCallOptions,
-      ) => callMethodHandle(session, handle, input, options),
+      ) => callMethodHandle(session, handle, input, structureRuntime, options),
     } as OpcuaMethodHandle<
       InputOfMethodSpec<Spec>,
       OutputOfMethodSpec<Spec>,
@@ -342,10 +385,16 @@ export const callMethodHandle = <
   session: ClientSession,
   handle: OpcuaMethodHandle<Input, Output, ObjectId, MethodId>,
   input: Input,
+  structureRuntime: OpcuaStructureRuntime,
   options?: OpcuaMethodCallOptions,
 ) =>
   Effect.gen(function* () {
-    const preflight = yield* preflightMethodCall(handle, input, options);
+    const preflight = yield* preflightMethodCall(
+      handle,
+      input,
+      structureRuntime,
+      options,
+    );
     const result = yield* Effect.tryPromise({
       try: () => session.call(preflight.request),
       catch: (cause) =>
@@ -355,7 +404,7 @@ export const callMethodHandle = <
           cause,
         }),
     });
-    return methodResultFromRaw(handle, preflight, result);
+    return methodResultFromRaw(handle, preflight, result, structureRuntime);
   });
 
 export const callMethodHandles = <
@@ -365,12 +414,18 @@ export const callMethodHandles = <
   entries: {
     readonly [Index in keyof Handles]: MethodCallEntry<Handles[Index]>;
   },
+  structureRuntime: OpcuaStructureRuntime,
 ) =>
   Effect.gen(function* () {
     const preflights: Array<MethodPreflight> = [];
     for (const entry of entries) {
       preflights.push(
-        yield* preflightMethodCall(entry.handle, entry.input, entry.options),
+        yield* preflightMethodCall(
+          entry.handle,
+          entry.input,
+          structureRuntime,
+          entry.options,
+        ),
       );
     }
     const results = yield* Effect.tryPromise({
@@ -389,7 +444,12 @@ export const callMethodHandles = <
       );
     }
     return entries.map((entry, index) =>
-      methodResultFromRaw(entry.handle, preflights[index]!, results[index]!),
+      methodResultFromRaw(
+        entry.handle,
+        preflights[index]!,
+        results[index]!,
+        structureRuntime,
+      ),
     ) as MethodCallHandlesResult<Handles>;
   });
 
@@ -401,12 +461,23 @@ const preflightMethodCall = <
 >(
   handle: OpcuaMethodHandle<Input, Output, ObjectId, MethodId>,
   input: Input,
+  structureRuntime: OpcuaStructureRuntime,
   options?: OpcuaMethodCallOptions,
-): Effect.Effect<MethodPreflight, OpcuaMethodInputError> =>
-  Effect.suspend(() => {
+): Effect.Effect<MethodPreflight, OpcuaMethodInputError | OpcuaServiceError> =>
+  Effect.gen(function* () {
+    if (
+      handle.metadata.inputMapping.some(
+        (mapping) => mapping.field._tag === "Structure",
+      ) ||
+      handle.metadata.outputMapping.some(
+        (mapping) => mapping.field._tag === "Structure",
+      )
+    ) {
+      yield* structureRuntime.ensureInitialized();
+    }
     const inputRecord = objectRecord(input);
     if (!inputRecord) {
-      return Effect.fail(
+      return yield* Effect.fail(
         new OpcuaMethodInputError({
           objectId: handle.objectId,
           methodId: handle.methodId,
@@ -417,46 +488,94 @@ const preflightMethodCall = <
       );
     }
     const keyError = validateInputKeys(handle, inputRecord, input);
-    if (keyError) return Effect.fail(keyError);
-
-    let encodedRecord: Record<string, unknown>;
-    try {
-      const encoded = handle.inputSchema
-        ? encodeWithSchema(handle.inputSchema, input)
-        : inputRecord;
-      const record = objectRecord(encoded);
-      if (!record) {
-        throw new TypeError("encoded input must be an object");
-      }
-      encodedRecord = record;
-    } catch (error) {
-      return Effect.fail(
-        new OpcuaMethodInputError({
-          objectId: handle.objectId,
-          methodId: handle.methodId,
-          input,
-          phase: handle.inputSchema ? "SchemaEncoding" : "Encoding",
-          error,
-        }),
-      );
-    }
+    if (keyError) return yield* Effect.fail(keyError);
 
     const inputArguments: Array<Variant> = [];
     for (const mapping of handle.metadata.inputMapping) {
       const argument = handle.metadata.inputArguments[mapping.index]!;
-      try {
-        const value = handle.inputSchema
-          ? encodedRecord[mapping.key]
-          : encodeDynamicValue(
-              encodedRecord[mapping.key],
-              codecMetadata(argument),
-            );
-        inputArguments[mapping.index] = makeVariantFromMetadata(
-          codecMetadata(argument),
-          value,
-        );
-      } catch (error) {
-        return Effect.fail(
+      const rawValue = inputRecord[mapping.key];
+      const variant = yield* (
+        encodeMethodArgument(
+          handle,
+          input,
+          mapping,
+          argument,
+          rawValue,
+          structureRuntime,
+        ) as Effect.Effect<Variant, unknown>
+      ).pipe(
+        Effect.mapError((error) =>
+          isOpcuaMethodInputError(error)
+            ? error
+            : new OpcuaMethodInputError({
+                objectId: handle.objectId,
+                methodId: handle.methodId,
+                input,
+                phase: "Encoding",
+                argumentKey: mapping.key,
+                argumentIndex: mapping.index,
+                error,
+              }),
+        ),
+      );
+      inputArguments[mapping.index] = variant;
+    }
+
+    return {
+      request: {
+        objectId: handle.raw.objectId,
+        methodId: handle.raw.methodId,
+        inputArguments,
+      },
+      includeRaw: options?.includeRaw ?? handle.includeRaw ?? false,
+    };
+  }) as Effect.Effect<
+    MethodPreflight,
+    OpcuaMethodInputError | OpcuaServiceError
+  >;
+
+const encodeMethodArgument = (
+  handle: AnyMethodHandle,
+  input: unknown,
+  mapping: OpcuaMethodArgumentMapping,
+  argument: OpcuaMethodArgumentMetadata,
+  value: unknown,
+  structureRuntime: OpcuaStructureRuntime,
+) => {
+  const field = mapping.field;
+  switch (field._tag) {
+    case "Schema":
+      return Effect.try({
+        try: () =>
+          makeVariantFromMetadata(
+            codecMetadata(argument),
+            encodeWithSchema(field.schema, value),
+          ),
+        catch: (error) =>
+          new OpcuaMethodInputError({
+            objectId: handle.objectId,
+            methodId: handle.methodId,
+            input,
+            phase: "SchemaEncoding",
+            argumentKey: mapping.key,
+            argumentIndex: mapping.index,
+            error,
+          }),
+      });
+    case "Structure":
+      return structureRuntime.variantFromStructure(
+        handle.methodId,
+        field.structure,
+        value,
+      );
+    case "Dynamic":
+      return Effect.try({
+        try: () =>
+          makeVariantFromMetadata(
+            codecMetadata(argument),
+            encodeDynamicValue(value, codecMetadata(argument)),
+          ),
+        catch: (error) =>
           new OpcuaMethodInputError({
             objectId: handle.objectId,
             methodId: handle.methodId,
@@ -466,19 +585,18 @@ const preflightMethodCall = <
             argumentIndex: mapping.index,
             error,
           }),
-        );
-      }
-    }
+      });
+  }
+};
 
-    return Effect.succeed({
-      request: {
-        objectId: handle.raw.objectId,
-        methodId: handle.raw.methodId,
-        inputArguments,
-      },
-      includeRaw: options?.includeRaw ?? handle.includeRaw ?? false,
-    });
-  });
+const isOpcuaMethodInputError = (
+  error: unknown,
+): error is OpcuaMethodInputError =>
+  Boolean(
+    error &&
+    typeof error === "object" &&
+    (error as { readonly _tag?: string })._tag === "OpcuaMethodInputError",
+  );
 
 const methodResultFromRaw = <
   Input,
@@ -489,6 +607,7 @@ const methodResultFromRaw = <
   handle: OpcuaMethodHandle<Input, Output, ObjectId, MethodId>,
   preflight: MethodPreflight,
   result: CallMethodResult,
+  structureRuntime: OpcuaStructureRuntime,
 ): OpcuaMethodCallResult<Output, ObjectId, MethodId> => {
   const raw = preflight.includeRaw
     ? { request: preflight.request, result }
@@ -507,10 +626,7 @@ const methodResultFromRaw = <
   }
 
   try {
-    const outputObject = outputObjectFromResult(handle, result);
-    const output = handle.outputSchema
-      ? decodeWithSchema(handle.outputSchema, outputObject)
-      : outputObject;
+    const output = outputObjectFromResult(handle, result, structureRuntime);
     return {
       _tag: "Called",
       objectId: handle.objectId,
@@ -622,13 +738,13 @@ const normalizeArguments = (
         description: argument.description
           ? normalizeLocalizedText(argument.description)
           : undefined,
-        dataTypeNodeId: normalizeNodeId(dataTypeNodeId),
-        dataType: DataType[builtInDataType] ?? String(builtInDataType),
+        declaredDataType: normalizeNodeId(dataTypeNodeId),
+        builtInDataType: DataType[builtInDataType] ?? String(builtInDataType),
         valueRank: argument.valueRank ?? -1,
         arrayDimensions: argument.arrayDimensions ?? undefined,
         raw: {
           argument,
-          dataType: dataTypeNodeId,
+          declaredDataType: dataTypeNodeId,
           builtInDataType,
         },
       } satisfies OpcuaMethodArgumentMetadata;
@@ -639,11 +755,11 @@ const mappingOrFail = (
   operation: string,
   nodeId: NodeIdString,
   arguments_: ReadonlyArray<OpcuaMethodArgumentMetadata>,
-  explicitMap: OpcuaMethodArgumentMap | undefined,
+  fields: Readonly<Record<string, OpcuaMethodFieldSpec<unknown>>> | undefined,
 ) =>
   Effect.suspend(() => {
-    const result = explicitMap
-      ? explicitMapping(arguments_, explicitMap)
+    const result = fields
+      ? explicitMapping(arguments_, fields)
       : defaultMapping(arguments_);
     if (result instanceof OpcuaConfigurationError) {
       return Effect.fail(
@@ -671,18 +787,27 @@ const defaultMapping = (
       });
     }
     seenNames.add(argumentName);
-    mapping.push({ key: argumentName, index, argumentName });
+    mapping.push({
+      key: argumentName,
+      index,
+      argumentName,
+      field: { _tag: "Dynamic" },
+    });
   }
   return mapping;
 };
 
 const explicitMapping = (
   arguments_: ReadonlyArray<OpcuaMethodArgumentMetadata>,
-  explicitMap: OpcuaMethodArgumentMap,
+  fields: Readonly<Record<string, OpcuaMethodFieldSpec<unknown>>>,
 ) => {
   const usedIndexes = new Set<number>();
   const mapping: Array<OpcuaMethodArgumentMapping> = [];
-  for (const [key, selector] of Object.entries(explicitMap)) {
+  for (const [key, fieldSpec] of Object.entries(fields)) {
+    const field = normalizeMethodFieldSpec(fieldSpec);
+    const selectorError = methodFieldSelectorError(key, field);
+    if (selectorError) return selectorError;
+    const selector = field.opcuaArgumentIndex ?? field.opcuaArgumentName ?? key;
     const matches =
       typeof selector === "number"
         ? [selector]
@@ -711,19 +836,98 @@ const explicitMapping = (
       });
     }
     usedIndexes.add(index);
+    const normalized = field.normalized;
+    if (normalized._tag === "Structure") {
+      const structureError = validateStructureMetadata(
+        "methodHandle.argumentMap",
+        arguments_[index]!.name,
+        {
+          valueRank: arguments_[index]!.valueRank,
+          raw: {
+            declaredDataType: arguments_[index]!.raw.declaredDataType,
+            builtInDataType: arguments_[index]!.raw.builtInDataType,
+          },
+        },
+        normalized.structure,
+      );
+      if (structureError) return structureError;
+    }
     mapping.push({
       key,
       index,
       argumentName: arguments_[index]!.name,
+      field: normalized,
     });
   }
   if (usedIndexes.size !== arguments_.length) {
     return new OpcuaConfigurationError({
       operation: "methodHandle.argumentMap",
-      cause: "Explicit argument map must cover every argument",
+      cause: "Method field specs must cover every argument",
     });
   }
   return mapping;
+};
+
+const normalizeMethodFieldSpec = (
+  spec: OpcuaMethodFieldSpec<unknown>,
+): {
+  readonly opcuaArgumentName?: string;
+  readonly opcuaArgumentIndex?: number;
+  readonly normalized: NormalizedMethodFieldSpec;
+} => {
+  if (isOpcuaStructureCodec(spec) || isOpcuaStructureArrayCodec(spec)) {
+    return { normalized: { _tag: "Structure", structure: spec } };
+  }
+  const record = objectRecord(spec);
+  if (record && ("schema" in record || "structure" in record)) {
+    if (record.structure) {
+      return {
+        opcuaArgumentName:
+          typeof record.opcuaArgumentName === "string"
+            ? record.opcuaArgumentName
+            : undefined,
+        opcuaArgumentIndex:
+          typeof record.opcuaArgumentIndex === "number"
+            ? record.opcuaArgumentIndex
+            : undefined,
+        normalized: {
+          _tag: "Structure",
+          structure: record.structure as AnyStructureSpec,
+        },
+      };
+    }
+    return {
+      opcuaArgumentName:
+        typeof record.opcuaArgumentName === "string"
+          ? record.opcuaArgumentName
+          : undefined,
+      opcuaArgumentIndex:
+        typeof record.opcuaArgumentIndex === "number"
+          ? record.opcuaArgumentIndex
+          : undefined,
+      normalized: { _tag: "Schema", schema: record.schema as AnySchema },
+    };
+  }
+  return { normalized: { _tag: "Schema", schema: spec as AnySchema } };
+};
+
+const methodFieldSelectorError = (
+  key: string,
+  field: {
+    readonly opcuaArgumentName?: string;
+    readonly opcuaArgumentIndex?: number;
+  },
+) => {
+  if (
+    field.opcuaArgumentName !== undefined &&
+    field.opcuaArgumentIndex !== undefined
+  ) {
+    return new OpcuaConfigurationError({
+      operation: "methodHandle.argumentMap",
+      cause: `Argument field ${key} cannot use both opcuaArgumentName and opcuaArgumentIndex`,
+    });
+  }
+  return undefined;
 };
 
 const coerceNodeIdOrFail = (operation: string, nodeId: unknown) =>
@@ -865,14 +1069,36 @@ const validateInputKeys = (
 const outputObjectFromResult = (
   handle: AnyMethodHandle,
   result: CallMethodResult,
+  structureRuntime: OpcuaStructureRuntime,
 ) => {
   const output: Record<string, unknown> = {};
   const outputArguments = result.outputArguments ?? [];
   for (const mapping of handle.metadata.outputMapping) {
     const variant = outputArguments[mapping.index];
-    output[mapping.key] = handle.outputSchema
-      ? variant?.value
-      : decodeDynamicValue(variant?.value, variant);
+    switch (mapping.field._tag) {
+      case "Schema":
+        output[mapping.key] = decodeWithSchema(
+          mapping.field.schema,
+          variant?.value,
+        );
+        break;
+      case "Structure":
+        output[mapping.key] = isOpcuaStructureArrayCodec(
+          mapping.field.structure,
+        )
+          ? structureRuntime.decodeStructureArray(
+              mapping.field.structure,
+              variant?.value,
+            )
+          : structureRuntime.decodeStructure(
+              mapping.field.structure,
+              variant?.value,
+            );
+        break;
+      case "Dynamic":
+        output[mapping.key] = decodeDynamicValue(variant?.value, variant);
+        break;
+    }
   }
   return output;
 };

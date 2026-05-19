@@ -35,12 +35,14 @@ import {
   type OpcuaStatusInfo,
 } from "./normalize.js";
 import {
+  hasStructureSpec,
   sampleFromDataValue,
-  type AnySchema,
   type OpcuaAnyValueSample,
   type OpcuaValueSample,
+  type ValueSpec,
   type ValueOfSpec,
 } from "./values.js";
+import type { OpcuaStructureRuntime } from "./structure-runtime.js";
 
 export type ClientBufferPolicy =
   | { readonly _tag: "Sliding"; readonly capacity: number }
@@ -104,13 +106,7 @@ export const MonitorValueFilter = {
   }),
 };
 
-export type MonitorValueSpec<
-  Id extends string = string,
-  S extends AnySchema | undefined = AnySchema | undefined,
-> = {
-  readonly nodeId: Id;
-  readonly schema?: S;
-  readonly includeRaw?: boolean;
+export type MonitorValueSpec<Id extends string = string> = ValueSpec<Id> & {
   readonly samplingInterval?: Duration.Duration;
   readonly filter?: MonitorValueFilter;
 };
@@ -211,6 +207,7 @@ export type OpcuaSubscription = {
 export const makeSubscription = (
   raw: ClientSubscription,
   events: PubSub.PubSub<OpcuaSubscriptionEvent>,
+  structureRuntime?: OpcuaStructureRuntime,
 ): OpcuaSubscription => {
   const finalizingMonitorGroups = new WeakSet<ClientMonitoredItemGroup>();
 
@@ -225,6 +222,9 @@ export const makeSubscription = (
           if (duplicate) return yield* Effect.fail(duplicate);
           const bufferError = bufferPolicyError(options.clientBuffer);
           if (bufferError) return yield* Effect.fail(bufferError);
+          if (structureRuntime && specs.some(hasStructureSpec)) {
+            yield* structureRuntime.ensureInitialized();
+          }
           const queue = yield* makeQueue<
             OpcuaAnyValueSample,
             OpcuaMonitorCreateError
@@ -250,6 +250,7 @@ export const makeSubscription = (
               queue,
               options,
               finalizingMonitorGroups,
+              structureRuntime,
             );
           }
           publishUnsafe(events, {
@@ -308,6 +309,9 @@ export const makeSubscription = (
         Effect.gen(function* () {
           const results: Array<OpcuaMonitorAddResult> = [];
           for (const spec of specs) {
+            if (structureRuntime && hasStructureSpec(spec)) {
+              yield* structureRuntime.ensureInitialized();
+            }
             const effective = effectiveMonitorOptions(spec, options);
             const current = (yield* Ref.get(registry)).get(spec.nodeId);
             if (current) {
@@ -377,7 +381,7 @@ export const makeSubscription = (
                 events,
                 sampleQueue,
                 options.clientBuffer,
-                sampleFromDataValue(spec, dataValue),
+                sampleFromDataValue(spec, dataValue, structureRuntime),
               );
             });
             group.on("terminated", (cause) => {
@@ -727,6 +731,7 @@ const wireMonitorGroup = (
   queue: Queue.Queue<OpcuaAnyValueSample, OpcuaMonitorCreateError>,
   options: MonitorValuesOptions,
   finalizingMonitorGroups: WeakSet<ClientMonitoredItemGroup>,
+  structureRuntime?: OpcuaStructureRuntime,
 ) => {
   group.on("changed", (_item, dataValue, index) => {
     const spec = groupSpec.entries[index]?.spec;
@@ -736,7 +741,7 @@ const wireMonitorGroup = (
       events,
       queue,
       options.clientBuffer,
-      sampleFromDataValue(spec, dataValue),
+      sampleFromDataValue(spec, dataValue, structureRuntime),
     );
   });
   group.on("err", (message) => {

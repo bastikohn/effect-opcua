@@ -41,6 +41,9 @@ importers:
       node-opcua:
         specifier: ^2.170.0
         version: 2.172.0
+      node-opcua-address-space:
+        specifier: ^2.170.0
+        version: 2.172.0
 
   examples/tui:
     dependencies:

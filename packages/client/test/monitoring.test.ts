@@ -6,10 +6,20 @@ import {
   MonitorValueDeadband,
   MonitorValueFilter,
   OpcuaSession,
+  OpcuaStructure,
 } from "../src/index.js";
 import { makeLiveTestContext } from "./live.js";
 
 const { runLive } = makeLiveTestContext(4843);
+const ScanSettings = OpcuaStructure.make({
+  name: "ScanSettings",
+  dataTypeId: "ns=1;i=3010",
+  schema: Schema.Struct({
+    duration: Schema.Number,
+    cycles: Schema.Number,
+    dataAvailable: Schema.Boolean,
+  }),
+});
 
 describe("monitoring", () => {
   it("builds monitor buffer policies and filters", () => {
@@ -114,5 +124,58 @@ describe("monitoring", () => {
     expect(result.sample.length).toBe(1);
     expect(result.removed[0]).toMatchObject({ _tag: "Removed" });
     expect(result.notMonitoring[0]).toMatchObject({ _tag: "NotMonitoring" });
+  }, 20_000);
+
+  it("streams structure samples from monitorValues and valueMonitor", async () => {
+    const result = await runLive(
+      Effect.gen(function* () {
+        const session = yield* OpcuaSession;
+        const subscription = yield* session.createSubscription({
+          publishingInterval: Duration.millis(100),
+        });
+        const direct = yield* subscription
+          .monitorValues(
+            [
+              {
+                nodeId: "ns=1;s=MyMachine.ScanSettings",
+                structure: ScanSettings,
+              },
+            ] as const,
+            {
+              samplingInterval: Duration.millis(50),
+              queueSize: 5,
+              discardOldest: true,
+              clientBuffer: ClientBufferPolicy.sliding(10),
+            },
+          )
+          .pipe(Stream.take(1), Stream.runCollect);
+        const monitor = yield* subscription.valueMonitor({
+          samplingInterval: Duration.millis(50),
+          queueSize: 5,
+          discardOldest: true,
+          clientBuffer: ClientBufferPolicy.sliding(10),
+        });
+        yield* monitor.add([
+          {
+            nodeId: "ns=1;s=MyMachine.ScanSettings",
+            structure: ScanSettings,
+          },
+        ]);
+        const dynamic = yield* monitor.samples.pipe(
+          Stream.take(1),
+          Stream.runCollect,
+        );
+        return { direct, dynamic };
+      }),
+    );
+
+    expect(result.direct[0]).toMatchObject({
+      _tag: "Value",
+      value: expect.objectContaining({ cycles: expect.any(Number) }),
+    });
+    expect(result.dynamic[0]).toMatchObject({
+      _tag: "Value",
+      value: expect.objectContaining({ cycles: expect.any(Number) }),
+    });
   }, 20_000);
 });

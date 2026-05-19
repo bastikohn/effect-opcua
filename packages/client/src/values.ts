@@ -3,6 +3,7 @@ import {
   AttributeIds,
   DataType,
   NodeId,
+  VariantArrayType,
   coerceNodeId,
   type ClientSession,
   type DataValue,
@@ -43,6 +44,17 @@ import {
   type AnySchema,
   type SchemaType,
 } from "./codecs.js";
+import {
+  validateStructureMetadata,
+  type OpcuaStructureRuntime,
+} from "./structure-runtime.js";
+import {
+  isOpcuaStructureArrayCodec,
+  isOpcuaStructureCodec,
+  type AnyStructureSpec,
+  type OpcuaStructureArrayCodec,
+  type OpcuaStructureCodec,
+} from "./structures.js";
 
 export type { AnySchema, SchemaType } from "./codecs.js";
 
@@ -109,27 +121,24 @@ export type OpcuaWriteValuesResult<Ids extends ReadonlyArray<string>> = {
 };
 export type OpcuaWriteValueSpec<
   Id extends string = string,
-  S extends AnySchema | undefined = AnySchema | undefined,
-> = ValueSpec<Id, S> & {
-  readonly value: ValueOfSpec<ValueSpec<Id, S>>;
+  Spec extends ValueSpec<Id> = ValueSpec<Id>,
+> = Spec & {
+  readonly value: ValueOfSpec<Spec>;
 };
 export type WriteValueSpec<
   Id extends string = string,
-  S extends AnySchema | undefined = AnySchema | undefined,
-> = OpcuaWriteValueSpec<Id, S>;
+  Spec extends ValueSpec<Id> = ValueSpec<Id>,
+> = OpcuaWriteValueSpec<Id, Spec>;
 export type WriteValuesResult<Specs extends ReadonlyArray<ValueSpec>> = {
-  readonly [Index in keyof Specs]: Specs[Index] extends ValueSpec<
-    infer Id,
-    AnySchema | undefined
-  >
+  readonly [Index in keyof Specs]: Specs[Index] extends ValueSpec<infer Id>
     ? OpcuaWriteResult<Id>
     : never;
 };
 
 export type OpcuaValueMetadata = {
   readonly nodeId: NodeIdString;
-  readonly dataType: string;
-  readonly dataTypeNodeId: OpcuaNodeIdInfo;
+  readonly declaredDataType: OpcuaNodeIdInfo;
+  readonly builtInDataType: string;
   readonly valueRank: number;
   readonly arrayDimensions?: ReadonlyArray<number>;
   readonly accessLevel: number;
@@ -141,33 +150,44 @@ export type OpcuaValueMetadata = {
     readonly userWritable: boolean;
   };
   readonly raw: {
-    readonly dataType: DataType;
-    readonly dataTypeNodeId: NodeId;
+    readonly declaredDataType: NodeId;
+    readonly builtInDataType: DataType;
   };
 };
 
-export type OpcuaValueSpec<
-  Id extends string = string,
-  S extends AnySchema | undefined = AnySchema | undefined,
-> = {
-  readonly nodeId: Id;
-  readonly schema?: S;
-  readonly includeRaw?: boolean;
-};
-export type ValueSpec<
-  Id extends string = string,
-  S extends AnySchema | undefined = AnySchema | undefined,
-> = OpcuaValueSpec<Id, S>;
-export type ValueOfSpec<Spec> = Spec extends { readonly schema: infer S }
-  ? S extends AnySchema
-    ? SchemaType<S>
-    : OpcuaDynamicValue
-  : OpcuaDynamicValue;
+export type OpcuaValueSpec<Id extends string = string> =
+  | {
+      readonly nodeId: Id;
+      readonly includeRaw?: boolean;
+      readonly schema?: undefined;
+      readonly structure?: undefined;
+    }
+  | {
+      readonly nodeId: Id;
+      readonly schema: AnySchema;
+      readonly includeRaw?: boolean;
+      readonly structure?: never;
+    }
+  | {
+      readonly nodeId: Id;
+      readonly structure: AnyStructureSpec;
+      readonly includeRaw?: boolean;
+      readonly schema?: never;
+    };
+export type ValueSpec<Id extends string = string> = OpcuaValueSpec<Id>;
+export type ValueOfSpec<Spec> = Spec extends {
+  readonly structure: OpcuaStructureCodec<infer A>;
+}
+  ? A
+  : Spec extends { readonly structure: OpcuaStructureArrayCodec<infer A> }
+    ? ReadonlyArray<A>
+    : Spec extends { readonly schema: infer S }
+      ? S extends AnySchema
+        ? SchemaType<S>
+        : OpcuaDynamicValue
+      : OpcuaDynamicValue;
 export type ReadValuesResult<Specs extends ReadonlyArray<ValueSpec>> = {
-  readonly [Index in keyof Specs]: Specs[Index] extends ValueSpec<
-    infer Id,
-    AnySchema | undefined
-  >
+  readonly [Index in keyof Specs]: Specs[Index] extends ValueSpec<infer Id>
     ? OpcuaValueSample<ValueOfSpec<Specs[Index]>, Id>
     : never;
 };
@@ -203,11 +223,12 @@ export type OpcuaValueHandle<
 > = {
   readonly nodeId: Id;
   readonly schema?: AnySchema;
+  readonly structure?: AnyStructureSpec;
   readonly metadata: OpcuaValueMetadata;
   readonly capabilities: Caps;
   readonly raw: {
     readonly nodeId: NodeId;
-    readonly dataType: DataType;
+    readonly builtInDataType: DataType;
   };
 } & ReadCapabilityPart<A, Caps, Id> &
   WriteCapabilityPart<A, Caps, Id>;
@@ -245,25 +266,21 @@ export const readDataValue = (session: ClientSession, nodeId: NodeIdString) =>
       new OpcuaServiceError({ operation: "readValue", nodeId, cause }),
   });
 
-export const sampleFromDataValue = <
-  Id extends string,
-  S extends AnySchema | undefined,
->(
-  spec: ValueSpec<Id, S>,
+export const sampleFromDataValue = <Id extends string>(
+  spec: ValueSpec<Id>,
   dataValue: DataValue,
-): OpcuaValueSample<ValueOfSpec<ValueSpec<Id, S>>, Id> => {
+  structureRuntime?: OpcuaStructureRuntime,
+): OpcuaValueSample<ValueOfSpec<ValueSpec<Id>>, Id> => {
   const base = sampleBase(spec.nodeId, dataValue, spec.includeRaw ?? false);
   if (!isGood(dataValue.statusCode)) {
     return { _tag: "NonGoodStatus", ...base };
   }
   try {
-    const value = spec.schema
-      ? decodeWithSchema(spec.schema, dataValue.value?.value)
-      : decodeDynamicValue(dataValue.value?.value, dataValue.value);
+    const value = decodeSpecValue(spec, dataValue, structureRuntime);
     return {
       _tag: "Value",
       ...base,
-      value: value as ValueOfSpec<ValueSpec<Id, S>>,
+      value: value as ValueOfSpec<ValueSpec<Id>>,
     };
   } catch (error) {
     return {
@@ -272,6 +289,40 @@ export const sampleFromDataValue = <
       error: error as Schema.SchemaError,
     };
   }
+};
+
+const decodeSpecValue = (
+  spec: ValueSpec,
+  dataValue: DataValue,
+  structureRuntime?: OpcuaStructureRuntime,
+) => {
+  if (spec.structure) {
+    if (!structureRuntime) {
+      throw new TypeError("Structure runtime is required");
+    }
+    if (dataValue.value?.dataType !== DataType.ExtensionObject) {
+      throw new TypeError("Expected ExtensionObject Variant");
+    }
+    if (isOpcuaStructureArrayCodec(spec.structure)) {
+      if (dataValue.value.arrayType !== VariantArrayType.Array) {
+        throw new TypeError("Expected ExtensionObject array Variant");
+      }
+      return structureRuntime.decodeStructureArray(
+        spec.structure,
+        dataValue.value.value,
+      );
+    }
+    if (dataValue.value?.arrayType !== VariantArrayType.Scalar) {
+      throw new TypeError("Expected scalar ExtensionObject Variant");
+    }
+    return structureRuntime.decodeStructure(
+      spec.structure,
+      dataValue.value?.value,
+    );
+  }
+  return spec.schema
+    ? decodeWithSchema(spec.schema, dataValue.value?.value)
+    : decodeDynamicValue(dataValue.value?.value, dataValue.value);
 };
 
 const sampleBase = <Id extends string>(
@@ -387,8 +438,8 @@ export const discoverMetadata = (
     const dataTypeNodeId = dataTypeValue.value.value as NodeId;
     return {
       nodeId,
-      dataType: DataType[builtInDataType] ?? String(builtInDataType),
-      dataTypeNodeId: normalizeNodeId(dataTypeNodeId),
+      declaredDataType: normalizeNodeId(dataTypeNodeId),
+      builtInDataType: DataType[builtInDataType] ?? String(builtInDataType),
       valueRank: valueRankValue.value.value as number,
       arrayDimensions:
         arrayDimensionsValue &&
@@ -407,8 +458,8 @@ export const discoverMetadata = (
           userAccessLevel === undefined || hasAccess(userAccessLevel, "write"),
       },
       raw: {
-        dataType: builtInDataType,
-        dataTypeNodeId,
+        declaredDataType: dataTypeNodeId,
+        builtInDataType,
       },
     };
   });
@@ -418,16 +469,29 @@ export const writeByMetadata = (
   input: {
     readonly nodeId: NodeIdString;
     readonly schema?: AnySchema;
+    readonly structure?: AnyStructureSpec;
     readonly value: unknown;
     readonly metadata: OpcuaValueMetadata;
+    readonly structureRuntime?: OpcuaStructureRuntime;
   },
 ) =>
   Effect.gen(function* () {
-    const encoded = yield* encodeValue(
+    if (input.structure) {
+      const structureError = validateStructureMetadata(
+        "writeValue.structure",
+        input.nodeId,
+        input.metadata,
+        input.structure,
+      );
+      if (structureError) return yield* Effect.fail(structureError);
+    }
+    const variant = yield* makeVariant(
       input.nodeId,
-      input.schema,
-      input.value,
       input.metadata,
+      input.value,
+      input.schema,
+      input.structure,
+      input.structureRuntime,
     );
     const statusCode = yield* Effect.tryPromise({
       try: () =>
@@ -435,7 +499,7 @@ export const writeByMetadata = (
           nodeId: coerceNodeId(input.nodeId),
           attributeId: AttributeIds.Value,
           value: {
-            value: makeVariant(input.metadata, encoded),
+            value: variant,
           },
         }),
       catch: (cause) =>
@@ -462,14 +526,68 @@ export const encodeValue = (
       )
     : Effect.suspend(() => {
         try {
-          return Effect.succeed(encodeDynamicValue(value, metadata));
+          return Effect.succeed(
+            encodeDynamicValue(value, {
+              raw: { dataType: metadata.raw.builtInDataType },
+              valueRank: metadata.valueRank,
+              arrayDimensions: metadata.arrayDimensions,
+            }),
+          );
         } catch (error) {
           return Effect.fail(new OpcuaEncodeError({ nodeId, value, error }));
         }
       });
 
-export const makeVariant = (metadata: OpcuaValueMetadata, value: unknown) =>
-  makeVariantFromMetadata(metadata, value);
+export const makeVariant = (
+  nodeId: NodeIdString,
+  metadata: OpcuaValueMetadata,
+  value: unknown,
+  schema?: AnySchema,
+  structure?: AnyStructureSpec,
+  structureRuntime?: OpcuaStructureRuntime,
+) => {
+  if (structure) {
+    if (!structureRuntime) {
+      return Effect.fail(
+        new OpcuaEncodeError({
+          nodeId,
+          value,
+          error: "Structure runtime is required",
+        }),
+      );
+    }
+    return structureRuntime.variantFromStructure(nodeId, structure, value);
+  }
+  return encodeValue(nodeId, schema, value, metadata).pipe(
+    Effect.map((encoded) =>
+      makeVariantFromMetadata(
+        {
+          ...metadata,
+          raw: { dataType: metadata.raw.builtInDataType },
+        },
+        encoded,
+      ),
+    ),
+  );
+};
+
+export const validateValueStructureSpec = (
+  operation: string,
+  spec: ValueSpec,
+  metadata: OpcuaValueMetadata,
+) =>
+  spec.structure
+    ? validateStructureMetadata(
+        operation,
+        spec.nodeId,
+        metadata,
+        spec.structure,
+      )
+    : undefined;
+
+export const hasStructureSpec = (spec: ValueSpec) =>
+  isOpcuaStructureCodec(spec.structure) ||
+  isOpcuaStructureArrayCodec(spec.structure);
 
 export const writeResult = <Id extends string>(
   nodeId: Id,

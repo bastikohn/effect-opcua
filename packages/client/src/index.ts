@@ -60,6 +60,16 @@ export type {
   WriteValueSpec,
   WriteValuesResult,
 } from "./values.js";
+export {
+  OpcuaStructure,
+  isOpcuaStructureArrayCodec,
+  isOpcuaStructureCodec,
+} from "./structures.js";
+export type {
+  AnyStructureSpec,
+  OpcuaStructureArrayCodec,
+  OpcuaStructureCodec,
+} from "./structures.js";
 export type {
   InputOfMethodHandle,
   InputOfMethodSpec,
@@ -67,9 +77,9 @@ export type {
   MethodCallHandlesResult,
   MethodIdOfMethodHandle,
   ObjectIdOfMethodHandle,
-  OpcuaMethodArgumentMap,
   OpcuaMethodArgumentMapping,
   OpcuaMethodArgumentMetadata,
+  OpcuaMethodFieldSpec,
   OpcuaMethodArgumentResult,
   OpcuaMethodCallRaw,
   OpcuaMethodCallOptions,

@@ -7,7 +7,6 @@ import {
   type OpcuaSession,
   type OpcuaMethodSpec,
   type OpcuaValueHandle,
-  type OpcuaWriteValueSpec,
   type WritableOpcuaValueHandle,
 } from "../src/index.js";
 
@@ -32,7 +31,7 @@ const expectWriteValuesTypes = (session: OpcuaSession) => {
     nodeId: "ns=1;s=Number",
     schema: Schema.Number,
     value: 123,
-  } satisfies OpcuaWriteValueSpec<"ns=1;s=Number", typeof Schema.Number>;
+  } as const;
 
   session.writeValues([spec]);
 
@@ -63,22 +62,25 @@ const expectMethodTypes = (session: OpcuaSession) => {
   const start = {
     objectId: "ns=1;s=MyMachine",
     methodId: "ns=1;s=MyMachine.Start",
-    inputSchema: Schema.Struct({
+    input: {
       StartSpeed: Schema.Number,
       Force: Schema.Boolean,
-    }),
-    outputSchema: Schema.Struct({
+    },
+    output: {
       Accepted: Schema.Boolean,
-    }),
+    },
   } as const satisfies OpcuaMethodSpec;
 
   session.callMethod({
     ...start,
-    input: { StartSpeed: 1, Force: false },
+    inputValues: { StartSpeed: 1, Force: false },
   });
 
-  // @ts-expect-error method input must match the input schema
-  session.callMethod({ ...start, input: { StartSpeed: "wrong", Force: false } });
+  session.callMethod({
+    ...start,
+    // @ts-expect-error method input must match the input schema
+    inputValues: { StartSpeed: "wrong", Force: false },
+  });
 };
 
 void expectMethodTypes;

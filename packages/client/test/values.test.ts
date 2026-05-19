@@ -2,10 +2,19 @@ import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
 import { StatusCodes } from "node-opcua";
 
-import { Capabilities, OpcuaSession } from "../src/index.js";
+import { Capabilities, OpcuaSession, OpcuaStructure } from "../src/index.js";
 import { makeLiveTestContext } from "./live.js";
 
 const { runLive } = makeLiveTestContext(4842);
+const ScanSettings = OpcuaStructure.make({
+  name: "ScanSettings",
+  dataTypeId: "ns=1;i=3010",
+  schema: Schema.Struct({
+    duration: Schema.Number,
+    cycles: Schema.Number,
+    dataAvailable: Schema.Boolean,
+  }),
+});
 
 describe("values", () => {
   it("returns schema-less normalized samples", async () => {
@@ -144,6 +153,92 @@ describe("values", () => {
     ).rejects.toMatchObject({
       _tag: "OpcuaAccessDeniedError",
       requestedCapability: "write",
+    });
+  });
+
+  it("reads and writes scalar structure values", async () => {
+    const result = await runLive(
+      Effect.gen(function* () {
+        const session = yield* OpcuaSession;
+        const written = yield* session.writeValue({
+          nodeId: "ns=1;s=MyMachine.ScanSettings",
+          structure: ScanSettings,
+          value: { duration: 1500, cycles: 7, dataAvailable: true },
+        });
+        const sample = yield* session.readValue({
+          nodeId: "ns=1;s=MyMachine.ScanSettings",
+          structure: ScanSettings,
+          includeRaw: true,
+        });
+        const handle = yield* session.valueHandle({
+          nodeId: "ns=1;s=MyMachine.ScanSettings",
+          structure: ScanSettings,
+          capabilities: Capabilities.readWrite,
+        });
+        const handleWrite = yield* handle.write({
+          duration: 500,
+          cycles: 2,
+          dataAvailable: false,
+        });
+        const handleRead = yield* handle.read();
+        return { written, sample, handleWrite, handleRead };
+      }),
+    );
+
+    expect(result.written).toMatchObject({ _tag: "Written" });
+    expect(result.sample).toMatchObject({
+      _tag: "Value",
+      value: { duration: 1500, cycles: 7, dataAvailable: true },
+    });
+    expect(
+      result.sample._tag === "Value" && result.sample.raw?.variant,
+    ).toBeDefined();
+    expect(result.handleWrite).toMatchObject({ _tag: "Written" });
+    expect(result.handleRead).toMatchObject({
+      _tag: "Value",
+      value: { duration: 500, cycles: 2, dataAvailable: false },
+    });
+  });
+
+  it("reads and writes structure arrays", async () => {
+    const queue = OpcuaStructure.array(ScanSettings);
+    const values = [
+      { duration: 10, cycles: 1, dataAvailable: true },
+      { duration: 20, cycles: 2, dataAvailable: false },
+    ];
+    const result = await runLive(
+      Effect.gen(function* () {
+        const session = yield* OpcuaSession;
+        const written = yield* session.writeValue({
+          nodeId: "ns=1;s=MyMachine.ScanSettingsQueue",
+          structure: queue,
+          value: values,
+        });
+        const sample = yield* session.readValue({
+          nodeId: "ns=1;s=MyMachine.ScanSettingsQueue",
+          structure: queue,
+        });
+        return { written, sample };
+      }),
+    );
+
+    expect(result.written).toMatchObject({ _tag: "Written" });
+    expect(result.sample).toMatchObject({ _tag: "Value", value: values });
+  });
+
+  it("rejects structure metadata mismatches at handle creation", async () => {
+    await expect(
+      runLive(
+        Effect.gen(function* () {
+          const session = yield* OpcuaSession;
+          return yield* session.valueHandle({
+            nodeId: "ns=1;s=MyMachine.Temperature",
+            structure: ScanSettings,
+          });
+        }),
+      ),
+    ).rejects.toMatchObject({
+      _tag: "OpcuaConfigurationError",
     });
   });
 });

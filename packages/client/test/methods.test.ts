@@ -7,23 +7,33 @@ import {
   OpcuaMethodInputError,
   OpcuaMethodNotExecutableError,
   OpcuaSession,
+  OpcuaStructure,
   type OpcuaMethodSpec,
 } from "../src/index.js";
 import { makeLiveTestContext } from "./live.js";
 
 const { runLive } = makeLiveTestContext(4844);
+const ScanSettings = OpcuaStructure.make({
+  name: "ScanSettings",
+  dataTypeId: "ns=1;i=3010",
+  schema: Schema.Struct({
+    duration: Schema.Number,
+    cycles: Schema.Number,
+    dataAvailable: Schema.Boolean,
+  }),
+});
 
 const StartMethod = {
   objectId: "ns=1;s=MyMachine",
   methodId: "ns=1;s=MyMachine.Start",
-  inputSchema: Schema.Struct({
+  input: {
     StartSpeed: Schema.Number,
     Force: Schema.Boolean,
-  }),
-  outputSchema: Schema.Struct({
+  },
+  output: {
     Accepted: Schema.Boolean,
     JobId: Schema.String,
-  }),
+  },
 } as const satisfies OpcuaMethodSpec;
 
 describe("methods", () => {
@@ -43,8 +53,16 @@ describe("methods", () => {
       userExecutable: true,
     });
     expect(handle.metadata.inputMapping).toEqual([
-      { key: "StartSpeed", index: 0, argumentName: "StartSpeed" },
-      { key: "Force", index: 1, argumentName: "Force" },
+      expect.objectContaining({
+        key: "StartSpeed",
+        index: 0,
+        argumentName: "StartSpeed",
+      }),
+      expect.objectContaining({
+        key: "Force",
+        index: 1,
+        argumentName: "Force",
+      }),
     ]);
     expect(
       handle.metadata.outputArguments.map((argument) => argument.name),
@@ -73,8 +91,17 @@ describe("methods", () => {
         const handle = yield* session.methodHandle({
           objectId: "ns=1;s=MyMachine",
           methodId: "ns=1;s=MyMachine.Start",
-          inputArgumentMap: { startSpeed: "StartSpeed", force: 1 },
-          outputArgumentMap: { accepted: 0, jobId: "JobId" },
+          input: {
+            startSpeed: {
+              opcuaArgumentName: "StartSpeed",
+              schema: Schema.Number,
+            },
+            force: { opcuaArgumentIndex: 1, schema: Schema.Boolean },
+          },
+          output: {
+            accepted: { opcuaArgumentIndex: 0, schema: Schema.Boolean },
+            jobId: { opcuaArgumentName: "JobId", schema: Schema.String },
+          },
         });
         return yield* handle.call({ startSpeed: 120, force: true });
       }),
@@ -94,13 +121,18 @@ describe("methods", () => {
           return yield* session.methodHandle({
             objectId: "ns=1;s=MyMachine",
             methodId: "ns=1;s=MyMachine.Start",
-            inputArgumentMap: { startSpeed: "StartSpeed" },
+            input: {
+              startSpeed: {
+                opcuaArgumentName: "StartSpeed",
+                schema: Schema.Number,
+              },
+            },
           });
         }),
       ),
     ).rejects.toMatchObject({
       _tag: "OpcuaConfigurationError",
-      cause: "Explicit argument map must cover every argument",
+      cause: "Method field specs must cover every argument",
     });
 
     await expect(
@@ -110,13 +142,18 @@ describe("methods", () => {
           return yield* session.methodHandle({
             objectId: "ns=1;s=MyMachine",
             methodId: "ns=1;s=MyMachine.Start",
-            outputArgumentMap: { accepted: "Accepted" },
+            output: {
+              accepted: {
+                opcuaArgumentName: "Accepted",
+                schema: Schema.Boolean,
+              },
+            },
           });
         }),
       ),
     ).rejects.toMatchObject({
       _tag: "OpcuaConfigurationError",
-      cause: "Explicit argument map must cover every argument",
+      cause: "Method field specs must cover every argument",
     });
   });
 
@@ -132,12 +169,12 @@ describe("methods", () => {
         return {
           start: start.metadata.inputArguments.map((argument) => ({
             name: argument.name,
-            dataType: argument.dataType,
+            dataType: argument.builtInDataType,
             valueRank: argument.valueRank,
           })),
           custom: custom.metadata.inputArguments.map((argument) => ({
             name: argument.name,
-            dataType: argument.dataType,
+            dataType: argument.builtInDataType,
             valueRank: argument.valueRank,
           })),
         };
@@ -175,7 +212,10 @@ describe("methods", () => {
         const handle = yield* session.methodHandle({
           objectId: "ns=1;s=MyMachine",
           methodId: "ns=1;s=MyMachine.UnnamedArguments",
-          inputArgumentMap: { first: 0, second: "Named" },
+          input: {
+            first: { opcuaArgumentIndex: 0, schema: Schema.String },
+            second: { opcuaArgumentName: "Named", schema: Schema.String },
+          },
         });
         return yield* handle.call({ first: "a", second: "b" });
       }),
@@ -270,7 +310,8 @@ describe("methods", () => {
         const echoNumber = yield* session.methodHandle({
           objectId: "ns=1;s=MyMachine",
           methodId: "ns=1;s=MyMachine.Echo",
-          outputSchema: Schema.Struct({ Value: Schema.Number }),
+          input: { Value: Schema.String },
+          output: { Value: Schema.Number },
         });
         const nonGood = yield* reject.call({ Value: -1 });
         const decode = yield* echoNumber.call({ Value: "not-a-number" });
@@ -314,7 +355,7 @@ describe("methods", () => {
         const session = yield* OpcuaSession;
         const oneOff = yield* session.callMethod({
           ...StartMethod,
-          input: { StartSpeed: 7, Force: true },
+          inputValues: { StartSpeed: 7, Force: true },
         });
         const echo = yield* session.methodHandle({
           objectId: "ns=1;s=MyMachine",
@@ -355,6 +396,55 @@ describe("methods", () => {
     expect(result.batch[0].raw).toBeDefined();
     expect(result.batch[1].raw).toBeUndefined();
     expect(result.batchCalls).toBe(1);
+  });
+
+  it("calls methods with structure and structure array inputs", async () => {
+    const result = await runLive(
+      Effect.gen(function* () {
+        const session = yield* OpcuaSession;
+        const startScan = yield* session.methodHandle({
+          objectId: "ns=1;s=MyMachine",
+          methodId: "ns=1;s=MyMachine.StartScan",
+          input: {
+            Settings: ScanSettings,
+            DryRun: Schema.Boolean,
+          },
+          output: {
+            Accepted: Schema.Boolean,
+          },
+        });
+        const setQueue = yield* session.methodHandle({
+          objectId: "ns=1;s=MyMachine",
+          methodId: "ns=1;s=MyMachine.SetQueue",
+          input: {
+            Jobs: OpcuaStructure.array(ScanSettings),
+          },
+          output: {
+            Accepted: Schema.Boolean,
+          },
+        });
+        const started = yield* startScan.call({
+          Settings: { duration: 100, cycles: 3, dataAvailable: true },
+          DryRun: false,
+        });
+        const queued = yield* setQueue.call({
+          Jobs: [
+            { duration: 10, cycles: 1, dataAvailable: true },
+            { duration: 20, cycles: 2, dataAvailable: false },
+          ],
+        });
+        return { started, queued };
+      }),
+    );
+
+    expect(result.started).toMatchObject({
+      _tag: "Called",
+      output: { Accepted: true },
+    });
+    expect(result.queued).toMatchObject({
+      _tag: "Called",
+      output: { Accepted: true },
+    });
   });
 
   it("rejects malformed batch call service responses", async () => {

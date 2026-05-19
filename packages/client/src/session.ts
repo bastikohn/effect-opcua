@@ -71,14 +71,14 @@ import { makeSubscription, type OpcuaSubscription } from "./monitoring.js";
 import { isGood } from "./normalize.js";
 import {
   discoverMetadata,
-  encodeValue,
+  hasStructureSpec,
   hasCapability,
   makeVariant,
   readDataValue,
   sampleFromDataValue,
+  validateValueStructureSpec,
   writeByMetadata,
   writeResult,
-  type AnySchema,
   type OpcuaValueHandle,
   type OpcuaValueSample,
   type OpcuaWriteResult,
@@ -103,15 +103,15 @@ import {
   type OpcuaMethodSpec,
   type OutputOfMethodSpec,
 } from "./methods.js";
+import { makeStructureRuntime } from "./structure-runtime.js";
 
 export type OpcuaSession = {
-  readonly readValue: <
-    const Id extends NodeIdString,
-    S extends AnySchema | undefined = undefined,
-  >(
-    input: ValueSpec<Id, S>,
+  readonly readValue: <const Spec extends ValueSpec<NodeIdString>>(
+    input: Spec,
   ) => Effect.Effect<
-    OpcuaValueSample<ValueOfSpec<ValueSpec<Id, S>>, Id>,
+    Spec extends ValueSpec<infer Id>
+      ? OpcuaValueSample<ValueOfSpec<Spec>, Id>
+      : never,
     OpcuaServiceError
   >;
   readonly readValues: <const Specs extends ReadonlyArray<ValueSpec>>(
@@ -121,24 +121,22 @@ export type OpcuaSession = {
     OpcuaConfigurationError | OpcuaServiceError
   >;
   readonly valueHandle: <
-    const Id extends NodeIdString,
-    S extends AnySchema | undefined = undefined,
+    const Spec extends ValueSpec<NodeIdString>,
     const Caps extends CapabilitySet = typeof Capabilities.read,
   >(
-    input: ValueSpec<Id, S> & { readonly capabilities?: Caps },
+    input: Spec & { readonly capabilities?: Caps },
   ) => Effect.Effect<
-    OpcuaValueHandle<ValueOfSpec<ValueSpec<Id, S>>, Caps, Id>,
+    Spec extends ValueSpec<infer Id>
+      ? OpcuaValueHandle<ValueOfSpec<Spec>, Caps, Id>
+      : never,
     OpcuaServiceError | OpcuaAccessDeniedError | OpcuaConfigurationError
   >;
-  readonly writeValue: <
-    const Id extends NodeIdString,
-    S extends AnySchema | undefined = undefined,
-  >(
-    input: ValueSpec<Id, S> & {
-      readonly value: ValueOfSpec<ValueSpec<Id, S>>;
+  readonly writeValue: <const Spec extends ValueSpec<NodeIdString>>(
+    input: Spec & {
+      readonly value: ValueOfSpec<Spec>;
     },
   ) => Effect.Effect<
-    OpcuaWriteResult<Id>,
+    Spec extends ValueSpec<infer Id> ? OpcuaWriteResult<Id> : never,
     | OpcuaConfigurationError
     | OpcuaEncodeError
     | OpcuaServiceError
@@ -182,7 +180,7 @@ export type OpcuaSession = {
     | OpcuaAccessDeniedError
   >;
   readonly callMethod: <const Spec extends OpcuaMethodSpec>(
-    spec: Spec & { readonly input: InputOfMethodSpec<Spec> },
+    spec: Spec & { readonly inputValues: InputOfMethodSpec<Spec> },
     options?: OpcuaMethodCallOptions,
   ) => Effect.Effect<
     OpcuaMethodCallResult<
@@ -282,24 +280,24 @@ export const makeSession = (
   events: PubSub.PubSub<OpcuaSessionEvent>,
 ): OpcuaSession => {
   const browseSemaphore = Semaphore.makeUnsafe(1);
+  const structureRuntime = makeStructureRuntime(raw);
 
-  const readValue = <
-    const Id extends NodeIdString,
-    S extends AnySchema | undefined = undefined,
-  >(
-    input: ValueSpec<Id, S>,
-  ) =>
-    readDataValue(raw, input.nodeId).pipe(
-      Effect.map((dataValue) => sampleFromDataValue(input, dataValue)),
-    ) as Effect.Effect<
-      OpcuaValueSample<ValueOfSpec<ValueSpec<Id, S>>, Id>,
-      OpcuaServiceError
-    >;
+  const readValue: OpcuaSession["readValue"] = (input) =>
+    Effect.gen(function* () {
+      if (hasStructureSpec(input)) {
+        yield* structureRuntime.ensureInitialized();
+      }
+      const dataValue = yield* readDataValue(raw, input.nodeId);
+      return sampleFromDataValue(input, dataValue, structureRuntime);
+    }) as never;
 
   const readValues = <const Specs extends ReadonlyArray<ValueSpec>>(
     specs: Specs,
   ) =>
     Effect.gen(function* () {
+      if (specs.some(hasStructureSpec)) {
+        yield* structureRuntime.ensureInitialized();
+      }
       const dataValues = yield* Effect.tryPromise({
         try: () =>
           raw.read(
@@ -313,27 +311,31 @@ export const makeSession = (
           new OpcuaServiceError({ operation: "readValues", cause }),
       });
       return specs.map((spec, index) =>
-        sampleFromDataValue(spec, dataValues[index]!),
+        sampleFromDataValue(spec, dataValues[index]!, structureRuntime),
       ) as ReadValuesResult<Specs>;
     });
 
-  const valueHandle = <
-    const Id extends NodeIdString,
-    S extends AnySchema | undefined = undefined,
-    const Caps extends CapabilitySet = typeof Capabilities.read,
-  >(
-    input: ValueSpec<Id, S> & { readonly capabilities?: Caps },
-  ) =>
+  const valueHandle: OpcuaSession["valueHandle"] = (input) =>
     Effect.gen(function* () {
-      const requested = (input.capabilities ?? Capabilities.read) as Caps;
+      const requested = input.capabilities ?? Capabilities.read;
+      if (hasStructureSpec(input)) {
+        yield* structureRuntime.ensureInitialized();
+      }
       const metadata = yield* discoverMetadata(raw, input.nodeId, requested);
+      const structureError = validateValueStructureSpec(
+        "valueHandle.structure",
+        input,
+        metadata,
+      );
+      if (structureError) return yield* Effect.fail(structureError);
       const nodeId = coerceNodeId(input.nodeId);
       const base = {
         nodeId: input.nodeId,
         schema: input.schema,
+        structure: input.structure,
         metadata,
         capabilities: requested,
-        raw: { nodeId, dataType: metadata.raw.dataType },
+        raw: { nodeId, builtInDataType: metadata.raw.builtInDataType },
       };
       const handle: Record<string, unknown> = { ...base };
       if (hasCapability(requested, "read")) {
@@ -344,53 +346,65 @@ export const makeSession = (
           writeByMetadata(raw, {
             nodeId: input.nodeId,
             schema: input.schema,
+            structure: input.structure,
             value,
             metadata,
+            structureRuntime,
           });
       }
-      return handle as OpcuaValueHandle<
-        ValueOfSpec<ValueSpec<Id, S>>,
-        Caps,
-        Id
-      >;
-    });
+      return handle;
+    }) as never;
 
-  const writeValue = <
-    const Id extends NodeIdString,
-    S extends AnySchema | undefined = undefined,
-  >(
-    input: ValueSpec<Id, S> & {
-      readonly value: ValueOfSpec<ValueSpec<Id, S>>;
-    },
-  ) =>
+  const writeValue: OpcuaSession["writeValue"] = (input) =>
     Effect.gen(function* () {
+      if (hasStructureSpec(input)) {
+        yield* structureRuntime.ensureInitialized();
+      }
       const metadata = yield* discoverMetadata(raw, input.nodeId, [
         "write",
       ] as const);
+      const structureError = validateValueStructureSpec(
+        "writeValue.structure",
+        input,
+        metadata,
+      );
+      if (structureError) return yield* Effect.fail(structureError);
       return (yield* writeByMetadata(raw, {
         ...input,
         metadata,
-      })) as OpcuaWriteResult<Id>;
-    });
+        structureRuntime,
+      })) as OpcuaWriteResult;
+    }) as never;
 
   const writeValues: OpcuaSession["writeValues"] = (specs) =>
     Effect.gen(function* () {
       const writePayloads: Array<WriteValueOptions> = [];
       for (const spec of specs) {
+        if (hasStructureSpec(spec)) {
+          yield* structureRuntime.ensureInitialized();
+        }
         const metadata = yield* discoverMetadata(raw, spec.nodeId, [
           "write",
         ] as const);
-        const encoded = yield* encodeValue(
-          spec.nodeId,
-          spec.schema,
-          spec.value,
+        const structureError = validateValueStructureSpec(
+          "writeValues.structure",
+          spec,
           metadata,
+        );
+        if (structureError) return yield* Effect.fail(structureError);
+        const variant = yield* makeVariant(
+          spec.nodeId,
+          metadata,
+          spec.value,
+          spec.schema,
+          spec.structure,
+          structureRuntime,
         );
         writePayloads.push({
           nodeId: coerceNodeId(spec.nodeId),
           attributeId: AttributeIds.Value,
           value: {
-            value: makeVariant(metadata, encoded),
+            value: variant,
           },
         });
       }
@@ -428,17 +442,19 @@ export const makeSession = (
             }),
           );
         }
-        const encoded = yield* encodeValue(
+        const variant = yield* makeVariant(
           write.handle.nodeId,
-          write.handle.schema,
-          write.value,
           write.handle.metadata,
+          write.value,
+          write.handle.schema,
+          write.handle.structure,
+          structureRuntime,
         );
         writePayloads.push({
           nodeId: coerceNodeId(write.handle.nodeId),
           attributeId: AttributeIds.Value,
           value: {
-            value: makeVariant(write.handle.metadata, encoded),
+            value: variant,
           },
         });
       }
@@ -453,16 +469,16 @@ export const makeSession = (
     });
 
   const methodHandle: OpcuaSession["methodHandle"] = (spec) =>
-    makeMethodHandle(raw, spec);
+    makeMethodHandle(raw, spec, structureRuntime);
 
   const callMethod: OpcuaSession["callMethod"] = (spec, options) =>
     Effect.gen(function* () {
       const handle = yield* methodHandle(spec);
-      return yield* handle.call(spec.input, options);
+      return yield* handle.call(spec.inputValues, options);
     });
 
   const callMethodHandles_: OpcuaSession["callMethodHandles"] = (entries) =>
-    callMethodHandles(raw, entries);
+    callMethodHandles(raw, entries, structureRuntime);
 
   const createSubscription: OpcuaSession["createSubscription"] = (options) =>
     Effect.gen(function* () {
@@ -500,7 +516,11 @@ export const makeSession = (
             Effect.andThen(PubSub.shutdown(subscriptionEvents)),
           ),
       );
-      return makeSubscription(rawSubscription, subscriptionEvents);
+      return makeSubscription(
+        rawSubscription,
+        subscriptionEvents,
+        structureRuntime,
+      );
     });
 
   const browse: OpcuaSession["browse"] = (input) =>

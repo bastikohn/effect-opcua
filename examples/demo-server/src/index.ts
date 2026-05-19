@@ -1,9 +1,11 @@
 import {
   DataType,
+  DataTypeIds,
   coerceNodeId,
   OPCUAServer,
   StatusCodes,
   Variant,
+  VariantArrayType,
   nodesets,
   type AddressSpace,
   type CallMethodResultOptions,
@@ -24,7 +26,15 @@ export type DemoOpcuaServerOptions = {
 };
 
 type MutableValue = {
-  value: number | boolean | string | Date | ReadonlyArray<number> | Buffer;
+  value:
+    | number
+    | boolean
+    | string
+    | Date
+    | ReadonlyArray<number>
+    | Buffer
+    | Record<string, unknown>
+    | ReadonlyArray<Record<string, unknown>>;
 };
 
 export const startDemoOpcuaServer = async (
@@ -44,7 +54,7 @@ export const startDemoOpcuaServer = async (
   });
 
   await server.initialize();
-  installDemoAddressSpace(server.engine.addressSpace!);
+  await installDemoAddressSpace(server.engine.addressSpace!);
 
   const timer = setInterval(() => {
     const now = Date.now();
@@ -76,7 +86,7 @@ const changing = {
   highFrequency: { value: 0 },
 } satisfies Record<string, MutableValue>;
 
-const installDemoAddressSpace = (addressSpace: AddressSpace) => {
+const installDemoAddressSpace = async (addressSpace: AddressSpace) => {
   const namespace = addressSpace.getOwnNamespace();
 
   const machine = namespace.addObject({
@@ -179,6 +189,7 @@ const installDemoAddressSpace = (addressSpace: AddressSpace) => {
   addDisabledCommandMethod(namespace, machine);
   addInvalidArgumentNameMethods(namespace, machine);
   addCustomDataTypeMethod(namespace, machine);
+  await addScanSettingsDemo(addressSpace, namespace, machine);
 
   const large = namespace.addObject({
     browseName: "LargeFolder",
@@ -328,6 +339,181 @@ const addByteString = (
         }),
     },
   });
+
+const addScanSettingsDemo = async (
+  addressSpace: AddressSpace,
+  namespace: ReturnType<AddressSpace["getOwnNamespace"]>,
+  parent: unknown,
+) => {
+  const scanSettingsType = namespace.createDataType({
+    browseName: "ScanSettings",
+    nodeId: "i=3010",
+    isAbstract: false,
+    subtypeOf: "Structure",
+    partialDefinition: [
+      {
+        name: "Duration",
+        dataType: coerceNodeId(DataTypeIds.Double),
+        valueRank: -1,
+      },
+      {
+        name: "Cycles",
+        dataType: coerceNodeId(DataTypeIds.UInt16),
+        valueRank: -1,
+      },
+      {
+        name: "DataAvailable",
+        dataType: coerceNodeId(DataTypeIds.Boolean),
+        valueRank: -1,
+      },
+    ],
+  });
+  namespace.addObject({
+    browseName: "Default Binary",
+    nodeId: "i=5010",
+    encodingOf: scanSettingsType,
+  });
+  const { ensureDatatypeExtracted } = await import("node-opcua-address-space");
+  await ensureDatatypeExtracted(addressSpace);
+  const dataTypeManager = (
+    addressSpace as unknown as {
+      readonly getDataTypeManager: () => {
+        readonly getExtensionObjectConstructorFromDataTypeAsync: (
+          nodeId: typeof scanSettingsType.nodeId,
+        ) => Promise<new (value: Record<string, unknown>) => object>;
+      };
+    }
+  ).getDataTypeManager();
+  const ScanSettingsConstructor =
+    await dataTypeManager.getExtensionObjectConstructorFromDataTypeAsync(
+      scanSettingsType.nodeId,
+    );
+  const makeScanSettings = (value: Record<string, unknown>) =>
+    new ScanSettingsConstructor(value);
+  const scanSettings: MutableValue = {
+    value: { duration: 1000, cycles: 5, dataAvailable: true },
+  };
+  const scanSettingsQueue: MutableValue = {
+    value: [
+      { duration: 1000, cycles: 5, dataAvailable: true },
+      { duration: 250, cycles: 1, dataAvailable: false },
+    ],
+  };
+
+  namespace.addVariable({
+    componentOf: parent as never,
+    browseName: "ScanSettings",
+    nodeId: "s=MyMachine.ScanSettings",
+    dataType: scanSettingsType.nodeId,
+    accessLevel: "CurrentRead | CurrentWrite",
+    userAccessLevel: "CurrentRead | CurrentWrite",
+    minimumSamplingInterval: 100,
+    value: {
+      get: () =>
+        new Variant({
+          dataType: DataType.ExtensionObject,
+          value: makeScanSettings(
+            scanSettings.value as Record<string, unknown>,
+          ),
+        }),
+      set: (variant: Variant) => {
+        scanSettings.value = structureRecord(variant.value);
+        return StatusCodes.Good;
+      },
+    },
+  });
+
+  namespace.addVariable({
+    componentOf: parent as never,
+    browseName: "ScanSettingsQueue",
+    nodeId: "s=MyMachine.ScanSettingsQueue",
+    dataType: scanSettingsType.nodeId,
+    accessLevel: "CurrentRead | CurrentWrite",
+    userAccessLevel: "CurrentRead | CurrentWrite",
+    minimumSamplingInterval: 100,
+    valueRank: 1,
+    value: {
+      get: () =>
+        new Variant({
+          dataType: DataType.ExtensionObject,
+          arrayType: VariantArrayType.Array,
+          value: (
+            scanSettingsQueue.value as ReadonlyArray<Record<string, unknown>>
+          ).map(makeScanSettings),
+        }),
+      set: (variant: Variant) => {
+        scanSettingsQueue.value = Array.isArray(variant.value)
+          ? variant.value.map(structureRecord)
+          : [];
+        return StatusCodes.Good;
+      },
+    },
+  });
+
+  const startScan = namespace.addMethod(parent as never, {
+    browseName: "StartScan",
+    nodeId: "s=MyMachine.StartScan",
+    inputArguments: [
+      { name: "Settings", dataType: scanSettingsType.nodeId },
+      { name: "DryRun", dataType: DataType.Boolean },
+    ],
+    outputArguments: [{ name: "Accepted", dataType: DataType.Boolean }],
+  });
+  startScan.bindMethod(async function (
+    this: UAMethod,
+    inputArguments: ReadonlyArray<Variant>,
+    context: ISessionContext,
+  ): Promise<CallMethodResultOptions> {
+    void this;
+    void context;
+    const settings = structureRecord(inputArguments[0]?.value);
+    if (!Boolean(inputArguments[1]?.value)) scanSettings.value = settings;
+    return {
+      statusCode: StatusCodes.Good,
+      outputArguments: [
+        new Variant({
+          dataType: DataType.Boolean,
+          value: Number(settings.cycles ?? 0) > 0,
+        }),
+      ],
+    };
+  });
+
+  const setQueue = namespace.addMethod(parent as never, {
+    browseName: "SetQueue",
+    nodeId: "s=MyMachine.SetQueue",
+    inputArguments: [
+      { name: "Jobs", dataType: scanSettingsType.nodeId, valueRank: 1 },
+    ],
+    outputArguments: [{ name: "Accepted", dataType: DataType.Boolean }],
+  });
+  setQueue.bindMethod(async function (
+    this: UAMethod,
+    inputArguments: ReadonlyArray<Variant>,
+    context: ISessionContext,
+  ): Promise<CallMethodResultOptions> {
+    void this;
+    void context;
+    scanSettingsQueue.value = Array.isArray(inputArguments[0]?.value)
+      ? inputArguments[0]!.value.map(structureRecord)
+      : [];
+    return {
+      statusCode: StatusCodes.Good,
+      outputArguments: [
+        new Variant({ dataType: DataType.Boolean, value: true }),
+      ],
+    };
+  });
+};
+
+const structureRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object"
+    ? Object.fromEntries(
+        Object.entries(value as Record<string, unknown>).filter(
+          ([key]) => !key.startsWith("_") && key !== "schema",
+        ),
+      )
+    : {};
 
 const addStartMethod = (
   namespace: ReturnType<AddressSpace["getOwnNamespace"]>,
