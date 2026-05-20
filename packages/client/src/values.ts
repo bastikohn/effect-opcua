@@ -3,21 +3,23 @@ import {
   AttributeIds,
   DataType,
   NodeId,
-  VariantArrayType,
   coerceNodeId,
   type ClientSession,
   type DataValue,
   type StatusCode,
   type Variant,
+  type WriteValueOptions,
 } from "node-opcua";
-import { Effect, Schema } from "effect";
+import { Effect, Result } from "effect";
 
+import type { NodeIdString, VariableCapability } from "./capabilities.js";
 import {
-  Capabilities,
-  type Capability,
-  type CapabilitySet,
-  type NodeIdString,
-} from "./capabilities.js";
+  Codec,
+  dynamic,
+  type AnySchema,
+  type CodecType,
+  type OpcuaCodec,
+} from "./codecs.js";
 import {
   OpcuaAccessDeniedError,
   OpcuaConfigurationError,
@@ -35,30 +37,39 @@ import {
   type OpcuaStatusInfo,
   type OpcuaVariantInfo,
 } from "./normalize.js";
-import {
-  decodeDynamicValue,
-  decodeWithSchema,
-  encodeDynamicValue,
-  encodeWithSchema,
-  makeVariantFromMetadata,
-  type AnySchema,
-  type SchemaType,
-} from "./codecs.js";
-import {
-  validateStructureMetadata,
-  type OpcuaStructureRuntime,
-} from "./structure-runtime.js";
-import {
-  isOpcuaStructureArrayCodec,
-  isOpcuaStructureCodec,
-  type AnyStructureSpec,
-  type OpcuaStructureArrayCodec,
-  type OpcuaStructureCodec,
-} from "./structures.js";
+import type { OpcuaStructureRuntime } from "./structure-runtime.js";
 
-export type { AnySchema, SchemaType } from "./codecs.js";
+export type { AnySchema, CodecType, OpcuaCodec };
 
-export type OpcuaValueSample<A, Id extends string = string> =
+export type VariableAccess = "read" | "write" | "readWrite";
+
+export type VariableDef<
+  Id extends string = string,
+  A = OpcuaDynamicValue,
+  Access extends VariableAccess = "read",
+> = {
+  readonly _tag: "VariableDef";
+  readonly nodeId: Id;
+  readonly codec: OpcuaCodec<A>;
+  readonly access: Access;
+  readonly includeRaw?: boolean;
+};
+
+export type AnyVariableDef = VariableDef<string, unknown, VariableAccess>;
+export type ReadableVariableDef =
+  | VariableDef<string, unknown, "read">
+  | VariableDef<string, unknown, "readWrite">;
+
+export type ValueOfVariableDef<Def> =
+  Def extends VariableDef<string, infer A, VariableAccess> ? A : never;
+
+export type AccessOfVariableDef<Def> =
+  Def extends VariableDef<string, unknown, infer Access> ? Access : never;
+
+export type NodeIdOfVariableDef<Def> =
+  Def extends VariableDef<infer Id, unknown, VariableAccess> ? Id : never;
+
+export type ReadResult<A, Id extends string = string> =
   | {
       readonly _tag: "Value";
       readonly nodeId: Id;
@@ -67,7 +78,7 @@ export type OpcuaValueSample<A, Id extends string = string> =
       readonly sourceTimestamp?: string;
       readonly serverTimestamp?: string;
       readonly variant?: OpcuaVariantInfo;
-      readonly raw?: {
+      readonly unsafeRaw?: {
         readonly dataValue: DataValue;
         readonly variant?: Variant;
       };
@@ -79,7 +90,7 @@ export type OpcuaValueSample<A, Id extends string = string> =
       readonly sourceTimestamp?: string;
       readonly serverTimestamp?: string;
       readonly variant?: OpcuaVariantInfo;
-      readonly raw?: {
+      readonly unsafeRaw?: {
         readonly dataValue: DataValue;
         readonly variant?: Variant;
       };
@@ -92,17 +103,17 @@ export type OpcuaValueSample<A, Id extends string = string> =
       readonly sourceTimestamp?: string;
       readonly serverTimestamp?: string;
       readonly variant?: OpcuaVariantInfo;
-      readonly raw?: {
+      readonly unsafeRaw?: {
         readonly dataValue: DataValue;
         readonly variant?: Variant;
       };
     };
 
-export type OpcuaAnyValueSample =
-  | OpcuaValueSample<unknown, string>
-  | OpcuaValueSample<OpcuaDynamicValue, string>;
+export type AnyReadResult =
+  | ReadResult<unknown, string>
+  | ReadResult<OpcuaDynamicValue, string>;
 
-export type OpcuaWriteResult<Id extends string = string> =
+export type WriteResult<Id extends string = string> =
   | {
       readonly _tag: "Written";
       readonly nodeId: Id;
@@ -114,28 +125,7 @@ export type OpcuaWriteResult<Id extends string = string> =
       readonly status: OpcuaStatusInfo;
     };
 
-export type OpcuaWriteValuesResult<Ids extends ReadonlyArray<string>> = {
-  readonly [Index in keyof Ids]: Ids[Index] extends string
-    ? OpcuaWriteResult<Ids[Index]>
-    : never;
-};
-export type OpcuaWriteValueSpec<
-  Id extends string = string,
-  Spec extends ValueSpec<Id> = ValueSpec<Id>,
-> = Spec & {
-  readonly value: ValueOfSpec<Spec>;
-};
-export type WriteValueSpec<
-  Id extends string = string,
-  Spec extends ValueSpec<Id> = ValueSpec<Id>,
-> = OpcuaWriteValueSpec<Id, Spec>;
-export type WriteValuesResult<Specs extends ReadonlyArray<ValueSpec>> = {
-  readonly [Index in keyof Specs]: Specs[Index] extends ValueSpec<infer Id>
-    ? OpcuaWriteResult<Id>
-    : never;
-};
-
-export type OpcuaValueMetadata = {
+export type VariableMetadata = {
   readonly nodeId: NodeIdString;
   readonly declaredDataType: OpcuaNodeIdInfo;
   readonly builtInDataType: string;
@@ -149,108 +139,89 @@ export type OpcuaValueMetadata = {
     readonly userReadable: boolean;
     readonly userWritable: boolean;
   };
-  readonly raw: {
+  readonly unsafeRaw: {
     readonly declaredDataType: NodeId;
     readonly builtInDataType: DataType;
   };
 };
 
-export type OpcuaValueSpec<Id extends string = string> =
-  | {
-      readonly nodeId: Id;
-      readonly includeRaw?: boolean;
-      readonly schema?: undefined;
-      readonly structure?: undefined;
+type ReadPart<
+  Id extends string,
+  A,
+  Access extends VariableAccess,
+> = Access extends "read" | "readWrite"
+  ? {
+      readonly read: () => Effect.Effect<ReadResult<A, Id>, OpcuaServiceError>;
     }
-  | {
-      readonly nodeId: Id;
-      readonly schema: AnySchema;
-      readonly includeRaw?: boolean;
-      readonly structure?: never;
-    }
-  | {
-      readonly nodeId: Id;
-      readonly structure: AnyStructureSpec;
-      readonly includeRaw?: boolean;
-      readonly schema?: never;
-    };
-export type ValueSpec<Id extends string = string> = OpcuaValueSpec<Id>;
-export type ValueOfSpec<Spec> = Spec extends {
-  readonly structure: OpcuaStructureCodec<infer A>;
-}
-  ? A
-  : Spec extends { readonly structure: OpcuaStructureArrayCodec<infer A> }
-    ? ReadonlyArray<A>
-    : Spec extends { readonly schema: infer S }
-      ? S extends AnySchema
-        ? SchemaType<S>
-        : OpcuaDynamicValue
-      : OpcuaDynamicValue;
-export type ReadValuesResult<Specs extends ReadonlyArray<ValueSpec>> = {
-  readonly [Index in keyof Specs]: Specs[Index] extends ValueSpec<infer Id>
-    ? OpcuaValueSample<ValueOfSpec<Specs[Index]>, Id>
-    : never;
-};
-type HasCapability<
-  Caps extends CapabilitySet,
-  Cap extends Capability,
-> = Cap extends Caps[number] ? unknown : never;
-type ReadCapabilityPart<A, Caps extends CapabilitySet, Id extends string> =
-  HasCapability<Caps, "read"> extends never
-    ? Record<never, never>
-    : {
-        readonly read: () => Effect.Effect<
-          OpcuaValueSample<A, Id>,
-          OpcuaServiceError
-        >;
-      };
-type WriteCapabilityPart<A, Caps extends CapabilitySet, Id extends string> =
-  HasCapability<Caps, "write"> extends never
-    ? Record<never, never>
-    : {
-        readonly write: (
-          value: A,
-        ) => Effect.Effect<
-          OpcuaWriteResult<Id>,
-          OpcuaEncodeError | OpcuaServiceError | OpcuaAccessDeniedError
-        >;
-      };
+  : Record<never, never>;
 
-export type OpcuaValueHandle<
-  A = OpcuaDynamicValue,
-  Caps extends CapabilitySet = typeof Capabilities.read,
+type WritePart<
+  Id extends string,
+  A,
+  Access extends VariableAccess,
+> = Access extends "write" | "readWrite"
+  ? {
+      readonly write: (
+        value: A,
+      ) => Effect.Effect<WriteResult<Id>, OpcuaEncodeError | OpcuaServiceError>;
+    }
+  : Record<never, never>;
+
+export type VariableHandle<
   Id extends string = string,
+  A = OpcuaDynamicValue,
+  Access extends VariableAccess = "read",
 > = {
+  readonly _tag: "VariableHandle";
   readonly nodeId: Id;
-  readonly schema?: AnySchema;
-  readonly structure?: AnyStructureSpec;
-  readonly metadata: OpcuaValueMetadata;
-  readonly capabilities: Caps;
-  readonly raw: {
+  readonly def: VariableDef<Id, A, Access>;
+  readonly metadata: VariableMetadata;
+  readonly unsafeRaw: {
     readonly nodeId: NodeId;
     readonly builtInDataType: DataType;
   };
-} & ReadCapabilityPart<A, Caps, Id> &
-  WriteCapabilityPart<A, Caps, Id>;
+} & ReadPart<Id, A, Access> &
+  WritePart<Id, A, Access>;
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type WritableOpcuaValueHandle<A = any, Id extends string = string> =
-  | OpcuaValueHandle<A, typeof Capabilities.write, Id>
-  | OpcuaValueHandle<A, typeof Capabilities.readWrite, Id>;
-
-export type ValueOfHandle<H> =
-  H extends OpcuaValueHandle<infer A, CapabilitySet, string> ? A : never;
-export type NodeIdOfHandle<H> =
+export type WritableVariableHandle<
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  H extends OpcuaValueHandle<any, CapabilitySet, infer Id> ? Id : never;
-export type NodeIdsOfHandles<Handles extends ReadonlyArray<unknown>> = {
-  readonly [Index in keyof Handles]: NodeIdOfHandle<Handles[Index]>;
-};
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type WriteEntry<H extends WritableOpcuaValueHandle<any, string>> = {
+  A = any,
+  Id extends string = string,
+> = VariableHandle<Id, A, "write"> | VariableHandle<Id, A, "readWrite">;
+
+export type ReadableVariableHandle<
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  A = any,
+  Id extends string = string,
+> = VariableHandle<Id, A, "read"> | VariableHandle<Id, A, "readWrite">;
+
+export type ValueOfVariableHandle<H> =
+  H extends VariableHandle<string, infer A, VariableAccess> ? A : never;
+
+export type NodeIdOfVariableHandle<H> =
+  H extends VariableHandle<infer Id, unknown, VariableAccess> ? Id : never;
+
+export type WriteEntry<H extends WritableVariableHandle> = {
   readonly handle: H;
-  readonly value: ValueOfHandle<H>;
+  readonly value: ValueOfVariableHandle<H>;
 };
+
+export const makeVariableDef = <
+  const Id extends string,
+  C extends OpcuaCodec<unknown> = OpcuaCodec<OpcuaDynamicValue>,
+  const Access extends VariableAccess = "read",
+>(options: {
+  readonly nodeId: Id;
+  readonly codec?: C;
+  readonly access?: Access;
+  readonly includeRaw?: boolean;
+}): VariableDef<Id, CodecType<C>, Access> => ({
+  _tag: "VariableDef",
+  nodeId: options.nodeId,
+  codec: (options.codec ?? dynamic()) as unknown as OpcuaCodec<CodecType<C>>,
+  access: (options.access ?? "read") as Access,
+  includeRaw: options.includeRaw,
+});
 
 export const readDataValue = (session: ClientSession, nodeId: NodeIdString) =>
   Effect.tryPromise({
@@ -263,336 +234,156 @@ export const readDataValue = (session: ClientSession, nodeId: NodeIdString) =>
         0,
       ),
     catch: (cause) =>
-      new OpcuaServiceError({ operation: "readValue", nodeId, cause }),
+      new OpcuaServiceError({ operation: "read", nodeId, cause }),
   });
 
-export const sampleFromDataValue = <Id extends string>(
-  spec: ValueSpec<Id>,
-  dataValue: DataValue,
-  structureRuntime?: OpcuaStructureRuntime,
-): OpcuaValueSample<ValueOfSpec<ValueSpec<Id>>, Id> => {
-  const base = sampleBase(spec.nodeId, dataValue, spec.includeRaw ?? false);
-  if (!isGood(dataValue.statusCode)) {
-    return { _tag: "NonGoodStatus", ...base };
+export const makeVariableHandle = <
+  const Id extends string,
+  A,
+  const Access extends VariableAccess,
+>(
+  session: ClientSession,
+  def: VariableDef<Id, A, Access>,
+  metadata: VariableMetadata,
+  structureRuntime: OpcuaStructureRuntime,
+): VariableHandle<Id, A, Access> => {
+  const nodeId = coerceNodeId(def.nodeId);
+  const base = {
+    _tag: "VariableHandle" as const,
+    nodeId: def.nodeId,
+    def,
+    metadata,
+    unsafeRaw: { nodeId, builtInDataType: metadata.unsafeRaw.builtInDataType },
+  };
+  const handle: Record<string, unknown> = { ...base };
+  if (hasAccessPart(def.access, "read")) {
+    handle.read = () => readVariable(session, def, structureRuntime);
   }
-  try {
-    const value = decodeSpecValue(spec, dataValue, structureRuntime);
+  if (hasAccessPart(def.access, "write")) {
+    handle.write = (value: A) =>
+      writeVariable(session, def, metadata, value, structureRuntime);
+  }
+  return handle as VariableHandle<Id, A, Access>;
+};
+
+export const readVariable = <const Id extends string, A>(
+  session: ClientSession,
+  def:
+    | VariableDef<Id, A, "read" | "readWrite">
+    | VariableDef<Id, A, VariableAccess>,
+  structureRuntime: OpcuaStructureRuntime,
+) =>
+  Effect.gen(function* () {
+    if (Codec.requiresStructureRuntime(def.codec)) {
+      yield* structureRuntime.ensureInitialized();
+    }
+    const dataValue = yield* readDataValue(session, def.nodeId);
+    return yield* sampleFromDataValue(def, dataValue, structureRuntime);
+  });
+
+export const sampleFromDataValue = <const Id extends string, A>(
+  def: VariableDef<Id, A, VariableAccess>,
+  dataValue: DataValue,
+  structureRuntime: OpcuaStructureRuntime,
+) =>
+  Effect.gen(function* () {
+    const base = sampleBase(def.nodeId, dataValue, def.includeRaw ?? false);
+    if (!isGood(dataValue.statusCode)) {
+      return { _tag: "NonGoodStatus", ...base } as ReadResult<A, Id>;
+    }
+    const decoded = yield* Effect.result(
+      Codec.decode(def.codec, dataValue.value, dataValue, structureRuntime),
+    );
+    if (Result.isFailure(decoded)) {
+      return {
+        _tag: "DecodeError",
+        ...base,
+        error: decoded.failure,
+      } as ReadResult<A, Id>;
+    }
     return {
       _tag: "Value",
       ...base,
-      value: value as ValueOfSpec<ValueSpec<Id>>,
-    };
-  } catch (error) {
-    return {
-      _tag: "DecodeError",
-      ...base,
-      error,
-    };
-  }
-};
-
-const decodeSpecValue = (
-  spec: ValueSpec,
-  dataValue: DataValue,
-  structureRuntime?: OpcuaStructureRuntime,
-) => {
-  if (spec.structure) {
-    if (!structureRuntime) {
-      throw new TypeError("Structure runtime is required");
-    }
-    if (dataValue.value?.dataType !== DataType.ExtensionObject) {
-      throw new TypeError("Expected ExtensionObject Variant");
-    }
-    if (isOpcuaStructureArrayCodec(spec.structure)) {
-      if (dataValue.value.arrayType !== VariantArrayType.Array) {
-        throw new TypeError("Expected ExtensionObject array Variant");
-      }
-      return structureRuntime.decodeStructureArray(
-        spec.structure,
-        dataValue.value.value,
-      );
-    }
-    if (dataValue.value?.arrayType !== VariantArrayType.Scalar) {
-      throw new TypeError("Expected scalar ExtensionObject Variant");
-    }
-    return structureRuntime.decodeStructure(
-      spec.structure,
-      dataValue.value?.value,
-    );
-  }
-  return spec.schema
-    ? decodeWithSchema(spec.schema, dataValue.value?.value)
-    : decodeDynamicValue(dataValue.value?.value, dataValue.value);
-};
-
-const sampleBase = <Id extends string>(
-  nodeId: Id,
-  dataValue: DataValue,
-  includeRaw: boolean,
-) => ({
-  nodeId,
-  status: normalizeStatusCode(dataValue.statusCode),
-  sourceTimestamp: normalizeTimestamp(dataValue.sourceTimestamp),
-  serverTimestamp: normalizeTimestamp(dataValue.serverTimestamp),
-  variant: dataValue.value ? normalizeVariantInfo(dataValue.value) : undefined,
-  raw: includeRaw
-    ? {
-        dataValue,
-        variant: dataValue.value,
-      }
-    : undefined,
-});
-
-export const discoverMetadata = (
-  session: ClientSession,
-  nodeId: NodeIdString,
-  requested: CapabilitySet,
-) =>
-  Effect.gen(function* () {
-    const nodes = [
-      AttributeIds.DataType,
-      AttributeIds.ValueRank,
-      AttributeIds.ArrayDimensions,
-      AttributeIds.AccessLevel,
-      AttributeIds.UserAccessLevel,
-    ].map((attributeId) => ({ nodeId: coerceNodeId(nodeId), attributeId }));
-    const [
-      dataTypeValue,
-      valueRankValue,
-      arrayDimensionsValue,
-      accessLevelValue,
-      userAccessLevelValue,
-    ] = yield* Effect.tryPromise({
-      try: () => session.read(nodes, 0),
-      catch: (cause) =>
-        new OpcuaServiceError({
-          operation: "valueHandle.discovery",
-          nodeId,
-          cause,
-        }),
-    });
-    if (
-      !dataTypeValue ||
-      !isGood(dataTypeValue.statusCode) ||
-      !(dataTypeValue.value?.value instanceof NodeId)
-    ) {
-      return yield* Effect.fail(
-        new OpcuaConfigurationError({
-          operation: "valueHandle.discovery",
-          nodeId,
-          cause: "DataType is unreadable",
-        }),
-      );
-    }
-    if (
-      !valueRankValue ||
-      !isGood(valueRankValue.statusCode) ||
-      typeof valueRankValue.value?.value !== "number"
-    ) {
-      return yield* Effect.fail(
-        new OpcuaConfigurationError({
-          operation: "valueHandle.discovery",
-          nodeId,
-          cause: "ValueRank is unreadable",
-        }),
-      );
-    }
-    if (
-      !accessLevelValue ||
-      !isGood(accessLevelValue.statusCode) ||
-      typeof accessLevelValue.value?.value !== "number"
-    ) {
-      return yield* Effect.fail(
-        new OpcuaConfigurationError({
-          operation: "valueHandle.discovery",
-          nodeId,
-          cause: "AccessLevel is unreadable",
-        }),
-      );
-    }
-    const builtInDataType = yield* Effect.tryPromise({
-      try: () => session.getBuiltInDataType(coerceNodeId(nodeId)),
-      catch: (cause) =>
-        new OpcuaServiceError({
-          operation: "valueHandle.discovery.getBuiltInDataType",
-          nodeId,
-          cause,
-        }),
-    });
-    const accessLevel = accessLevelValue.value.value as number;
-    const userAccessLevel =
-      userAccessLevelValue &&
-      isGood(userAccessLevelValue.statusCode) &&
-      typeof userAccessLevelValue.value?.value === "number"
-        ? (userAccessLevelValue.value.value as number)
-        : undefined;
-    for (const capability of requested) {
-      const accessError = accessDeniedError(
-        nodeId,
-        capability,
-        accessLevel,
-        userAccessLevel,
-      );
-      if (accessError) return yield* Effect.fail(accessError);
-    }
-    const dataTypeNodeId = dataTypeValue.value.value as NodeId;
-    return {
-      nodeId,
-      declaredDataType: normalizeNodeId(dataTypeNodeId),
-      builtInDataType: DataType[builtInDataType] ?? String(builtInDataType),
-      valueRank: valueRankValue.value.value as number,
-      arrayDimensions:
-        arrayDimensionsValue &&
-        isGood(arrayDimensionsValue.statusCode) &&
-        Array.isArray(arrayDimensionsValue.value?.value)
-          ? arrayDimensionsValue.value.value
-          : undefined,
-      accessLevel,
-      userAccessLevel,
-      access: {
-        readable: hasAccess(accessLevel, "read"),
-        writable: hasAccess(accessLevel, "write"),
-        userReadable:
-          userAccessLevel === undefined || hasAccess(userAccessLevel, "read"),
-        userWritable:
-          userAccessLevel === undefined || hasAccess(userAccessLevel, "write"),
-      },
-      raw: {
-        declaredDataType: dataTypeNodeId,
-        builtInDataType,
-      },
-    };
+      value: decoded.success as unknown as A,
+    } as ReadResult<A, Id>;
   });
 
-export const writeByMetadata = (
+export const writeVariable = <const Id extends string, A>(
   session: ClientSession,
-  input: {
-    readonly nodeId: NodeIdString;
-    readonly schema?: AnySchema;
-    readonly structure?: AnyStructureSpec;
-    readonly value: unknown;
-    readonly metadata: OpcuaValueMetadata;
-    readonly structureRuntime?: OpcuaStructureRuntime;
-  },
+  def: VariableDef<Id, A, VariableAccess>,
+  metadata: VariableMetadata,
+  value: A,
+  structureRuntime: OpcuaStructureRuntime,
 ) =>
   Effect.gen(function* () {
-    if (input.structure) {
-      const structureError = validateStructureMetadata(
-        "writeValue.structure",
-        input.nodeId,
-        input.metadata,
-        input.structure,
-      );
-      if (structureError) return yield* Effect.fail(structureError);
+    if (Codec.requiresStructureRuntime(def.codec)) {
+      yield* structureRuntime.ensureInitialized();
     }
-    const variant = yield* makeVariant(
-      input.nodeId,
-      input.metadata,
-      input.value,
-      input.schema,
-      input.structure,
-      input.structureRuntime,
+    const variant = yield* Codec.encode(
+      def.codec as OpcuaCodec<unknown>,
+      value as unknown,
+      codecMetadata(metadata),
+      structureRuntime,
     );
     const statusCode = yield* Effect.tryPromise({
       try: () =>
         session.write({
-          nodeId: coerceNodeId(input.nodeId),
+          nodeId: coerceNodeId(def.nodeId),
           attributeId: AttributeIds.Value,
-          value: {
-            value: variant,
-          },
+          value: { value: variant },
         }),
       catch: (cause) =>
         new OpcuaServiceError({
-          operation: "writeValue",
-          nodeId: input.nodeId,
+          operation: "write",
+          nodeId: def.nodeId,
           cause,
         }),
     });
-    return writeResult(input.nodeId, statusCode);
+    return writeResult(def.nodeId, statusCode);
   });
 
-export const encodeValue = (
-  nodeId: NodeIdString,
-  schema: AnySchema | undefined,
-  value: unknown,
-  metadata: OpcuaValueMetadata,
+export const writeVariableEntries = <
+  const Handles extends ReadonlyArray<WritableVariableHandle>,
+>(
+  session: ClientSession,
+  writes: {
+    readonly [Index in keyof Handles]: WriteEntry<Handles[Index]>;
+  },
+  structureRuntime: OpcuaStructureRuntime,
 ) =>
-  schema
-    ? Effect.sync(() => encodeWithSchema(schema, value)).pipe(
-        Effect.mapError(
-          (error) => new OpcuaEncodeError({ nodeId, value, error }),
-        ),
-      )
-    : Effect.suspend(() => {
-        try {
-          return Effect.succeed(
-            encodeDynamicValue(value, {
-              raw: { dataType: metadata.raw.builtInDataType },
-              valueRank: metadata.valueRank,
-              arrayDimensions: metadata.arrayDimensions,
-            }),
-          );
-        } catch (error) {
-          return Effect.fail(new OpcuaEncodeError({ nodeId, value, error }));
-        }
-      });
-
-export const makeVariant = (
-  nodeId: NodeIdString,
-  metadata: OpcuaValueMetadata,
-  value: unknown,
-  schema?: AnySchema,
-  structure?: AnyStructureSpec,
-  structureRuntime?: OpcuaStructureRuntime,
-) => {
-  if (structure) {
-    if (!structureRuntime) {
-      return Effect.fail(
-        new OpcuaEncodeError({
-          nodeId,
-          value,
-          error: "Structure runtime is required",
-        }),
+  Effect.gen(function* () {
+    const nodeIds = writes.map((write) => write.handle.nodeId);
+    const duplicate = duplicateNodeIdError("Opcua.writeAll", nodeIds);
+    if (duplicate) return yield* Effect.fail(duplicate);
+    const writePayloads: Array<WriteValueOptions> = [];
+    for (const write of writes) {
+      const handle = write.handle;
+      const variant = yield* Codec.encode(
+        handle.def.codec as OpcuaCodec<unknown>,
+        write.value,
+        codecMetadata(handle.metadata),
+        structureRuntime,
       );
+      writePayloads.push({
+        nodeId: handle.unsafeRaw.nodeId,
+        attributeId: AttributeIds.Value,
+        value: { value: variant },
+      });
     }
-    return structureRuntime.variantFromStructure(nodeId, structure, value);
-  }
-  return encodeValue(nodeId, schema, value, metadata).pipe(
-    Effect.map((encoded) =>
-      makeVariantFromMetadata(
-        {
-          ...metadata,
-          raw: { dataType: metadata.raw.builtInDataType },
-        },
-        encoded,
-      ),
-    ),
-  );
-};
-
-export const validateValueStructureSpec = (
-  operation: string,
-  spec: ValueSpec,
-  metadata: OpcuaValueMetadata,
-) =>
-  spec.structure
-    ? validateStructureMetadata(
-        operation,
-        spec.nodeId,
-        metadata,
-        spec.structure,
-      )
-    : undefined;
-
-export const hasStructureSpec = (spec: ValueSpec) =>
-  isOpcuaStructureCodec(spec.structure) ||
-  isOpcuaStructureArrayCodec(spec.structure);
+    const statusCodes = yield* Effect.tryPromise({
+      try: () => session.write(writePayloads),
+      catch: (cause) =>
+        new OpcuaServiceError({ operation: "Opcua.writeAll", cause }),
+    });
+    return writes.map((write, index) =>
+      writeResult(write.handle.nodeId, statusCodes[index]!),
+    );
+  });
 
 export const writeResult = <Id extends string>(
   nodeId: Id,
   statusCode: StatusCode,
-): OpcuaWriteResult<Id> =>
+): WriteResult<Id> =>
   isGood(statusCode)
     ? { _tag: "Written", nodeId, status: normalizeStatusCode(statusCode) }
     : {
@@ -603,7 +394,7 @@ export const writeResult = <Id extends string>(
 
 export const accessDeniedError = (
   nodeId: NodeIdString,
-  requestedCapability: Capability,
+  requestedCapability: VariableCapability,
   accessLevel: number,
   userAccessLevel?: number,
 ) => {
@@ -622,17 +413,110 @@ export const accessDeniedError = (
   return undefined;
 };
 
-export const hasAccess = (accessLevel: number, capability: Capability) => {
+export const variableAccessCapabilities = (
+  access: VariableAccess,
+): ReadonlyArray<VariableCapability> => {
+  switch (access) {
+    case "read":
+      return ["read"];
+    case "write":
+      return ["write"];
+    case "readWrite":
+      return ["read", "write"];
+  }
+};
+
+export const hasAccess = (
+  accessLevel: number,
+  capability: VariableCapability,
+) => {
   const flag =
     capability === "read"
       ? AccessLevelFlag.CurrentRead
-      : capability === "write"
-        ? AccessLevelFlag.CurrentWrite
-        : 0;
+      : AccessLevelFlag.CurrentWrite;
   return (accessLevel & flag) !== 0;
 };
 
-export const hasCapability = (
-  capabilities: CapabilitySet,
-  capability: Capability,
-) => capabilities.includes(capability);
+export const variableMetadataFromRaw = (input: {
+  readonly nodeId: NodeIdString;
+  readonly dataTypeNodeId: NodeId;
+  readonly builtInDataType: DataType;
+  readonly valueRank: number;
+  readonly arrayDimensions?: ReadonlyArray<number>;
+  readonly accessLevel: number;
+  readonly userAccessLevel?: number;
+}): VariableMetadata => ({
+  nodeId: input.nodeId,
+  declaredDataType: normalizeNodeId(input.dataTypeNodeId),
+  builtInDataType:
+    DataType[input.builtInDataType] ?? String(input.builtInDataType),
+  valueRank: input.valueRank,
+  arrayDimensions: input.arrayDimensions,
+  accessLevel: input.accessLevel,
+  userAccessLevel: input.userAccessLevel,
+  access: {
+    readable: hasAccess(input.accessLevel, "read"),
+    writable: hasAccess(input.accessLevel, "write"),
+    userReadable:
+      input.userAccessLevel === undefined ||
+      hasAccess(input.userAccessLevel, "read"),
+    userWritable:
+      input.userAccessLevel === undefined ||
+      hasAccess(input.userAccessLevel, "write"),
+  },
+  unsafeRaw: {
+    declaredDataType: input.dataTypeNodeId,
+    builtInDataType: input.builtInDataType,
+  },
+});
+
+export const codecMetadata = (metadata: VariableMetadata) => ({
+  nodeId: metadata.nodeId,
+  valueRank: metadata.valueRank,
+  arrayDimensions: metadata.arrayDimensions,
+  raw: {
+    declaredDataType: metadata.unsafeRaw.declaredDataType,
+    builtInDataType: metadata.unsafeRaw.builtInDataType,
+  },
+});
+
+const sampleBase = <Id extends string>(
+  nodeId: Id,
+  dataValue: DataValue,
+  includeRaw: boolean,
+) => ({
+  nodeId,
+  status: normalizeStatusCode(dataValue.statusCode),
+  sourceTimestamp: normalizeTimestamp(dataValue.sourceTimestamp),
+  serverTimestamp: normalizeTimestamp(dataValue.serverTimestamp),
+  variant: dataValue.value ? normalizeVariantInfo(dataValue.value) : undefined,
+  unsafeRaw: includeRaw
+    ? {
+        dataValue,
+        variant: dataValue.value,
+      }
+    : undefined,
+});
+
+const hasAccessPart = (
+  access: VariableAccess,
+  capability: VariableCapability,
+) => access === "readWrite" || access === capability;
+
+const duplicateNodeIdError = (
+  operation: string,
+  nodeIds: ReadonlyArray<NodeIdString>,
+) => {
+  const seen = new Set<string>();
+  for (const nodeId of nodeIds) {
+    if (seen.has(nodeId)) {
+      return new OpcuaConfigurationError({
+        operation,
+        nodeId,
+        cause: "Duplicate nodeId",
+      });
+    }
+    seen.add(nodeId);
+  }
+  return undefined;
+};

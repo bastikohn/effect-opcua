@@ -1,24 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import { BrowseDirection, makeNodeClassMask, makeResultMask } from "node-opcua";
 
+import { OpcuaSession, type OpcuaBrowseReference } from "../src/index.js";
+import { OpcuaConfigurationError } from "../src/errors.js";
 import {
-  BrowseDirection as ExportedBrowseDirection,
-  OpcuaConfigurationError,
-  OpcuaNonGoodStatusError,
-  OpcuaSession,
-  makeResultMask as exportedMakeResultMask,
-} from "../src/index.js";
+  BrowseDirection,
+  makeNodeClassMask,
+  makeResultMask,
+} from "../src/node-opcua.js";
 import { makeLiveTestContext } from "./live.js";
 
 const { runLive } = makeLiveTestContext(4841);
 
 describe("browse", () => {
-  it("keeps browse helper re-exports", () => {
-    expect(ExportedBrowseDirection.Forward).toBe(BrowseDirection.Forward);
-    expect(exportedMakeResultMask("BrowseName")).toBe(
-      makeResultMask("BrowseName"),
-    );
+  it("moves node-opcua helpers to the node-opcua subpath", () => {
+    expect(BrowseDirection.Forward).toBe(0);
+    expect(makeResultMask("BrowseName")).toBeGreaterThan(0);
   });
 
   it("browses normalized child references from ObjectsFolder", async () => {
@@ -29,8 +26,11 @@ describe("browse", () => {
       }),
     );
 
-    const machine = result.references.find(
-      (reference) => reference.browseName?.name === "MyMachine",
+    expect(result._tag).toBe("Browsed");
+    const references = result._tag === "Browsed" ? result.references : [];
+    const machine = references.find(
+      (reference: OpcuaBrowseReference) =>
+        reference.browseName?.name === "MyMachine",
     );
     expect(machine).toMatchObject({
       nodeId: {
@@ -47,7 +47,7 @@ describe("browse", () => {
         text: "MyMachine",
       },
     });
-    expect(machine?.raw).toBeUndefined();
+    expect(machine?.unsafeRaw).toBeUndefined();
   });
 
   it("keeps lower-level browse raw fields opt-in", async () => {
@@ -62,9 +62,11 @@ describe("browse", () => {
       }),
     );
 
+    expect(result).toMatchObject({ _tag: "Browsed" });
+    if (result._tag !== "Browsed") return;
     expect(result.status).toMatchObject({ isGood: true });
-    expect(result.raw).toBeDefined();
-    expect(result.references[0]?.raw).toBeDefined();
+    expect(result.unsafeRaw).toBeDefined();
+    expect(result.references[0]?.unsafeRaw).toBeDefined();
     expect(result.references[0]?.browseName).toBeDefined();
   });
 
@@ -78,6 +80,8 @@ describe("browse", () => {
       }),
     );
 
+    expect(result._tag).toBe("Browsed");
+    if (result._tag !== "Browsed") return;
     expect(
       result.references.map((reference) => reference.browseName?.name),
     ).toEqual(
@@ -94,7 +98,7 @@ describe("browse", () => {
     ).toBe(true);
   });
 
-  it("fails invalid browse input before calling node-opcua", async () => {
+  it("returns browse non-good statuses as data", async () => {
     await expect(
       runLive(
         Effect.gen(function* () {
@@ -104,13 +108,15 @@ describe("browse", () => {
       ),
     ).rejects.toBeInstanceOf(OpcuaConfigurationError);
 
-    await expect(
-      runLive(
-        Effect.gen(function* () {
-          const session = yield* OpcuaSession;
-          return yield* session.browse({ nodeId: "ns=1;s=missing" });
-        }),
-      ),
-    ).rejects.toBeInstanceOf(OpcuaNonGoodStatusError);
+    const missing = await runLive(
+      Effect.gen(function* () {
+        const session = yield* OpcuaSession;
+        return yield* session.browse({ nodeId: "ns=1;s=missing" });
+      }),
+    );
+    expect(missing).toMatchObject({
+      _tag: "NonGoodStatus",
+      status: { isGood: false },
+    });
   });
 });

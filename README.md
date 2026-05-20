@@ -11,36 +11,64 @@ Local-first workspace for an Effect v4 OPC-UA client wrapper around node-opcua.
 - `@effect-opcua/demo-server`
 - `@effect-opcua/tui`
 
-## Method Calls
+## Definitions And Handles
 
-Use `browseChildren` to discover Method nodes on an object, then create a
-`methodHandle` to read method-specific metadata such as `InputArguments`,
-`OutputArguments`, `Executable`, and `UserExecutable`.
+Declare OPC-UA nodes as pure definitions, then ask the session for handles.
 
 ```ts
-const children = yield * session.browseChildren(objectId);
-const methodRef = children.references.find(
-  (reference) => reference.nodeClass === "Method",
-);
+const Temperature = Opcua.variable({
+  nodeId: "ns=2;s=Machine.Temperature",
+  codec: Opcua.schema(Schema.Number),
+});
 
-const method =
-  yield *
-  session.methodHandle({
-    objectId,
-    methodId: methodRef.nodeId.text,
-  });
+const Setpoint = Opcua.variable({
+  nodeId: "ns=2;s=Machine.Setpoint",
+  codec: Opcua.schema(Schema.Number),
+  access: "readWrite",
+});
+
+const Reset = Opcua.method({
+  objectId: "ns=2;s=Machine",
+  methodId: "ns=2;s=Machine.Reset",
+  input: {
+    mode: Opcua.arg({
+      name: "Mode",
+      codec: Opcua.schema(Schema.Literal("soft", "hard")),
+    }),
+  },
+  output: {
+    ok: Opcua.arg({
+      name: "Ok",
+      codec: Opcua.schema(Schema.Boolean),
+    }),
+  },
+});
+
+const temperature = yield * session.handle(Temperature);
+const setpoint = yield * session.handle(Setpoint);
+const reset = yield * session.handle(Reset);
+
+const current = yield * temperature.read();
+const written = yield * setpoint.write(42);
+const resetResult = yield * reset.call({ mode: "soft" });
+```
+
+Batch helpers operate on handles:
+
+```ts
+const [temperature, pressure] =
+  yield * session.handleAll([Temperature, Pressure] as const);
+
+const samples = yield * Opcua.readAll([temperature, pressure] as const);
 ```
 
 ## Structures
 
-Define OPC-UA `ExtensionObject` structures with `OpcuaStructure`. The schema
-direction is:
-
-- `Schema.decode`: OPC-UA POJO body to public app value
-- `Schema.encode`: public app value to OPC-UA POJO body
+Define OPC-UA `ExtensionObject` structures, wrap them in the shared codec, and
+use the same codec for variables, method arguments, and monitoring.
 
 ```ts
-const ScanSettings = OpcuaStructure.make({
+const ScanSettingsSpec = Opcua.Structure.make({
   name: "ScanSettings",
   dataTypeId: "ns=1;i=3010",
   schema: Schema.Struct({
@@ -49,95 +77,60 @@ const ScanSettings = OpcuaStructure.make({
     dataAvailable: Schema.Boolean,
   }),
 });
+
+const ScanSettings = Opcua.structure(ScanSettingsSpec);
+const ScanSettingsQueue = Opcua.structureArray(
+  Opcua.Structure.array(ScanSettingsSpec),
+);
 ```
 
-Read and write a scalar structure value:
-
 ```ts
-const handle =
+const settings =
   yield *
-  session.valueHandle({
-    nodeId: "ns=1;s=MyMachine.ScanSettings",
-    structure: ScanSettings,
-    capabilities: Capabilities.readWrite,
-  });
-
-const current = yield * handle.read();
+  session.handle(
+    Opcua.variable({
+      nodeId: "ns=1;s=MyMachine.ScanSettings",
+      codec: ScanSettings,
+      access: "readWrite",
+    }),
+  );
 
 yield *
-  handle.write({
+  settings.write({
     duration: 1000,
     cycles: 5,
     dataAvailable: true,
   });
 ```
 
-Read and write a one-dimensional structure array:
+## Monitoring
+
+Subscriptions expose one primitive, `monitor`; `watch` is a scoped stream
+wrapper over it.
 
 ```ts
-const queue =
+const subscription =
   yield *
-  session.valueHandle({
-    nodeId: "ns=1;s=MyMachine.ScanSettingsQueue",
-    structure: OpcuaStructure.array(ScanSettings),
-    capabilities: Capabilities.readWrite,
+  session.subscription({
+    publishingInterval: Duration.millis(100),
   });
+
+const samples = subscription.watch([Temperature] as const, {
+  samplingInterval: Duration.millis(50),
+  queueSize: 5,
+  discardOldest: true,
+  clientBuffer: Opcua.BufferPolicy.latest(),
+  filter: Opcua.MonitorFilter.statusValue(),
+});
 ```
 
-Call a method with mixed structure and scalar arguments:
+## Unsafe Access
+
+Raw node-opcua objects are exposed only through `unsafeRaw`, and node-opcua
+types/constants are available from the explicit subpath:
 
 ```ts
-const startScan =
-  yield *
-  session.methodHandle({
-    objectId: "ns=1;s=MyMachine",
-    methodId: "ns=1;s=MyMachine.StartScan",
-    input: {
-      Settings: ScanSettings,
-      DryRun: Schema.Boolean,
-    },
-    output: {
-      Accepted: Schema.Boolean,
-    },
-  });
-
-const result =
-  yield *
-  startScan.call({
-    Settings: {
-      duration: 1000,
-      cycles: 5,
-      dataAvailable: true,
-    },
-    DryRun: false,
-  });
-```
-
-Rename public method keys with explicit OPC-UA argument selectors:
-
-```ts
-const startScan =
-  yield *
-  session.methodHandle({
-    objectId,
-    methodId,
-    input: {
-      settings: {
-        opcuaArgumentName: "Settings",
-        structure: ScanSettings,
-      },
-      dryRun: {
-        opcuaArgumentName: "DryRun",
-        schema: Schema.Boolean,
-      },
-    },
-    output: {
-      accepted: {
-        opcuaArgumentName: "Accepted",
-        schema: Schema.Boolean,
-      },
-    },
-  });
+import { DataType, StatusCodes } from "@effect-opcua/client/node-opcua";
 ```
 
 ## Development

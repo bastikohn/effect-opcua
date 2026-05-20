@@ -14,17 +14,17 @@ export type OpcuaClientEvent =
       readonly endpointUrl: string;
       readonly cause: unknown;
     }
-  | { readonly _tag: "Backoff"; readonly raw: unknown }
-  | { readonly _tag: "StartReconnection"; readonly raw: unknown }
-  | { readonly _tag: "AfterReconnection"; readonly raw: unknown }
-  | { readonly _tag: "ConnectionLost"; readonly raw: unknown }
-  | { readonly _tag: "ConnectionReestablished"; readonly raw: unknown }
+  | { readonly _tag: "Backoff"; readonly unsafeRaw: unknown }
+  | { readonly _tag: "StartReconnection"; readonly unsafeRaw: unknown }
+  | { readonly _tag: "AfterReconnection"; readonly unsafeRaw: unknown }
+  | { readonly _tag: "ConnectionLost"; readonly unsafeRaw: unknown }
+  | { readonly _tag: "ConnectionReestablished"; readonly unsafeRaw: unknown }
   | { readonly _tag: "Disconnected"; readonly endpointUrl?: string };
 
 export type OpcuaSessionEvent =
-  | { readonly _tag: "KeepAlive"; readonly raw: unknown }
-  | { readonly _tag: "KeepAliveFailure"; readonly raw: unknown }
-  | { readonly _tag: "SessionClosed"; readonly raw: unknown }
+  | { readonly _tag: "KeepAlive"; readonly unsafeRaw: unknown }
+  | { readonly _tag: "KeepAliveFailure"; readonly unsafeRaw: unknown }
+  | { readonly _tag: "SessionClosed"; readonly unsafeRaw: unknown }
   | { readonly _tag: "SessionRestored" };
 
 export type OpcuaSubscriptionEvent =
@@ -43,7 +43,7 @@ export type OpcuaSubscriptionEvent =
   | {
       readonly _tag: "StatusChanged";
       readonly subscriptionId?: number;
-      readonly raw: unknown;
+      readonly unsafeRaw: unknown;
     }
   | {
       readonly _tag: "ClientBufferDropped";
@@ -61,81 +61,167 @@ export type OpcuaSubscriptionEvent =
       readonly nodeIds: ReadonlyArray<NodeIdString>;
     };
 
-export const publishUnsafe = <A>(pubsub: PubSub.PubSub<A>, event: A) => {
-  Effect.runFork(PubSub.publish(pubsub, event));
+type Emitter = {
+  readonly on: (
+    event: string,
+    listener: (...args: ReadonlyArray<unknown>) => void,
+  ) => unknown;
+  readonly off?: (
+    event: string,
+    listener: (...args: ReadonlyArray<unknown>) => void,
+  ) => unknown;
+  readonly removeListener?: (
+    event: string,
+    listener: (...args: ReadonlyArray<unknown>) => void,
+  ) => unknown;
+};
+
+type EventMapping<A> = {
+  readonly event: string;
+  readonly make: (...args: ReadonlyArray<unknown>) => A;
+};
+
+export const EventBus = {
+  publish: <A>(pubsub: PubSub.PubSub<A>, event: A) => {
+    Effect.runFork(PubSub.publish(pubsub, event));
+  },
+  wireEmitter: <A>(
+    emitter: Emitter,
+    mappings: ReadonlyArray<EventMapping<A>>,
+    pubsub: PubSub.PubSub<A>,
+  ) =>
+    Effect.acquireRelease(
+      Effect.sync(() =>
+        mappings.map((mapping) => {
+          const listener = (...args: ReadonlyArray<unknown>) => {
+            EventBus.publish(pubsub, mapping.make(...args));
+          };
+          emitter.on(mapping.event, listener);
+          return { event: mapping.event, listener };
+        }),
+      ),
+      (listeners) =>
+        Effect.sync(() => {
+          for (const { event, listener } of listeners) {
+            if (emitter.off) emitter.off(event, listener);
+            else emitter.removeListener?.(event, listener);
+          }
+        }),
+    ),
 };
 
 export const wireClientEvents = (
   client: OPCUAClient,
   events: PubSub.PubSub<OpcuaClientEvent>,
-) => {
-  client.on("backoff", (...raw) =>
-    publishUnsafe(events, { _tag: "Backoff", raw }),
+) =>
+  EventBus.wireEmitter(
+    client as unknown as Emitter,
+    [
+      {
+        event: "backoff",
+        make: (...unsafeRaw) => ({ _tag: "Backoff", unsafeRaw }) as const,
+      },
+      {
+        event: "start_reconnection",
+        make: (...unsafeRaw) =>
+          ({ _tag: "StartReconnection", unsafeRaw }) as const,
+      },
+      {
+        event: "after_reconnection",
+        make: (...unsafeRaw) =>
+          ({ _tag: "AfterReconnection", unsafeRaw }) as const,
+      },
+      {
+        event: "connection_lost",
+        make: (...unsafeRaw) =>
+          ({ _tag: "ConnectionLost", unsafeRaw }) as const,
+      },
+      {
+        event: "connection_reestablished",
+        make: (...unsafeRaw) =>
+          ({ _tag: "ConnectionReestablished", unsafeRaw }) as const,
+      },
+    ],
+    events,
   );
-  client.on("start_reconnection", (...raw) =>
-    publishUnsafe(events, { _tag: "StartReconnection", raw }),
-  );
-  client.on("after_reconnection", (...raw) =>
-    publishUnsafe(events, { _tag: "AfterReconnection", raw }),
-  );
-  client.on("connection_lost", (...raw) =>
-    publishUnsafe(events, { _tag: "ConnectionLost", raw }),
-  );
-  client.on("connection_reestablished", (...raw) =>
-    publishUnsafe(events, { _tag: "ConnectionReestablished", raw }),
-  );
-};
 
 export const wireSessionEvents = (
   session: ClientSession,
   events: PubSub.PubSub<OpcuaSessionEvent>,
-) => {
-  session.on("keepalive", (raw) =>
-    publishUnsafe(events, { _tag: "KeepAlive", raw }),
+) =>
+  EventBus.wireEmitter(
+    session as unknown as Emitter,
+    [
+      {
+        event: "keepalive",
+        make: (unsafeRaw) => ({ _tag: "KeepAlive", unsafeRaw }) as const,
+      },
+      {
+        event: "keepalive_failure",
+        make: (unsafeRaw) => ({ _tag: "KeepAliveFailure", unsafeRaw }) as const,
+      },
+      {
+        event: "session_closed",
+        make: (unsafeRaw) => ({ _tag: "SessionClosed", unsafeRaw }) as const,
+      },
+      {
+        event: "session_restored",
+        make: () => ({ _tag: "SessionRestored" }) as const,
+      },
+    ],
+    events,
   );
-  session.on("keepalive_failure", (raw) =>
-    publishUnsafe(events, { _tag: "KeepAliveFailure", raw }),
-  );
-  session.on("session_closed", (raw) =>
-    publishUnsafe(events, { _tag: "SessionClosed", raw }),
-  );
-  session.on("session_restored", () =>
-    publishUnsafe(events, { _tag: "SessionRestored" }),
-  );
-};
 
 export const wireSubscriptionEvents = (
   subscription: ClientSubscription,
   events: PubSub.PubSub<OpcuaSubscriptionEvent>,
-) => {
-  subscription.on("started", (subscriptionId) =>
-    publishUnsafe(events, { _tag: "Started", subscriptionId }),
+) =>
+  EventBus.wireEmitter(
+    subscription as unknown as Emitter,
+    [
+      {
+        event: "started",
+        make: (subscriptionId) =>
+          ({
+            _tag: "Started",
+            subscriptionId: Number(subscriptionId),
+          }) as const,
+      },
+      {
+        event: "terminated",
+        make: (...unsafeRaw) =>
+          ({
+            _tag: "Terminated",
+            subscriptionId: subscription.subscriptionId,
+            cause: unsafeRaw,
+          }) as const,
+      },
+      {
+        event: "keepalive",
+        make: () =>
+          ({
+            _tag: "KeepAlive",
+            subscriptionId: subscription.subscriptionId,
+          }) as const,
+      },
+      {
+        event: "internal_error",
+        make: (cause) =>
+          ({
+            _tag: "InternalError",
+            subscriptionId: subscription.subscriptionId,
+            cause,
+          }) as const,
+      },
+      {
+        event: "status_changed",
+        make: (...unsafeRaw) =>
+          ({
+            _tag: "StatusChanged",
+            subscriptionId: subscription.subscriptionId,
+            unsafeRaw,
+          }) as const,
+      },
+    ],
+    events,
   );
-  subscription.on("terminated", (...raw) =>
-    publishUnsafe(events, {
-      _tag: "Terminated",
-      subscriptionId: subscription.subscriptionId,
-      cause: raw,
-    }),
-  );
-  subscription.on("keepalive", () =>
-    publishUnsafe(events, {
-      _tag: "KeepAlive",
-      subscriptionId: subscription.subscriptionId,
-    }),
-  );
-  subscription.on("internal_error", (cause) =>
-    publishUnsafe(events, {
-      _tag: "InternalError",
-      subscriptionId: subscription.subscriptionId,
-      cause,
-    }),
-  );
-  subscription.on("status_changed", (...raw) =>
-    publishUnsafe(events, {
-      _tag: "StatusChanged",
-      subscriptionId: subscription.subscriptionId,
-      raw,
-    }),
-  );
-};

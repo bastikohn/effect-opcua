@@ -2,85 +2,70 @@ import { Config, Schema } from "effect";
 import { expect, it } from "vitest";
 
 import {
-  Capabilities,
+  Opcua,
   OpcuaClient,
   type OpcuaSession,
-  type OpcuaMethodSpec,
-  type OpcuaValueHandle,
-  type WritableOpcuaValueHandle,
+  type VariableHandle,
+  type WritableVariableHandle,
 } from "../src/index.js";
 
-const expectWriteHandleValuesTypes = (
+const expectVariableHandleTypes = (
   session: OpcuaSession,
-  numberHandle: WritableOpcuaValueHandle<number>,
-  readOnlyHandle: OpcuaValueHandle<number, typeof Capabilities.read>,
+  writable: WritableVariableHandle<number>,
+  readOnly: VariableHandle<string, number, "read">,
 ) => {
-  session.writeHandleValues([{ handle: numberHandle, value: 123 }]);
+  writable.write(123);
 
-  // @ts-expect-error value must match the handle schema type
-  session.writeHandleValues([{ handle: numberHandle, value: "wrong" }]);
+  // @ts-expect-error value must match the handle codec type
+  writable.write("wrong");
 
-  // @ts-expect-error read-only handles are not accepted for writes
-  session.writeHandleValues([{ handle: readOnlyHandle, value: 123 }]);
+  // @ts-expect-error read-only handles do not expose write
+  readOnly.write(123);
+
+  session.handle(
+    Opcua.variable({
+      nodeId: "ns=1;s=Number",
+      codec: Opcua.schema(Schema.Number),
+    }),
+  );
 };
 
-void expectWriteHandleValuesTypes;
+void expectVariableHandleTypes;
 
-const expectWriteValuesTypes = (session: OpcuaSession) => {
-  const spec = {
-    nodeId: "ns=1;s=Number",
-    schema: Schema.Number,
-    value: 123,
-  } as const;
+const expectBatchTypes = (
+  numberHandle: WritableVariableHandle<number>,
+  booleanHandle: WritableVariableHandle<boolean>,
+) => {
+  Opcua.writeAll([
+    { handle: numberHandle, value: 123 },
+    { handle: booleanHandle, value: false },
+  ] as const);
 
-  session.writeValues([spec]);
-
-  const badSpec = {
-    nodeId: "ns=1;s=Number",
-    schema: Schema.Number,
-    value: "wrong",
-  };
-
-  // @ts-expect-error schema-backed values must match the schema type
-  session.writeValues([badSpec]);
-};
-
-void expectWriteValuesTypes;
-
-const expectReadValueTypes = (session: OpcuaSession) => {
-  session.readValue({ nodeId: "ns=1;s=Dynamic" });
-  session.readValue({ nodeId: "ns=1;s=Number", schema: Schema.Number });
-  session.readValues([
-    { nodeId: "ns=1;s=Dynamic" },
-    { nodeId: "ns=1;s=Number", schema: Schema.Number },
+  Opcua.writeAll([
+    {
+      handle: numberHandle,
+      // @ts-expect-error write values must match their handle type
+      value: "wrong",
+    },
   ] as const);
 };
 
-void expectReadValueTypes;
+void expectBatchTypes;
 
 const expectMethodTypes = (session: OpcuaSession) => {
-  const start = {
+  const start = Opcua.method({
     objectId: "ns=1;s=MyMachine",
     methodId: "ns=1;s=MyMachine.Start",
     input: {
-      StartSpeed: Schema.Number,
-      Force: Schema.Boolean,
+      StartSpeed: Opcua.arg({ codec: Opcua.schema(Schema.Number) }),
+      Force: Opcua.arg({ codec: Opcua.schema(Schema.Boolean) }),
     },
     output: {
-      Accepted: Schema.Boolean,
+      Accepted: Opcua.arg({ codec: Opcua.schema(Schema.Boolean) }),
     },
-  } as const satisfies OpcuaMethodSpec;
-
-  session.callMethod({
-    ...start,
-    inputValues: { StartSpeed: 1, Force: false },
   });
 
-  session.callMethod({
-    ...start,
-    // @ts-expect-error method input must match the input schema
-    inputValues: { StartSpeed: "wrong", Force: false },
-  });
+  session.handle(start);
 };
 
 void expectMethodTypes;

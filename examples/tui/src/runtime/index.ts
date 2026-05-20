@@ -1,14 +1,12 @@
 import {
-  Capabilities,
-  ClientBufferPolicy,
-  MonitorValueFilter,
+  Opcua,
   OpcuaClient,
   OpcuaSession,
   type NodeIdString,
   type OpcuaBrowseReference,
   type OpcuaDynamicValue,
-  type OpcuaValueSample,
-  type OpcuaWriteResult,
+  type ReadResult,
+  type WriteResult,
 } from "@effect-opcua/client";
 import {
   Cause,
@@ -38,7 +36,7 @@ export type TuiTreeEntry = {
 
 export type SelectedNodeState = {
   readonly entry?: TuiTreeEntry;
-  readonly sample?: OpcuaValueSample<unknown>;
+  readonly sample?: ReadResult<unknown>;
   readonly error?: string;
 };
 
@@ -56,7 +54,7 @@ export type TuiState = {
   readonly selectedNode?: SelectedNodeState;
   readonly monitors: {
     readonly desired: ReadonlySet<NodeIdString>;
-    readonly latest: ReadonlyMap<NodeIdString, OpcuaValueSample<unknown>>;
+    readonly latest: ReadonlyMap<NodeIdString, ReadResult<unknown>>;
   };
   readonly eventLog: ReadonlyArray<TuiEvent>;
   readonly writesEnabled: boolean;
@@ -69,7 +67,7 @@ export type TuiRuntime = {
   readonly collapseNode: (entryId: TreeEntryId) => Promise<void>;
   readonly selectNode: (entryId: TreeEntryId) => Promise<void>;
   readonly refreshNode: (entryId: TreeEntryId) => Promise<void>;
-  readonly writeSelected: (value: unknown) => Promise<OpcuaWriteResult>;
+  readonly writeSelected: (value: unknown) => Promise<WriteResult>;
   readonly monitorSelected: () => Promise<void>;
   readonly unmonitorSelected: () => Promise<void>;
   readonly reportError: (message: string) => void;
@@ -180,6 +178,10 @@ export const createTuiRuntime = async (
         return yield* session.browseChildren(entry.nodeId);
       }),
     );
+    if (result._tag === "NonGoodStatus") {
+      log(`Browse ${entry.label} ${result.status.text}`);
+      return;
+    }
     const children = result.references.map((reference, index): TuiTreeEntry => {
       const nodeId = reference.nodeId.text;
       const pathNodeIds = [...entry.pathNodeIds, nodeId];
@@ -281,7 +283,9 @@ export const createTuiRuntime = async (
       const sample = await run(
         Effect.gen(function* () {
           const session = yield* OpcuaSession;
-          const handle = yield* session.valueHandle({ nodeId: entry.nodeId });
+          const handle = yield* session.handle(
+            Opcua.variable({ nodeId: entry.nodeId }),
+          );
           return yield* handle.read();
         }),
       );
@@ -302,16 +306,16 @@ export const createTuiRuntime = async (
       Effect.scoped(
         Effect.gen(function* () {
           const session = yield* OpcuaSession;
-          const subscription = yield* session.createSubscription({
+          const subscription = yield* session.subscription({
             publishingInterval: Duration.millis(250),
           });
           yield* subscription
-            .monitorValues([{ nodeId: entry.nodeId }], {
+            .watch([Opcua.variable({ nodeId: entry.nodeId })], {
               samplingInterval: Duration.millis(250),
               queueSize: 5,
               discardOldest: true,
-              clientBuffer: ClientBufferPolicy.latest(),
-              filter: MonitorValueFilter.statusValue(),
+              clientBuffer: Opcua.BufferPolicy.latest(),
+              filter: Opcua.MonitorFilter.statusValue(),
             })
             .pipe(
               Stream.runForEach((sample) =>
@@ -368,10 +372,12 @@ export const createTuiRuntime = async (
       const { result, sample } = await run(
         Effect.gen(function* () {
           const session = yield* OpcuaSession;
-          const handle = yield* session.valueHandle({
-            nodeId: entry.nodeId,
-            capabilities: Capabilities.readWrite,
-          });
+          const handle = yield* session.handle(
+            Opcua.variable({
+              nodeId: entry.nodeId,
+              access: "readWrite",
+            }),
+          );
           const result = yield* handle.write(value as OpcuaDynamicValue);
           const sample = yield* handle.read();
           return { result, sample };

@@ -1,0 +1,33 @@
+export type {
+  Argument,
+  BrowseResult,
+  ClientMonitoredItemGroup,
+  ClientSession,
+  ClientSubscription,
+  DataValue,
+  ExpandedNodeId,
+  NodeId,
+  OPCUAClient,
+  OPCUAClientOptions,
+  ReferenceDescription,
+  ReadValueIdOptions,
+  StatusCode,
+  UserIdentityInfo,
+} from "node-opcua";
+
+export {
+  AccessLevelFlag,
+  AttributeIds,
+  BrowseDirection,
+  DataType,
+  NodeClass,
+  NodeClassMask,
+  ResultMask,
+  StatusCodes,
+  TimestampsToReturn,
+  Variant,
+  VariantArrayType,
+  coerceNodeId,
+  makeNodeClassMask,
+  makeResultMask,
+} from "node-opcua";

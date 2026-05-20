@@ -1,7 +1,7 @@
 import type { DataValue, StatusCode } from "node-opcua";
 import { Data } from "effect";
 
-import type { Capability, NodeIdString } from "./capabilities.js";
+import type { NodeIdString, VariableCapability } from "./capabilities.js";
 
 export class OpcuaConnectError extends Data.TaggedError("OpcuaConnectError")<{
   readonly endpointUrl: string;
@@ -81,7 +81,7 @@ export class OpcuaAccessDeniedError extends Data.TaggedError(
   "OpcuaAccessDeniedError",
 )<{
   readonly nodeId: NodeIdString;
-  readonly requestedCapability: Capability;
+  readonly requestedCapability: VariableCapability;
   readonly accessLevel?: number;
   readonly userAccessLevel?: number;
   readonly cause?: unknown;

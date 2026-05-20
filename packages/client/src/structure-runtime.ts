@@ -26,6 +26,7 @@ import {
 
 export type OpcuaStructureRuntime = {
   readonly ensureInitialized: () => Effect.Effect<void, OpcuaServiceError>;
+  readonly invalidate: Effect.Effect<void>;
   readonly encodeStructure: <A>(
     nodeId: NodeIdString,
     codec: OpcuaStructureCodec<A>,
@@ -59,11 +60,10 @@ export const makeStructureRuntime = (
 ): OpcuaStructureRuntime => {
   let initializeOnce = makeInitializeOnce(session);
 
-  session.on("session_restored", () => {
+  const ensureInitialized = () => initializeOnce;
+  const invalidate = Effect.sync(() => {
     initializeOnce = makeInitializeOnce(session);
   });
-
-  const ensureInitialized = () => initializeOnce;
 
   const encodeStructure = <A>(
     nodeId: NodeIdString,
@@ -145,6 +145,7 @@ export const makeStructureRuntime = (
 
   return {
     ensureInitialized,
+    invalidate,
     encodeStructure,
     encodeStructureArray,
     decodeStructure,

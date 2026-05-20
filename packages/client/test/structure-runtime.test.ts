@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { DataType, coerceNodeId } from "node-opcua";
 import { Schema } from "effect";
 
-import { OpcuaStructure } from "../src/index.js";
+import { Opcua } from "../src/index.js";
+import { DataType, coerceNodeId } from "../src/node-opcua.js";
 import { validateStructureMetadata } from "../src/structure-runtime.js";
 
-const ScanSettings = OpcuaStructure.make({
+const ScanSettings = Opcua.Structure.make({
   name: "ScanSettings",
   dataTypeId: "ns=1;i=3010",
   schema: Schema.Struct({
@@ -38,7 +38,7 @@ describe("structure runtime metadata validation", () => {
   });
 
   it("accepts OPC-UA one-dimensional array-compatible ValueRanks", () => {
-    const structure = OpcuaStructure.array(ScanSettings);
+    const structure = Opcua.Structure.array(ScanSettings);
     for (const valueRank of [1, 0, -2, -3]) {
       expect(
         validateStructureMetadata(

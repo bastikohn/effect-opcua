@@ -1,4 +1,3 @@
-import { Effect } from "effect";
 import {
   BrowseDirection,
   NodeClass,
@@ -8,7 +7,7 @@ import {
   type ReferenceDescription,
 } from "node-opcua";
 
-import { OpcuaConfigurationError, OpcuaNonGoodStatusError } from "./errors.js";
+import { OpcuaConfigurationError } from "./errors.js";
 import {
   isGood,
   normalizeExpandedNodeId,
@@ -30,27 +29,31 @@ export type OpcuaBrowseReference = {
   readonly browseName?: OpcuaQualifiedNameInfo;
   readonly displayName?: OpcuaLocalizedTextInfo;
   readonly typeDefinition?: OpcuaExpandedNodeIdInfo;
-  readonly raw?: ReferenceDescription;
+  readonly unsafeRaw?: ReferenceDescription;
 };
 
 export type OpcuaBrowseContinuation = {
   readonly nodeId: NodeIdString;
-  readonly raw: Buffer;
+  readonly unsafeRaw: Buffer;
 };
 
-export type OpcuaBrowseResult = {
-  readonly nodeId: NodeIdString;
-  readonly status: OpcuaStatusInfo;
-  readonly references: ReadonlyArray<OpcuaBrowseReference>;
-  readonly continuation?: OpcuaBrowseContinuation;
-  readonly raw?: BrowseResult;
-};
+export type OpcuaBrowseResult =
+  | {
+      readonly _tag: "Browsed";
+      readonly nodeId: NodeIdString;
+      readonly status: OpcuaStatusInfo;
+      readonly references: ReadonlyArray<OpcuaBrowseReference>;
+      readonly continuation?: OpcuaBrowseContinuation;
+      readonly unsafeRaw?: BrowseResult;
+    }
+  | {
+      readonly _tag: "NonGoodStatus";
+      readonly nodeId: NodeIdString;
+      readonly status: OpcuaStatusInfo;
+      readonly unsafeRaw?: BrowseResult;
+    };
 
-export type OpcuaBrowseChildrenResult = {
-  readonly nodeId: NodeIdString;
-  readonly references: ReadonlyArray<OpcuaBrowseReference>;
-  readonly continuation?: OpcuaBrowseContinuation;
-};
+export type OpcuaBrowseChildrenResult = OpcuaBrowseResult;
 
 export type OpcuaBrowseOptions = {
   readonly nodeId: NodeIdString;
@@ -105,7 +108,7 @@ export const browseContinuationError = (
       cause: "nodeId must not be empty",
     });
   }
-  if (continuation.raw.length === 0) {
+  if (continuation.unsafeRaw.length === 0) {
     return new OpcuaConfigurationError({
       operation,
       nodeId: continuation.nodeId,
@@ -129,42 +132,35 @@ export const browseWithMaxReferences = async (
   }
 };
 
-export const normalizeBrowseResultOrFail = (
-  operation: string,
+export const normalizeBrowseResult = (
   nodeId: NodeIdString,
   result: BrowseResult,
   includeRaw: boolean,
-): Effect.Effect<OpcuaBrowseResult, OpcuaNonGoodStatusError> => {
+): OpcuaBrowseResult => {
   if (!isGood(result.statusCode)) {
-    return Effect.fail(
-      new OpcuaNonGoodStatusError({
-        operation,
-        nodeId,
-        statusCode: result.statusCode,
-      }),
-    );
+    return {
+      _tag: "NonGoodStatus",
+      nodeId,
+      status: normalizeStatusCode(result.statusCode),
+      unsafeRaw: includeRaw ? result : undefined,
+    };
   }
 
-  return Effect.succeed(normalizeBrowseResult(nodeId, result, includeRaw));
+  return {
+    _tag: "Browsed",
+    nodeId,
+    status: normalizeStatusCode(result.statusCode),
+    references:
+      result.references?.map((reference) =>
+        normalizeBrowseReference(reference, includeRaw),
+      ) ?? [],
+    continuation:
+      result.continuationPoint && result.continuationPoint.length > 0
+        ? { nodeId, unsafeRaw: result.continuationPoint }
+        : undefined,
+    unsafeRaw: includeRaw ? result : undefined,
+  };
 };
-
-const normalizeBrowseResult = (
-  nodeId: NodeIdString,
-  result: BrowseResult,
-  includeRaw: boolean,
-): OpcuaBrowseResult => ({
-  nodeId,
-  status: normalizeStatusCode(result.statusCode),
-  references:
-    result.references?.map((reference) =>
-      normalizeBrowseReference(reference, includeRaw),
-    ) ?? [],
-  continuation:
-    result.continuationPoint && result.continuationPoint.length > 0
-      ? { nodeId, raw: result.continuationPoint }
-      : undefined,
-  raw: includeRaw ? result : undefined,
-});
 
 export const normalizeBrowseReference = (
   reference: ReferenceDescription,
@@ -186,5 +182,5 @@ export const normalizeBrowseReference = (
   typeDefinition: reference.typeDefinition
     ? normalizeExpandedNodeId(reference.typeDefinition)
     : undefined,
-  raw: includeRaw ? reference : undefined,
+  unsafeRaw: includeRaw ? reference : undefined,
 });

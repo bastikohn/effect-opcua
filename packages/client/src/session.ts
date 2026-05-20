@@ -1,11 +1,8 @@
 import {
-  AttributeIds,
   ClientSubscription,
-  coerceNodeId,
   resolveNodeId,
   type ClientSession,
   type UserIdentityInfo,
-  type WriteValueOptions,
 } from "node-opcua";
 import {
   Context,
@@ -13,16 +10,11 @@ import {
   Effect,
   Layer,
   PubSub,
-  Semaphore,
   Scope,
+  Semaphore,
   Stream,
 } from "effect";
 
-import {
-  Capabilities,
-  type CapabilitySet,
-  type NodeIdString,
-} from "./capabilities.js";
 import {
   DEFAULT_BROWSE_DIRECTION,
   DEFAULT_BROWSE_INCLUDE_SUBTYPES,
@@ -42,7 +34,7 @@ import {
   browseContinuationError,
   browseOptionsError,
   browseWithMaxReferences,
-  normalizeBrowseResultOrFail,
+  normalizeBrowseResult,
   type OpcuaBrowseChildrenOptions,
   type OpcuaBrowseChildrenResult,
   type OpcuaBrowseContinuation,
@@ -52,10 +44,7 @@ import {
 import {
   OpcuaAccessDeniedError,
   OpcuaConfigurationError,
-  OpcuaEncodeError,
-  OpcuaMethodInputError,
   OpcuaMethodNotExecutableError,
-  OpcuaNonGoodStatusError,
   OpcuaServiceError,
   OpcuaSessionCloseError,
   OpcuaSessionCreateError,
@@ -67,171 +56,98 @@ import {
   wireSessionEvents,
   wireSubscriptionEvents,
 } from "./events.js";
+import { makeMetadataService } from "./metadata.js";
 import { makeSubscription, type OpcuaSubscription } from "./monitoring.js";
-import { isGood } from "./normalize.js";
-import {
-  discoverMetadata,
-  hasStructureSpec,
-  hasCapability,
-  makeVariant,
-  readDataValue,
-  sampleFromDataValue,
-  validateValueStructureSpec,
-  writeByMetadata,
-  writeResult,
-  type OpcuaValueHandle,
-  type OpcuaValueSample,
-  type OpcuaWriteResult,
-  type OpcuaWriteValuesResult,
-  type WriteValuesResult,
-  type ReadValuesResult,
-  type ValueOfSpec,
-  type ValueSpec,
-  type WritableOpcuaValueHandle,
-  type WriteEntry,
-  type NodeIdsOfHandles,
-} from "./values.js";
-import {
-  callMethodHandles,
-  makeMethodHandle,
-  type InputOfMethodSpec,
-  type MethodCallEntry,
-  type MethodCallHandlesResult,
-  type OpcuaMethodCallOptions,
-  type OpcuaMethodCallResult,
-  type OpcuaMethodHandle,
-  type OpcuaMethodSpec,
-  type OutputOfMethodSpec,
-} from "./methods.js";
 import { makeStructureRuntime } from "./structure-runtime.js";
+import type { NodeIdString } from "./capabilities.js";
+import {
+  makeMethodHandle,
+  type AnyMethodDef,
+  type InputOfMethodDef,
+  type MethodDef,
+  type MethodHandle,
+  type OutputOfMethodDef,
+} from "./methods.js";
+import {
+  makeVariableHandle,
+  type AnyVariableDef,
+  type VariableAccess,
+  type VariableDef,
+  type VariableHandle,
+} from "./values.js";
+
+export type HandleDef = AnyVariableDef | AnyMethodDef;
+
+export type HandleOf<Def> =
+  Def extends VariableDef<infer Id, infer A, infer Access>
+    ? VariableHandle<Id, A, Access>
+    : Def extends MethodDef<
+          infer ObjectId,
+          infer MethodId,
+          infer Input,
+          infer Output
+        >
+      ? MethodHandle<
+          InputOfMethodDef<MethodDef<ObjectId, MethodId, Input, Output>>,
+          OutputOfMethodDef<MethodDef<ObjectId, MethodId, Input, Output>>,
+          ObjectId,
+          MethodId
+        >
+      : never;
+
+export type HandlesOf<Defs extends ReadonlyArray<unknown>> = {
+  readonly [Index in keyof Defs]: HandleOf<Defs[Index]>;
+};
+
+type HandleError =
+  | OpcuaConfigurationError
+  | OpcuaServiceError
+  | OpcuaAccessDeniedError
+  | OpcuaMethodNotExecutableError;
 
 export type OpcuaSession = {
-  readonly readValue: <const Spec extends ValueSpec<NodeIdString>>(
-    input: Spec,
-  ) => Effect.Effect<
-    Spec extends ValueSpec<infer Id>
-      ? OpcuaValueSample<ValueOfSpec<Spec>, Id>
-      : never,
-    OpcuaServiceError
-  >;
-  readonly readValues: <const Specs extends ReadonlyArray<ValueSpec>>(
-    specs: Specs,
-  ) => Effect.Effect<
-    ReadValuesResult<Specs>,
-    OpcuaConfigurationError | OpcuaServiceError
-  >;
-  readonly valueHandle: <
-    const Spec extends ValueSpec<NodeIdString>,
-    const Caps extends CapabilitySet = typeof Capabilities.read,
-  >(
-    input: Spec & { readonly capabilities?: Caps },
-  ) => Effect.Effect<
-    Spec extends ValueSpec<infer Id>
-      ? OpcuaValueHandle<ValueOfSpec<Spec>, Caps, Id>
-      : never,
-    OpcuaServiceError | OpcuaAccessDeniedError | OpcuaConfigurationError
-  >;
-  readonly writeValue: <const Spec extends ValueSpec<NodeIdString>>(
-    input: Spec & {
-      readonly value: ValueOfSpec<Spec>;
-    },
-  ) => Effect.Effect<
-    Spec extends ValueSpec<infer Id> ? OpcuaWriteResult<Id> : never,
-    | OpcuaConfigurationError
-    | OpcuaEncodeError
-    | OpcuaServiceError
-    | OpcuaAccessDeniedError
-  >;
-  readonly writeValues: <const Specs extends ReadonlyArray<ValueSpec>>(specs: {
-    readonly [Index in keyof Specs]: Specs[Index] & {
-      readonly value: ValueOfSpec<Specs[Index]>;
-    };
-  }) => Effect.Effect<
-    WriteValuesResult<Specs>,
-    | OpcuaConfigurationError
-    | OpcuaEncodeError
-    | OpcuaServiceError
-    | OpcuaAccessDeniedError
-  >;
-  readonly writeHandleValues: <
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const Handles extends ReadonlyArray<WritableOpcuaValueHandle<any>>,
-  >(writes: {
-    readonly [Index in keyof Handles]: WriteEntry<Handles[Index]>;
-  }) => Effect.Effect<
-    OpcuaWriteValuesResult<NodeIdsOfHandles<Handles>>,
-    | OpcuaConfigurationError
-    | OpcuaEncodeError
-    | OpcuaServiceError
-    | OpcuaAccessDeniedError
-  >;
-  readonly methodHandle: <const Spec extends OpcuaMethodSpec>(
-    spec: Spec,
-  ) => Effect.Effect<
-    OpcuaMethodHandle<
-      InputOfMethodSpec<Spec>,
-      OutputOfMethodSpec<Spec>,
-      Spec["objectId"],
-      Spec["methodId"]
-    >,
-    | OpcuaConfigurationError
-    | OpcuaServiceError
-    | OpcuaMethodNotExecutableError
-    | OpcuaAccessDeniedError
-  >;
-  readonly callMethod: <const Spec extends OpcuaMethodSpec>(
-    spec: Spec & { readonly inputValues: InputOfMethodSpec<Spec> },
-    options?: OpcuaMethodCallOptions,
-  ) => Effect.Effect<
-    OpcuaMethodCallResult<
-      OutputOfMethodSpec<Spec>,
-      Spec["objectId"],
-      Spec["methodId"]
-    >,
-    | OpcuaConfigurationError
-    | OpcuaServiceError
-    | OpcuaMethodInputError
-    | OpcuaMethodNotExecutableError
-    | OpcuaAccessDeniedError
-  >;
-  readonly callMethodHandles: <
-    const Handles extends ReadonlyArray<OpcuaMethodHandle>,
-  >(entries: {
-    readonly [Index in keyof Handles]: MethodCallEntry<Handles[Index]>;
-  }) => Effect.Effect<
-    MethodCallHandlesResult<Handles>,
-    | OpcuaConfigurationError
-    | OpcuaServiceError
-    | OpcuaMethodInputError
-    | OpcuaMethodNotExecutableError
-    | OpcuaAccessDeniedError
-  >;
+  readonly handle: {
+    <const Id extends string, A, const Access extends VariableAccess>(
+      def: VariableDef<Id, A, Access>,
+    ): Effect.Effect<VariableHandle<Id, A, Access>, HandleError>;
+    <const Spec extends AnyMethodDef>(
+      def: Spec,
+    ): Effect.Effect<
+      MethodHandle<
+        InputOfMethodDef<Spec>,
+        OutputOfMethodDef<Spec>,
+        Spec["objectId"],
+        Spec["methodId"]
+      >,
+      HandleError
+    >;
+  };
+  readonly handleAll: <const Defs extends ReadonlyArray<HandleDef>>(
+    defs: Defs,
+  ) => Effect.Effect<HandlesOf<Defs>, HandleError>;
   readonly browse: (
     input: OpcuaBrowseOptions,
   ) => Effect.Effect<
     OpcuaBrowseResult,
-    OpcuaConfigurationError | OpcuaServiceError | OpcuaNonGoodStatusError
+    OpcuaConfigurationError | OpcuaServiceError
   >;
   readonly browseNext: (
     continuation: OpcuaBrowseContinuation & { readonly includeRaw?: boolean },
   ) => Effect.Effect<
     OpcuaBrowseResult,
-    OpcuaConfigurationError | OpcuaServiceError | OpcuaNonGoodStatusError
+    OpcuaConfigurationError | OpcuaServiceError
   >;
   readonly releaseBrowseContinuation: (
     continuation: OpcuaBrowseContinuation,
-  ) => Effect.Effect<
-    void,
-    OpcuaConfigurationError | OpcuaServiceError | OpcuaNonGoodStatusError
-  >;
+  ) => Effect.Effect<void, OpcuaConfigurationError | OpcuaServiceError>;
   readonly browseChildren: (
     nodeId: NodeIdString,
     options?: OpcuaBrowseChildrenOptions,
   ) => Effect.Effect<
     OpcuaBrowseChildrenResult,
-    OpcuaConfigurationError | OpcuaServiceError | OpcuaNonGoodStatusError
+    OpcuaConfigurationError | OpcuaServiceError
   >;
-  readonly createSubscription: (options: {
+  readonly subscription: (options: {
     readonly publishingInterval: Duration.Duration;
     readonly lifetimeCount?: number;
     readonly maxKeepAliveCount?: number;
@@ -244,7 +160,7 @@ export type OpcuaSession = {
     Scope.Scope
   >;
   readonly events: Stream.Stream<OpcuaSessionEvent>;
-  readonly raw: ClientSession;
+  readonly unsafeRaw: ClientSession;
 };
 
 export const OpcuaSession = Object.assign(
@@ -259,7 +175,7 @@ export const OpcuaSession = Object.assign(
             yield* PubSub.sliding<OpcuaSessionEvent>(EVENT_BUFFER_SIZE);
           const raw = yield* Effect.acquireRelease(
             Effect.tryPromise({
-              try: () => client.raw.createSession(options?.userIdentity),
+              try: () => client.unsafeRaw.createSession(options?.userIdentity),
               catch: (cause) => new OpcuaSessionCreateError({ cause }),
             }),
             (session) =>
@@ -268,432 +184,254 @@ export const OpcuaSession = Object.assign(
                 catch: (cause) => new OpcuaSessionCloseError({ cause }),
               }).pipe(Effect.ignore, Effect.andThen(PubSub.shutdown(events))),
           );
-          wireSessionEvents(raw, events);
-          return makeSession(raw, events);
+          yield* wireSessionEvents(raw, events);
+          return yield* makeSession(raw, events);
         }),
       ),
   },
 );
 
 export const makeSession = (
-  raw: ClientSession,
+  unsafeRaw: ClientSession,
   events: PubSub.PubSub<OpcuaSessionEvent>,
-): OpcuaSession => {
-  const browseSemaphore = Semaphore.makeUnsafe(1);
-  const structureRuntime = makeStructureRuntime(raw);
+): Effect.Effect<OpcuaSession, never, Scope.Scope> =>
+  Effect.gen(function* () {
+    const browseSemaphore = Semaphore.makeUnsafe(1);
+    const structureRuntime = makeStructureRuntime(unsafeRaw);
+    const metadata = makeMetadataService(unsafeRaw, structureRuntime);
+    yield* Effect.acquireRelease(
+      Effect.sync(() => {
+        const listener = () => {
+          Effect.runFork(
+            metadata.invalidate.pipe(
+              Effect.andThen(structureRuntime.invalidate),
+            ),
+          );
+        };
+        unsafeRaw.on("session_restored", listener);
+        return listener;
+      }),
+      (listener) =>
+        Effect.sync(() => {
+          if ("off" in unsafeRaw && typeof unsafeRaw.off === "function") {
+            unsafeRaw.off("session_restored", listener);
+          } else {
+            unsafeRaw.removeListener("session_restored", listener);
+          }
+        }),
+    );
 
-  const readValue: OpcuaSession["readValue"] = (input) =>
-    Effect.gen(function* () {
-      if (hasStructureSpec(input)) {
-        yield* structureRuntime.ensureInitialized();
-      }
-      const dataValue = yield* readDataValue(raw, input.nodeId);
-      return sampleFromDataValue(input, dataValue, structureRuntime);
-    }) as never;
-
-  const readValues = <const Specs extends ReadonlyArray<ValueSpec>>(
-    specs: Specs,
-  ) =>
-    Effect.gen(function* () {
-      if (specs.some(hasStructureSpec)) {
-        yield* structureRuntime.ensureInitialized();
-      }
-      const dataValues = yield* Effect.tryPromise({
-        try: () =>
-          raw.read(
-            specs.map((spec) => ({
-              nodeId: coerceNodeId(spec.nodeId),
-              attributeId: AttributeIds.Value,
-            })),
-            0,
-          ),
-        catch: (cause) =>
-          new OpcuaServiceError({ operation: "readValues", cause }),
-      });
-      return specs.map((spec, index) =>
-        sampleFromDataValue(spec, dataValues[index]!, structureRuntime),
-      ) as ReadValuesResult<Specs>;
-    });
-
-  const valueHandle: OpcuaSession["valueHandle"] = (input) =>
-    Effect.gen(function* () {
-      const requested = input.capabilities ?? Capabilities.read;
-      if (hasStructureSpec(input)) {
-        yield* structureRuntime.ensureInitialized();
-      }
-      const metadata = yield* discoverMetadata(raw, input.nodeId, requested);
-      const structureError = validateValueStructureSpec(
-        "valueHandle.structure",
-        input,
-        metadata,
-      );
-      if (structureError) return yield* Effect.fail(structureError);
-      const nodeId = coerceNodeId(input.nodeId);
-      const base = {
-        nodeId: input.nodeId,
-        schema: input.schema,
-        structure: input.structure,
-        metadata,
-        capabilities: requested,
-        raw: { nodeId, builtInDataType: metadata.raw.builtInDataType },
-      };
-      const handle: Record<string, unknown> = { ...base };
-      if (hasCapability(requested, "read")) {
-        handle.read = () => readValue(input);
-      }
-      if (hasCapability(requested, "write")) {
-        handle.write = (value: unknown) =>
-          writeByMetadata(raw, {
-            nodeId: input.nodeId,
-            schema: input.schema,
-            structure: input.structure,
-            value,
-            metadata,
+    const handle: OpcuaSession["handle"] = ((def: HandleDef) =>
+      Effect.gen(function* () {
+        if (def._tag === "VariableDef") {
+          const variableMetadata = yield* metadata.variable(def);
+          return makeVariableHandle(
+            unsafeRaw,
+            def,
+            variableMetadata,
             structureRuntime,
-          });
-      }
-      return handle;
-    }) as never;
-
-  const writeValue: OpcuaSession["writeValue"] = (input) =>
-    Effect.gen(function* () {
-      if (hasStructureSpec(input)) {
-        yield* structureRuntime.ensureInitialized();
-      }
-      const metadata = yield* discoverMetadata(raw, input.nodeId, [
-        "write",
-      ] as const);
-      const structureError = validateValueStructureSpec(
-        "writeValue.structure",
-        input,
-        metadata,
-      );
-      if (structureError) return yield* Effect.fail(structureError);
-      return (yield* writeByMetadata(raw, {
-        ...input,
-        metadata,
-        structureRuntime,
-      })) as OpcuaWriteResult;
-    }) as never;
-
-  const writeValues: OpcuaSession["writeValues"] = (specs) =>
-    Effect.gen(function* () {
-      const writePayloads: Array<WriteValueOptions> = [];
-      for (const spec of specs) {
-        if (hasStructureSpec(spec)) {
-          yield* structureRuntime.ensureInitialized();
-        }
-        const metadata = yield* discoverMetadata(raw, spec.nodeId, [
-          "write",
-        ] as const);
-        const structureError = validateValueStructureSpec(
-          "writeValues.structure",
-          spec,
-          metadata,
-        );
-        if (structureError) return yield* Effect.fail(structureError);
-        const variant = yield* makeVariant(
-          spec.nodeId,
-          metadata,
-          spec.value,
-          spec.schema,
-          spec.structure,
-          structureRuntime,
-        );
-        writePayloads.push({
-          nodeId: coerceNodeId(spec.nodeId),
-          attributeId: AttributeIds.Value,
-          value: {
-            value: variant,
-          },
-        });
-      }
-
-      const statusCodes = yield* Effect.tryPromise({
-        try: () => raw.write(writePayloads),
-        catch: (cause) =>
-          new OpcuaServiceError({ operation: "writeValues", cause }),
-      });
-
-      return specs.map((spec, index) =>
-        writeResult(spec.nodeId, statusCodes[index]!),
-      ) as WriteValuesResult<typeof specs>;
-    });
-
-  const writeHandleValues = <
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const Handles extends ReadonlyArray<WritableOpcuaValueHandle<any>>,
-  >(writes: {
-    readonly [Index in keyof Handles]: WriteEntry<Handles[Index]>;
-  }) =>
-    Effect.gen(function* () {
-      const nodeIds = writes.map((write) => write.handle.nodeId);
-      const duplicate = duplicateStringError("writeHandleValues", nodeIds);
-      if (duplicate) return yield* Effect.fail(duplicate);
-      const writePayloads: Array<WriteValueOptions> = [];
-      for (const write of writes) {
-        if (!hasCapability(write.handle.capabilities, "write")) {
-          return yield* Effect.fail(
-            new OpcuaAccessDeniedError({
-              nodeId: write.handle.nodeId,
-              requestedCapability: "write",
-              accessLevel: write.handle.metadata.accessLevel,
-              userAccessLevel: write.handle.metadata.userAccessLevel,
-            }),
           );
         }
-        const variant = yield* makeVariant(
-          write.handle.nodeId,
-          write.handle.metadata,
-          write.value,
-          write.handle.schema,
-          write.handle.structure,
+        const methodMetadata = yield* metadata.method(def);
+        return yield* makeMethodHandle(
+          unsafeRaw,
+          def,
+          methodMetadata,
           structureRuntime,
         );
-        writePayloads.push({
-          nodeId: coerceNodeId(write.handle.nodeId),
-          attributeId: AttributeIds.Value,
-          value: {
-            value: variant,
-          },
-        });
-      }
-      const statusCodes = yield* Effect.tryPromise({
-        try: () => raw.write(writePayloads),
-        catch: (cause) =>
-          new OpcuaServiceError({ operation: "writeHandleValues", cause }),
-      });
-      return writes.map((write, index) =>
-        writeResult(write.handle.nodeId, statusCodes[index]!),
-      ) as OpcuaWriteValuesResult<NodeIdsOfHandles<Handles>>;
-    });
+      })) as OpcuaSession["handle"];
 
-  const methodHandle: OpcuaSession["methodHandle"] = (spec) =>
-    makeMethodHandle(raw, spec, structureRuntime);
+    const handleAll: OpcuaSession["handleAll"] = (defs) =>
+      Effect.forEach(defs, (def) => handle(def as never)) as Effect.Effect<
+        HandlesOf<typeof defs>,
+        HandleError
+      >;
 
-  const callMethod: OpcuaSession["callMethod"] = (spec, options) =>
-    Effect.gen(function* () {
-      const handle = yield* methodHandle(spec);
-      return yield* handle.call(spec.inputValues, options);
-    });
-
-  const callMethodHandles_: OpcuaSession["callMethodHandles"] = (entries) =>
-    callMethodHandles(raw, entries, structureRuntime);
-
-  const createSubscription: OpcuaSession["createSubscription"] = (options) =>
-    Effect.gen(function* () {
-      const subscriptionEvents =
-        yield* PubSub.sliding<OpcuaSubscriptionEvent>(EVENT_BUFFER_SIZE);
-      const rawSubscription = yield* Effect.acquireRelease(
-        Effect.tryPromise({
-          try: async () => {
-            const subscription = ClientSubscription.create(raw, {
-              requestedPublishingInterval: durationMillis(
-                options.publishingInterval,
-              ),
-              requestedLifetimeCount:
-                options.lifetimeCount ?? DEFAULT_LIFETIME_COUNT,
-              requestedMaxKeepAliveCount:
-                options.maxKeepAliveCount ?? DEFAULT_MAX_KEEP_ALIVE_COUNT,
-              maxNotificationsPerPublish:
-                options.maxNotificationsPerPublish ??
-                DEFAULT_MAX_NOTIFICATIONS_PER_PUBLISH,
-              publishingEnabled:
-                options.publishingEnabled ?? DEFAULT_PUBLISHING_ENABLED,
-              priority: options.priority ?? DEFAULT_PRIORITY,
-            });
-            wireSubscriptionEvents(subscription, subscriptionEvents);
-            return subscription;
-          },
-          catch: (cause) => new OpcuaSubscriptionCreateError({ cause }),
-        }),
-        (subscription) =>
+    const subscription: OpcuaSession["subscription"] = (options) =>
+      Effect.gen(function* () {
+        const subscriptionEvents =
+          yield* PubSub.sliding<OpcuaSubscriptionEvent>(EVENT_BUFFER_SIZE);
+        const rawSubscription = yield* Effect.acquireRelease(
           Effect.tryPromise({
-            try: () => subscription.terminate(),
+            try: async () =>
+              ClientSubscription.create(unsafeRaw, {
+                requestedPublishingInterval: durationMillis(
+                  options.publishingInterval,
+                ),
+                requestedLifetimeCount:
+                  options.lifetimeCount ?? DEFAULT_LIFETIME_COUNT,
+                requestedMaxKeepAliveCount:
+                  options.maxKeepAliveCount ?? DEFAULT_MAX_KEEP_ALIVE_COUNT,
+                maxNotificationsPerPublish:
+                  options.maxNotificationsPerPublish ??
+                  DEFAULT_MAX_NOTIFICATIONS_PER_PUBLISH,
+                publishingEnabled:
+                  options.publishingEnabled ?? DEFAULT_PUBLISHING_ENABLED,
+                priority: options.priority ?? DEFAULT_PRIORITY,
+              }),
             catch: (cause) => new OpcuaSubscriptionCreateError({ cause }),
-          }).pipe(
-            Effect.ignore,
-            Effect.andThen(PubSub.shutdown(subscriptionEvents)),
-          ),
-      );
-      return makeSubscription(
-        rawSubscription,
-        subscriptionEvents,
-        structureRuntime,
-      );
-    });
-
-  const browse: OpcuaSession["browse"] = (input) =>
-    Effect.gen(function* () {
-      const validationError = browseOptionsError(input);
-      if (validationError) return yield* Effect.fail(validationError);
-
-      const result = yield* Effect.tryPromise({
-        try: () =>
-          browseWithMaxReferences(
-            raw,
-            {
-              nodeId: resolveNodeId(input.nodeId),
-              referenceTypeId: resolveNodeId(
-                input.referenceTypeId ?? DEFAULT_BROWSE_REFERENCE_TYPE_ID,
-              ),
-              browseDirection:
-                input.browseDirection ?? DEFAULT_BROWSE_DIRECTION,
-              includeSubtypes:
-                input.includeSubtypes ?? DEFAULT_BROWSE_INCLUDE_SUBTYPES,
-              nodeClassMask:
-                input.nodeClassMask ?? DEFAULT_BROWSE_NODE_CLASS_MASK,
-              resultMask: input.resultMask ?? DEFAULT_BROWSE_RESULT_MASK,
-            },
-            input.maxReferencesPerNode ??
-              DEFAULT_BROWSE_MAX_REFERENCES_PER_NODE,
-          ),
-        catch: (cause) =>
-          new OpcuaServiceError({
-            operation: "browse",
-            nodeId: input.nodeId,
-            cause,
           }),
-      }).pipe(browseSemaphore.withPermits(1));
-
-      return yield* normalizeBrowseResultOrFail(
-        "browse",
-        input.nodeId,
-        result,
-        input.includeRaw ?? false,
-      );
-    });
-
-  const browseNext: OpcuaSession["browseNext"] = (continuation) =>
-    Effect.gen(function* () {
-      const validationError = browseContinuationError(
-        "browseNext",
-        continuation,
-      );
-      if (validationError) return yield* Effect.fail(validationError);
-
-      const result = yield* Effect.tryPromise({
-        try: () => raw.browseNext(continuation.raw, false),
-        catch: (cause) =>
-          new OpcuaServiceError({
-            operation: "browseNext",
-            nodeId: continuation.nodeId,
-            cause,
-          }),
-      });
-
-      return yield* normalizeBrowseResultOrFail(
-        "browseNext",
-        continuation.nodeId,
-        result,
-        continuation.includeRaw ?? false,
-      );
-    });
-
-  const releaseBrowseContinuation: OpcuaSession["releaseBrowseContinuation"] = (
-    continuation,
-  ) =>
-    Effect.gen(function* () {
-      const validationError = browseContinuationError(
-        "releaseBrowseContinuation",
-        continuation,
-      );
-      if (validationError) return yield* Effect.fail(validationError);
-
-      const result = yield* Effect.tryPromise({
-        try: () => raw.browseNext(continuation.raw, true),
-        catch: (cause) =>
-          new OpcuaServiceError({
-            operation: "releaseBrowseContinuation",
-            nodeId: continuation.nodeId,
-            cause,
-          }),
-      });
-
-      if (!isGood(result.statusCode)) {
-        return yield* Effect.fail(
-          new OpcuaNonGoodStatusError({
-            operation: "releaseBrowseContinuation",
-            nodeId: continuation.nodeId,
-            statusCode: result.statusCode,
-          }),
+          (subscription) =>
+            Effect.tryPromise({
+              try: () => subscription.terminate(),
+              catch: (cause) => new OpcuaSubscriptionCreateError({ cause }),
+            }).pipe(
+              Effect.ignore,
+              Effect.andThen(PubSub.shutdown(subscriptionEvents)),
+            ),
         );
-      }
-    });
-
-  const browseChildren: OpcuaSession["browseChildren"] = (nodeId, options) =>
-    Effect.gen(function* () {
-      const mode = options?.mode ?? "all";
-      const first = yield* browse({
-        nodeId,
-        referenceTypeId:
-          options?.referenceTypeId ?? DEFAULT_BROWSE_REFERENCE_TYPE_ID,
-        includeSubtypes:
-          options?.includeSubtypes ?? DEFAULT_BROWSE_INCLUDE_SUBTYPES,
-        nodeClassMask: options?.nodeClassMask ?? DEFAULT_BROWSE_NODE_CLASS_MASK,
-        maxReferencesPerNode:
-          options?.maxReferencesPerNode ??
-          DEFAULT_BROWSE_MAX_REFERENCES_PER_NODE,
-        includeRaw: options?.includeRaw,
+        yield* wireSubscriptionEvents(rawSubscription, subscriptionEvents);
+        return makeSubscription(
+          rawSubscription,
+          subscriptionEvents,
+          structureRuntime,
+          (def) => handle(def) as never,
+        );
       });
-      if (mode === "page") {
-        return {
-          nodeId,
-          references: first.references,
-          continuation: first.continuation,
-        };
-      }
 
-      const references = [...first.references];
-      let continuation = first.continuation;
-      while (continuation) {
-        const next = yield* browseNext({
-          ...continuation,
+    const browse: OpcuaSession["browse"] = (input) =>
+      Effect.gen(function* () {
+        const validationError = browseOptionsError(input);
+        if (validationError) return yield* Effect.fail(validationError);
+
+        const result = yield* Effect.tryPromise({
+          try: () =>
+            browseWithMaxReferences(
+              unsafeRaw,
+              {
+                nodeId: resolveNodeId(input.nodeId),
+                referenceTypeId: resolveNodeId(
+                  input.referenceTypeId ?? DEFAULT_BROWSE_REFERENCE_TYPE_ID,
+                ),
+                browseDirection:
+                  input.browseDirection ?? DEFAULT_BROWSE_DIRECTION,
+                includeSubtypes:
+                  input.includeSubtypes ?? DEFAULT_BROWSE_INCLUDE_SUBTYPES,
+                nodeClassMask:
+                  input.nodeClassMask ?? DEFAULT_BROWSE_NODE_CLASS_MASK,
+                resultMask: input.resultMask ?? DEFAULT_BROWSE_RESULT_MASK,
+              },
+              input.maxReferencesPerNode ??
+                DEFAULT_BROWSE_MAX_REFERENCES_PER_NODE,
+            ),
+          catch: (cause) =>
+            new OpcuaServiceError({
+              operation: "browse",
+              nodeId: input.nodeId,
+              cause,
+            }),
+        }).pipe(browseSemaphore.withPermits(1));
+
+        return normalizeBrowseResult(
+          input.nodeId,
+          result,
+          input.includeRaw ?? false,
+        );
+      });
+
+    const browseNext: OpcuaSession["browseNext"] = (continuation) =>
+      Effect.gen(function* () {
+        const validationError = browseContinuationError(
+          "browseNext",
+          continuation,
+        );
+        if (validationError) return yield* Effect.fail(validationError);
+
+        const result = yield* Effect.tryPromise({
+          try: () => unsafeRaw.browseNext(continuation.unsafeRaw, false),
+          catch: (cause) =>
+            new OpcuaServiceError({
+              operation: "browseNext",
+              nodeId: continuation.nodeId,
+              cause,
+            }),
+        });
+
+        return normalizeBrowseResult(
+          continuation.nodeId,
+          result,
+          continuation.includeRaw ?? false,
+        );
+      });
+
+    const releaseBrowseContinuation: OpcuaSession["releaseBrowseContinuation"] =
+      (continuation) =>
+        Effect.gen(function* () {
+          const validationError = browseContinuationError(
+            "releaseBrowseContinuation",
+            continuation,
+          );
+          if (validationError) return yield* Effect.fail(validationError);
+
+          yield* Effect.tryPromise({
+            try: () => unsafeRaw.browseNext(continuation.unsafeRaw, true),
+            catch: (cause) =>
+              new OpcuaServiceError({
+                operation: "releaseBrowseContinuation",
+                nodeId: continuation.nodeId,
+                cause,
+              }),
+          });
+        });
+
+    const browseChildren: OpcuaSession["browseChildren"] = (nodeId, options) =>
+      Effect.gen(function* () {
+        const mode = options?.mode ?? "all";
+        const first = yield* browse({
+          nodeId,
+          referenceTypeId:
+            options?.referenceTypeId ?? DEFAULT_BROWSE_REFERENCE_TYPE_ID,
+          includeSubtypes:
+            options?.includeSubtypes ?? DEFAULT_BROWSE_INCLUDE_SUBTYPES,
+          nodeClassMask:
+            options?.nodeClassMask ?? DEFAULT_BROWSE_NODE_CLASS_MASK,
+          maxReferencesPerNode:
+            options?.maxReferencesPerNode ??
+            DEFAULT_BROWSE_MAX_REFERENCES_PER_NODE,
           includeRaw: options?.includeRaw,
         });
-        references.push(...next.references);
-        continuation = next.continuation;
-      }
-      return { nodeId, references };
-    });
+        if (first._tag === "NonGoodStatus") return first;
+        if (mode === "page") {
+          return {
+            _tag: "Browsed" as const,
+            nodeId,
+            status: first.status,
+            references: first.references,
+            continuation: first.continuation,
+          };
+        }
 
-  return {
-    readValue,
-    readValues,
-    valueHandle,
-    writeValue,
-    writeValues,
-    writeHandleValues,
-    methodHandle,
-    callMethod,
-    callMethodHandles: callMethodHandles_,
-    createSubscription,
-    browse,
-    browseNext,
-    releaseBrowseContinuation,
-    browseChildren,
-    events: Stream.fromPubSub(events),
-    raw,
-  };
-};
-
-const duplicateStringError = (
-  operation: string,
-  nodeIds: ReadonlyArray<NodeIdString>,
-) => {
-  const seen = new Set<string>();
-  for (const nodeId of nodeIds) {
-    if (seen.has(nodeId)) {
-      return new OpcuaConfigurationError({
-        operation,
-        nodeId,
-        cause: "Duplicate nodeId",
+        const references = [...first.references];
+        let continuation = first.continuation;
+        while (continuation) {
+          const next = yield* browseNext({
+            ...continuation,
+            includeRaw: options?.includeRaw,
+          });
+          if (next._tag === "NonGoodStatus") return next;
+          references.push(...next.references);
+          continuation = next.continuation;
+        }
+        return {
+          _tag: "Browsed" as const,
+          nodeId,
+          status: first.status,
+          references,
+        };
       });
-    }
-    seen.add(nodeId);
-  }
-  return undefined;
-};
+
+    return {
+      handle,
+      handleAll,
+      subscription,
+      browse,
+      browseNext,
+      releaseBrowseContinuation,
+      browseChildren,
+      events: Stream.fromPubSub(events),
+      unsafeRaw,
+    };
+  });
 
 const durationMillis = (duration: Duration.Duration) =>
   Duration.toMillis(duration);

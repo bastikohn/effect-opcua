@@ -3,15 +3,11 @@ import { Config, Context, Effect, Layer, PubSub, Stream } from "effect";
 
 import { EVENT_BUFFER_SIZE } from "./constants.js";
 import { OpcuaConnectError, OpcuaDisconnectError } from "./errors.js";
-import {
-  type OpcuaClientEvent,
-  publishUnsafe,
-  wireClientEvents,
-} from "./events.js";
+import { EventBus, type OpcuaClientEvent, wireClientEvents } from "./events.js";
 
 export type OpcuaClient = {
   readonly events: Stream.Stream<OpcuaClientEvent>;
-  readonly raw: OPCUAClient;
+  readonly unsafeRaw: OPCUAClient;
 };
 
 export type OpcuaClientLayerOptions = {
@@ -52,20 +48,20 @@ export const OpcuaClient = Object.assign(
 export const makeOpcuaClient = (options: OpcuaClientLayerOptions) =>
   Effect.gen(function* () {
     const events = yield* PubSub.sliding<OpcuaClientEvent>(EVENT_BUFFER_SIZE);
-    const raw = OPCUAClient.create(options.clientOptions ?? {});
-    wireClientEvents(raw, events);
+    const unsafeRaw = OPCUAClient.create(options.clientOptions ?? {});
+    yield* wireClientEvents(unsafeRaw, events);
     yield* Effect.acquireRelease(
       Effect.tryPromise({
         try: async () => {
-          await raw.connect(options.endpointUrl);
-          publishUnsafe(events, {
+          await unsafeRaw.connect(options.endpointUrl);
+          EventBus.publish(events, {
             _tag: "Connected",
             endpointUrl: options.endpointUrl,
           });
-          return raw;
+          return unsafeRaw;
         },
         catch: (cause) => {
-          publishUnsafe(events, {
+          EventBus.publish(events, {
             _tag: "ConnectionFailed",
             endpointUrl: options.endpointUrl,
             cause,
@@ -79,8 +75,8 @@ export const makeOpcuaClient = (options: OpcuaClientLayerOptions) =>
       () =>
         Effect.tryPromise({
           try: async () => {
-            await raw.disconnect();
-            publishUnsafe(events, {
+            await unsafeRaw.disconnect();
+            EventBus.publish(events, {
               _tag: "Disconnected",
               endpointUrl: options.endpointUrl,
             });
@@ -94,6 +90,6 @@ export const makeOpcuaClient = (options: OpcuaClientLayerOptions) =>
     );
     return {
       events: Stream.fromPubSub(events),
-      raw,
+      unsafeRaw,
     };
   });
