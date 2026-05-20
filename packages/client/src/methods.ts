@@ -237,11 +237,13 @@ type MethodHandleInfo = {
 
 export const makeMethodArg = <
   C extends OpcuaCodec<unknown> = OpcuaCodec<OpcuaDynamicValue>,
->(options: {
-  readonly codec?: C;
-  readonly name?: string;
-  readonly index?: number;
-}): MethodArg<CodecType<C>> => ({
+>(
+  options: {
+    readonly codec?: C;
+    readonly name?: string;
+    readonly index?: number;
+  } = {},
+): MethodArg<CodecType<C>> => ({
   _tag: "MethodArg",
   codec: (options.codec ?? dynamic()) as unknown as OpcuaCodec<CodecType<C>>,
   selector:
@@ -591,7 +593,7 @@ const defaultMapping = (arguments_: ReadonlyArray<MethodArgumentMetadata>) => {
       key: argumentName,
       index,
       argumentName,
-      arg: makeMethodArg({}),
+      arg: makeMethodArg(),
     });
   }
   return mapping;

@@ -8,7 +8,6 @@ import {
   type DataValue,
   type StatusCode,
   type Variant,
-  type WriteValueOptions,
 } from "node-opcua";
 import { Effect, Result } from "effect";
 
@@ -22,7 +21,6 @@ import {
 } from "./codecs.js";
 import {
   OpcuaAccessDeniedError,
-  OpcuaConfigurationError,
   OpcuaEncodeError,
   OpcuaServiceError,
 } from "./errors.js";
@@ -342,44 +340,6 @@ export const writeVariable = <const Id extends string, A>(
     return writeResult(def.nodeId, statusCode);
   });
 
-export const writeVariableEntries = <
-  const Handles extends ReadonlyArray<WritableVariableHandle>,
->(
-  session: ClientSession,
-  writes: {
-    readonly [Index in keyof Handles]: WriteEntry<Handles[Index]>;
-  },
-  structureRuntime: OpcuaStructureRuntime,
-) =>
-  Effect.gen(function* () {
-    const nodeIds = writes.map((write) => write.handle.nodeId);
-    const duplicate = duplicateNodeIdError("Opcua.writeAll", nodeIds);
-    if (duplicate) return yield* Effect.fail(duplicate);
-    const writePayloads: Array<WriteValueOptions> = [];
-    for (const write of writes) {
-      const handle = write.handle;
-      const variant = yield* Codec.encode(
-        handle.def.codec as OpcuaCodec<unknown>,
-        write.value,
-        codecMetadata(handle.metadata),
-        structureRuntime,
-      );
-      writePayloads.push({
-        nodeId: handle.unsafeRaw.nodeId,
-        attributeId: AttributeIds.Value,
-        value: { value: variant },
-      });
-    }
-    const statusCodes = yield* Effect.tryPromise({
-      try: () => session.write(writePayloads),
-      catch: (cause) =>
-        new OpcuaServiceError({ operation: "Opcua.writeAll", cause }),
-    });
-    return writes.map((write, index) =>
-      writeResult(write.handle.nodeId, statusCodes[index]!),
-    );
-  });
-
 export const writeResult = <Id extends string>(
   nodeId: Id,
   statusCode: StatusCode,
@@ -502,21 +462,3 @@ const hasAccessPart = (
   access: VariableAccess,
   capability: VariableCapability,
 ) => access === "readWrite" || access === capability;
-
-const duplicateNodeIdError = (
-  operation: string,
-  nodeIds: ReadonlyArray<NodeIdString>,
-) => {
-  const seen = new Set<string>();
-  for (const nodeId of nodeIds) {
-    if (seen.has(nodeId)) {
-      return new OpcuaConfigurationError({
-        operation,
-        nodeId,
-        cause: "Duplicate nodeId",
-      });
-    }
-    seen.add(nodeId);
-  }
-  return undefined;
-};

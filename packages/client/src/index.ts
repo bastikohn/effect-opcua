@@ -6,6 +6,20 @@ export type {
 } from "./client.js";
 export { OpcuaSession } from "./session.js";
 export type { HandleDef, HandleOf, HandlesOf } from "./session.js";
+export {
+  OpcuaAccessDeniedError,
+  OpcuaConfigurationError,
+  OpcuaConnectError,
+  OpcuaDisconnectError,
+  OpcuaEncodeError,
+  OpcuaMethodInputError,
+  OpcuaMethodNotExecutableError,
+  OpcuaMonitorCreateError,
+  OpcuaServiceError,
+  OpcuaSessionCloseError,
+  OpcuaSessionCreateError,
+  OpcuaSubscriptionCreateError,
+} from "./errors.js";
 
 export type { NodeIdString, ExpandedNodeIdString } from "./capabilities.js";
 export type {

@@ -1,7 +1,8 @@
-import type { DataValue, StatusCode } from "node-opcua";
+import type { StatusCode } from "node-opcua";
 import { Data } from "effect";
 
 import type { NodeIdString, VariableCapability } from "./capabilities.js";
+import type { OpcuaStatusInfo } from "./normalize.js";
 
 export class OpcuaConnectError extends Data.TaggedError("OpcuaConnectError")<{
   readonly endpointUrl: string;
@@ -42,6 +43,7 @@ export class OpcuaMonitorCreateError extends Data.TaggedError(
   readonly details?: ReadonlyArray<{
     readonly nodeId: NodeIdString;
     readonly statusCode?: StatusCode;
+    readonly status?: OpcuaStatusInfo;
     readonly cause?: unknown;
   }>;
   readonly cause?: unknown;
@@ -50,23 +52,6 @@ export class OpcuaMonitorCreateError extends Data.TaggedError(
 export class OpcuaServiceError extends Data.TaggedError("OpcuaServiceError")<{
   readonly operation: string;
   readonly nodeId?: NodeIdString;
-  readonly cause?: unknown;
-}> {}
-
-export class OpcuaNonGoodStatusError extends Data.TaggedError(
-  "OpcuaNonGoodStatusError",
-)<{
-  readonly operation: string;
-  readonly nodeId: NodeIdString;
-  readonly statusCode: StatusCode;
-  readonly dataValue?: DataValue;
-  readonly cause?: unknown;
-}> {}
-
-export class OpcuaDecodeError extends Data.TaggedError("OpcuaDecodeError")<{
-  readonly nodeId: NodeIdString;
-  readonly error: unknown;
-  readonly dataValue: DataValue;
   readonly cause?: unknown;
 }> {}
 
@@ -102,7 +87,6 @@ export class OpcuaMethodInputError extends Data.TaggedError(
   readonly methodId: NodeIdString;
   readonly input: unknown;
   readonly phase:
-    | "SchemaEncoding"
     | "MissingInputKey"
     | "UnknownInputKey"
     | "ArgumentMapping"

@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
 
-import { Opcua, OpcuaSession } from "../src/index.js";
 import {
+  Opcua,
   OpcuaConfigurationError,
   OpcuaMethodInputError,
   OpcuaMethodNotExecutableError,
-} from "../src/errors.js";
+  OpcuaSession,
+} from "../src/index.js";
 import { makeLiveTestContext } from "./live.js";
 
 const { runLive } = makeLiveTestContext(4844);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Duration, Effect, Schema, Stream } from "effect";
 
-import { Opcua, OpcuaSession } from "../src/index.js";
+import { Opcua, OpcuaMonitorCreateError, OpcuaSession } from "../src/index.js";
 import { makeLiveTestContext } from "./live.js";
 
 const { runLive } = makeLiveTestContext(4843);
@@ -118,6 +118,63 @@ describe("monitoring", () => {
     expect(result.notMonitoring[0]).toMatchObject({ _tag: "NotMonitoring" });
   }, 20_000);
 
+  it("returns monitor add failures as data and keeps successful items", async () => {
+    const Temperature = Opcua.variable({
+      nodeId: "ns=1;s=MyMachine.Temperature",
+    });
+    const Missing = Opcua.variable({ nodeId: "ns=1;s=missing" });
+
+    const result = await runLive(
+      Effect.gen(function* () {
+        const session = yield* OpcuaSession;
+        const subscription = yield* session.subscription({
+          publishingInterval: Duration.millis(100),
+        });
+        const monitor = yield* subscription.monitor({
+          samplingInterval: Duration.millis(50),
+          queueSize: 5,
+          discardOldest: true,
+          clientBuffer: Opcua.BufferPolicy.sliding(10),
+        });
+        const add = yield* monitor.add([Temperature, Missing] as const);
+        const items = yield* monitor.items;
+        return { add, items };
+      }),
+    );
+
+    expect(result.add[0]).toMatchObject({ _tag: "Monitoring" });
+    expect(result.add[1]).toMatchObject({
+      _tag: "ConfigurationError",
+      nodeId: "ns=1;s=missing",
+    });
+    expect(result.items.has(Temperature.nodeId)).toBe(true);
+    expect(result.items.has(Missing.nodeId)).toBe(false);
+  }, 20_000);
+
+  it("fails watch when initial monitored item creation fails", async () => {
+    await expect(
+      runLive(
+        Effect.gen(function* () {
+          const session = yield* OpcuaSession;
+          const subscription = yield* session.subscription({
+            publishingInterval: Duration.millis(100),
+          });
+          return yield* subscription
+            .watch([Opcua.variable({ nodeId: "ns=1;s=missing" })] as const, {
+              samplingInterval: Duration.millis(50),
+              queueSize: 5,
+              discardOldest: true,
+              clientBuffer: Opcua.BufferPolicy.sliding(10),
+            })
+            .pipe(Stream.take(1), Stream.runCollect);
+        }),
+      ),
+    ).rejects.toMatchObject({
+      _tag: "OpcuaMonitorCreateError",
+      nodeIds: ["ns=1;s=missing"],
+    });
+  }, 20_000);
+
   it("streams structure samples through watch and monitor", async () => {
     const Settings = Opcua.variable({
       nodeId: "ns=1;s=MyMachine.ScanSettings",
@@ -188,8 +245,6 @@ describe("monitoring", () => {
             .pipe(Stream.take(1), Stream.runCollect);
         }),
       ),
-    ).rejects.toMatchObject({
-      _tag: "OpcuaConfigurationError",
-    });
+    ).rejects.toBeInstanceOf(OpcuaMonitorCreateError);
   }, 20_000);
 });

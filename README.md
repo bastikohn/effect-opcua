@@ -108,6 +108,10 @@ yield *
 Subscriptions expose one primitive, `monitor`; `watch` is a scoped stream
 wrapper over it.
 
+`monitor.add` is best-effort and returns per-node startup results as data.
+`watch` requires every initial item to start cleanly and fails the stream with
+`OpcuaMonitorCreateError` when it cannot.
+
 ```ts
 const subscription =
   yield *

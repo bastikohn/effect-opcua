@@ -14,6 +14,7 @@ import {
   PubSub,
   Queue,
   Ref,
+  Result,
   Scope,
   Semaphore,
   Stream,
@@ -143,6 +144,21 @@ export type MonitorAddResult<Id extends string = string> =
       readonly nodeId: Id;
       readonly status: OpcuaStatusInfo;
       readonly cause?: unknown;
+    }
+  | {
+      readonly _tag: "ConfigurationError";
+      readonly nodeId: Id;
+      readonly error: OpcuaConfigurationError;
+    }
+  | {
+      readonly _tag: "AccessDenied";
+      readonly nodeId: Id;
+      readonly error: OpcuaAccessDeniedError;
+    }
+  | {
+      readonly _tag: "ServiceError";
+      readonly nodeId: Id;
+      readonly error: OpcuaServiceError;
     };
 
 export type MonitorRemoveResult<Id extends string = string> =
@@ -171,7 +187,7 @@ export type ValueMonitor = {
         ? MonitorAddResult<Def["nodeId"]>
         : never
     >,
-    OpcuaAccessDeniedError | OpcuaConfigurationError | OpcuaServiceError
+    never
   >;
   readonly remove: <const Ids extends ReadonlyArray<NodeIdString>>(
     nodeIds: Ids,
@@ -198,10 +214,7 @@ export type OpcuaSubscription = {
     options: MonitorOptions,
   ) => Stream.Stream<
     MonitorSampleOf<Defs[number]>,
-    | OpcuaAccessDeniedError
-    | OpcuaMonitorCreateError
-    | OpcuaConfigurationError
-    | OpcuaServiceError
+    OpcuaMonitorCreateError | OpcuaConfigurationError
   >;
   readonly events: Stream.Stream<OpcuaSubscriptionEvent>;
   readonly unsafeRaw: ClientSubscription;
@@ -281,31 +294,55 @@ export const makeSubscription = (
               continue;
             }
 
-            const handle = yield* handleVariable(def);
-            const group = yield* Effect.tryPromise({
-              try: () =>
-                unsafeRaw.monitorItems(
-                  [
+            const handleResult = yield* Effect.result(handleVariable(def));
+            if (Result.isFailure(handleResult)) {
+              const result = monitorAddErrorResult(
+                def.nodeId,
+                handleResult.failure,
+              );
+              results.push(result);
+              yield* PubSub.publish(itemEvents, result);
+              continue;
+            }
+
+            const handle = handleResult.success;
+            const groupResult = yield* Effect.result(
+              Effect.tryPromise({
+                try: () =>
+                  unsafeRaw.monitorItems(
+                    [
+                      {
+                        nodeId: handle.unsafeRaw.nodeId,
+                        attributeId: AttributeIds.Value,
+                      },
+                    ],
                     {
-                      nodeId: handle.unsafeRaw.nodeId,
-                      attributeId: AttributeIds.Value,
+                      samplingInterval: effective.samplingInterval,
+                      filter: toNodeOpcuaDataChangeFilter(effective.filter),
+                      queueSize: options.queueSize,
+                      discardOldest: options.discardOldest,
                     },
-                  ],
-                  {
-                    samplingInterval: effective.samplingInterval,
-                    filter: toNodeOpcuaDataChangeFilter(effective.filter),
-                    queueSize: options.queueSize,
-                    discardOldest: options.discardOldest,
-                  },
-                  TimestampsToReturn.Both,
-                ),
-              catch: (cause) =>
-                new OpcuaServiceError({
-                  operation: "monitor.add",
-                  nodeId: def.nodeId,
-                  cause,
-                }),
-            });
+                    TimestampsToReturn.Both,
+                  ),
+                catch: (cause) =>
+                  new OpcuaServiceError({
+                    operation: "monitor.add",
+                    nodeId: def.nodeId,
+                    cause,
+                  }),
+              }),
+            );
+            if (Result.isFailure(groupResult)) {
+              const result = monitorAddErrorResult(
+                def.nodeId,
+                groupResult.failure,
+              );
+              results.push(result);
+              yield* PubSub.publish(itemEvents, result);
+              continue;
+            }
+
+            const group = groupResult.success;
             const failure = monitorCreateFailures(group, [def.nodeId])[0];
             if (failure) {
               yield* terminateMonitorGroup(group);
@@ -332,7 +369,7 @@ export const makeSubscription = (
               structureRuntime,
               finalizingMonitorGroups,
               (nodeId, cause) =>
-                Effect.runFork(
+                Effect.runSync(
                   Ref.update(registry, (map) => {
                     const next = new Map(map);
                     next.delete(nodeId);
@@ -445,13 +482,11 @@ export const makeSubscription = (
       Stream.unwrap(
         Effect.gen(function* () {
           const active = yield* monitor(options);
-          yield* active.add(defs);
+          const results = yield* active.add(defs);
+          yield* assertWatchStarted(results);
           return active.samples as unknown as Stream.Stream<
             MonitorSampleOf<(typeof defs)[number]>,
-            | OpcuaAccessDeniedError
-            | OpcuaMonitorCreateError
-            | OpcuaConfigurationError
-            | OpcuaServiceError
+            OpcuaMonitorCreateError | OpcuaConfigurationError
           >;
         }),
       ),
@@ -463,6 +498,77 @@ export const makeSubscription = (
     events: Stream.fromPubSub(events),
     unsafeRaw,
   };
+};
+
+type MonitorAddError =
+  | OpcuaAccessDeniedError
+  | OpcuaConfigurationError
+  | OpcuaServiceError;
+
+const monitorAddErrorResult = <Id extends string>(
+  nodeId: Id,
+  error: MonitorAddError,
+): MonitorAddResult<Id> => {
+  switch (error._tag) {
+    case "OpcuaAccessDeniedError":
+      return { _tag: "AccessDenied", nodeId, error };
+    case "OpcuaConfigurationError":
+      return { _tag: "ConfigurationError", nodeId, error };
+    case "OpcuaServiceError":
+      return { _tag: "ServiceError", nodeId, error };
+  }
+};
+
+const assertWatchStarted = (
+  results: ReadonlyArray<MonitorAddResult>,
+): Effect.Effect<void, OpcuaMonitorCreateError> => {
+  const failures = results.filter(isMonitorAddFailure);
+  return failures.length === 0
+    ? Effect.void
+    : Effect.fail(
+        new OpcuaMonitorCreateError({
+          nodeIds: failures.map((failure) => failure.nodeId),
+          details: failures.map(monitorCreateFailureDetail),
+          cause: failures,
+        }),
+      );
+};
+
+const isMonitorAddFailure = (
+  result: MonitorAddResult,
+): result is Exclude<
+  MonitorAddResult,
+  | { readonly _tag: "Monitoring"; readonly nodeId: string }
+  | { readonly _tag: "AlreadyMonitoring"; readonly nodeId: string }
+> => result._tag !== "Monitoring" && result._tag !== "AlreadyMonitoring";
+
+const monitorCreateFailureDetail = (
+  failure: Exclude<
+    MonitorAddResult,
+    | { readonly _tag: "Monitoring"; readonly nodeId: string }
+    | { readonly _tag: "AlreadyMonitoring"; readonly nodeId: string }
+  >,
+) => {
+  switch (failure._tag) {
+    case "AlreadyMonitoringWithDifferentOptions":
+      return {
+        nodeId: failure.nodeId,
+        cause: {
+          current: failure.current,
+          requested: failure.requested,
+        },
+      };
+    case "NonGoodStatus":
+      return {
+        nodeId: failure.nodeId,
+        status: failure.status,
+        cause: failure.cause,
+      };
+    case "ConfigurationError":
+    case "AccessDenied":
+    case "ServiceError":
+      return { nodeId: failure.nodeId, cause: failure.error };
+  }
 };
 
 type MonitorGroupEntry = {
@@ -602,7 +708,7 @@ const wireMonitorGroup = (
   ) => {
     const entry = entries[index];
     if (!entry) return;
-    Effect.runFork(
+    Effect.runSync(
       sampleFromDataValue(entry.handle.def, dataValue, structureRuntime).pipe(
         Effect.tap((sample) =>
           Effect.sync(() =>
@@ -613,7 +719,7 @@ const wireMonitorGroup = (
     );
   };
   const onError = (message: unknown) => {
-    EventBus.publish(events, {
+    EventBus.publishUnsafe(events, {
       _tag: "InternalError",
       subscriptionId: subscription.subscriptionId,
       cause: message,
@@ -621,7 +727,7 @@ const wireMonitorGroup = (
   };
   const onTerminatedGroup = (cause: unknown) => {
     if (finalizingMonitorGroups.has(group)) return;
-    EventBus.publish(events, {
+    EventBus.publishUnsafe(events, {
       _tag: "MonitorItemsTerminated",
       subscriptionId: subscription.subscriptionId,
       nodeIds: entries.map((entry) => entry.nodeId),
@@ -631,7 +737,7 @@ const wireMonitorGroup = (
   group.on("changed", onChanged);
   group.on("err", onError);
   group.on("terminated", onTerminatedGroup);
-  EventBus.publish(events, {
+  EventBus.publishUnsafe(events, {
     _tag: "MonitorItemsCreated",
     subscriptionId: subscription.subscriptionId,
     nodeIds: entries.map((entry) => entry.nodeId),
@@ -654,7 +760,7 @@ const offerMonitorSample = <E>(
     policy._tag === "Sliding" && Queue.sizeUnsafe(queue) >= policy.capacity;
   const offered = Queue.offerUnsafe(queue, sample);
   if (willDrop || !offered) {
-    EventBus.publish(events, {
+    EventBus.publishUnsafe(events, {
       _tag: "ClientBufferDropped",
       subscriptionId: subscription.subscriptionId,
       nodeId: sample.nodeId,

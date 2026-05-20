@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 
-import { OpcuaSession, type OpcuaBrowseReference } from "../src/index.js";
-import { OpcuaConfigurationError } from "../src/errors.js";
+import {
+  OpcuaConfigurationError,
+  OpcuaSession,
+  type OpcuaBrowseReference,
+} from "../src/index.js";
 import {
   BrowseDirection,
   makeNodeClassMask,

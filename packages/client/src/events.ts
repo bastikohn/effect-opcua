@@ -82,9 +82,8 @@ type EventMapping<A> = {
 };
 
 export const EventBus = {
-  publish: <A>(pubsub: PubSub.PubSub<A>, event: A) => {
-    Effect.runFork(PubSub.publish(pubsub, event));
-  },
+  publishUnsafe: <A>(pubsub: PubSub.PubSub<A>, event: A) =>
+    Effect.runSync(PubSub.publish(pubsub, event)),
   wireEmitter: <A>(
     emitter: Emitter,
     mappings: ReadonlyArray<EventMapping<A>>,
@@ -94,7 +93,7 @@ export const EventBus = {
       Effect.sync(() =>
         mappings.map((mapping) => {
           const listener = (...args: ReadonlyArray<unknown>) => {
-            EventBus.publish(pubsub, mapping.make(...args));
+            EventBus.publishUnsafe(pubsub, mapping.make(...args));
           };
           emitter.on(mapping.event, listener);
           return { event: mapping.event, listener };

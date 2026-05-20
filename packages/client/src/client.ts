@@ -54,14 +54,14 @@ export const makeOpcuaClient = (options: OpcuaClientLayerOptions) =>
       Effect.tryPromise({
         try: async () => {
           await unsafeRaw.connect(options.endpointUrl);
-          EventBus.publish(events, {
+          EventBus.publishUnsafe(events, {
             _tag: "Connected",
             endpointUrl: options.endpointUrl,
           });
           return unsafeRaw;
         },
         catch: (cause) => {
-          EventBus.publish(events, {
+          EventBus.publishUnsafe(events, {
             _tag: "ConnectionFailed",
             endpointUrl: options.endpointUrl,
             cause,
@@ -76,7 +76,7 @@ export const makeOpcuaClient = (options: OpcuaClientLayerOptions) =>
         Effect.tryPromise({
           try: async () => {
             await unsafeRaw.disconnect();
-            EventBus.publish(events, {
+            EventBus.publishUnsafe(events, {
               _tag: "Disconnected",
               endpointUrl: options.endpointUrl,
             });

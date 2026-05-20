@@ -202,7 +202,7 @@ export const makeSession = (
     yield* Effect.acquireRelease(
       Effect.sync(() => {
         const listener = () => {
-          Effect.runFork(
+          Effect.runSync(
             metadata.invalidate.pipe(
               Effect.andThen(structureRuntime.invalidate),
             ),
