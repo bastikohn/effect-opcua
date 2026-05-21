@@ -12,6 +12,7 @@ import {
 } from "node-opcua";
 import { Effect, Result } from "effect";
 
+import { runChunked, type BatchOptions } from "./batch.js";
 import type { NodeIdString } from "./capabilities.js";
 import { Codec, dynamic, type CodecType, type OpcuaCodec } from "./codecs.js";
 import {
@@ -200,29 +201,35 @@ export type MethodHandle<
   >;
 };
 
-export type MethodCallEntry<H extends MethodHandle> = {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type AnyMethodHandle = MethodHandle<
+  any,
+  any,
+  NodeIdString,
+  NodeIdString
+>;
+
+export type MethodCallEntry<H extends AnyMethodHandle> = {
   readonly handle: H;
   readonly input: InputOfMethodHandle<H>;
   readonly options?: MethodCallOptions;
 };
 
 export type InputOfMethodHandle<H> =
-  H extends MethodHandle<infer Input, unknown, string, string> ? Input : never;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  H extends MethodHandle<infer Input, any, any, any> ? Input : never;
 
 export type OutputOfMethodHandle<H> =
-  H extends MethodHandle<unknown, infer Output, string, string>
-    ? Output
-    : never;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  H extends MethodHandle<any, infer Output, any, any> ? Output : never;
 
 export type ObjectIdOfMethodHandle<H> =
-  H extends MethodHandle<unknown, unknown, infer ObjectId, string>
-    ? ObjectId
-    : never;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  H extends MethodHandle<any, any, infer ObjectId, any> ? ObjectId : never;
 
 export type MethodIdOfMethodHandle<H> =
-  H extends MethodHandle<unknown, unknown, string, infer MethodId>
-    ? MethodId
-    : never;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  H extends MethodHandle<any, any, any, infer MethodId> ? MethodId : never;
 
 type MethodPreflight = {
   readonly request: CallMethodRequestLike;
@@ -309,6 +316,8 @@ export const makeMethodHandle = <const Spec extends AnyMethodDef>(
       methodId: spec.methodId,
       def: spec,
       metadata,
+      [methodHandleSession]: session,
+      [methodHandleStructureRuntime]: structureRuntime,
       unsafeRaw: {
         objectId,
         methodId,
@@ -329,6 +338,23 @@ export const makeMethodHandle = <const Spec extends AnyMethodDef>(
     >;
     return handle;
   });
+
+const methodHandleSession = Symbol("@effect-opcua/client/MethodSession");
+const methodHandleStructureRuntime = Symbol(
+  "@effect-opcua/client/MethodStructureRuntime",
+);
+
+export const getMethodHandleSession = (handle: unknown) =>
+  (handle as { readonly [methodHandleSession]?: ClientSession })[
+    methodHandleSession
+  ];
+
+export const getMethodHandleStructureRuntime = (handle: unknown) =>
+  (
+    handle as {
+      readonly [methodHandleStructureRuntime]?: OpcuaStructureRuntime;
+    }
+  )[methodHandleStructureRuntime];
 
 export const callHandle = <
   Input,
@@ -363,6 +389,52 @@ export const callHandle = <
       preflight,
       result,
       structureRuntime,
+    );
+  });
+
+export const callMethods = (
+  session: ClientSession,
+  entries: ReadonlyArray<MethodCallEntry<AnyMethodHandle>>,
+  structureRuntime: OpcuaStructureRuntime,
+  options?: BatchOptions,
+) =>
+  Effect.gen(function* () {
+    const preflights = yield* Effect.forEach(entries, (entry) =>
+      preflightMethodCall(
+        entry.handle,
+        entry.input,
+        structureRuntime,
+        entry.options,
+      ),
+    );
+    const rawResults = yield* runChunked(preflights, options, (chunk) =>
+      Effect.gen(function* () {
+        const results = yield* Effect.tryPromise({
+          try: () => session.call(chunk.map((preflight) => preflight.request)),
+          catch: (cause) =>
+            new OpcuaServiceError({
+              operation: "call",
+              cause,
+            }),
+        });
+        if (results.length !== chunk.length) {
+          return yield* Effect.fail(
+            new OpcuaServiceError({
+              operation: "call",
+              cause: `Expected ${chunk.length} CallMethodResults, got ${results.length}`,
+            }),
+          );
+        }
+        return results;
+      }),
+    );
+    return yield* Effect.forEach(entries, (entry, index) =>
+      methodResultFromRaw(
+        entry.handle,
+        preflights[index]!,
+        rawResults[index]!,
+        structureRuntime,
+      ),
     );
   });
 
@@ -452,7 +524,7 @@ export const readBooleanAttribute = (
   });
 };
 
-const preflightMethodCall = <
+export const preflightMethodCall = <
   Input,
   Output,
   ObjectId extends NodeIdString,
@@ -525,7 +597,7 @@ const preflightMethodCall = <
     };
   });
 
-const methodResultFromRaw = <
+export const methodResultFromRaw = <
   Input,
   Output,
   ObjectId extends NodeIdString,

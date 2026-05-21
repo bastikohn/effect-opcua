@@ -1,6 +1,15 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it } from "vitest";
-import { Duration, Effect, PubSub, Schema, Stream } from "effect";
+import {
+  Duration,
+  Effect,
+  Fiber,
+  Option,
+  PubSub,
+  Result,
+  Schema,
+  Stream,
+} from "effect";
 
 import {
   Opcua,
@@ -72,6 +81,7 @@ class FakeMonitorGroup extends EventEmitter {
     statusCode: (typeof StatusCodes)["Good"];
     result?: unknown;
   }>;
+  readonly originalMonitoredItems: FakeMonitorGroup["monitoredItems"];
 
   constructor(statusCodes: ReadonlyArray<(typeof StatusCodes)["Good"]>) {
     super();
@@ -83,11 +93,17 @@ class FakeMonitorGroup extends EventEmitter {
         statusCode,
       },
     }));
+    this.originalMonitoredItems = this.monitoredItems;
   }
 
   async terminate() {
     this.terminated = true;
     this.emit("terminated", new Error("terminated"));
+  }
+
+  emitChangedForOriginalIndex(index: number, dataValue: unknown) {
+    const item = this.originalMonitoredItems[index];
+    this.emit("changed", item, dataValue, this.monitoredItems.indexOf(item!));
   }
 }
 
@@ -122,6 +138,10 @@ const makeFakeSubscription = (options?: {
     readonly itemIndex: number;
   }) => (typeof StatusCodes)["Good"];
   readonly monitorDelayMs?: number;
+  readonly beforeMonitorResolve?: (input: {
+    readonly callIndex: number;
+    readonly items: ReadonlyArray<unknown>;
+  }) => void | Promise<void>;
   readonly read?: (...args: ReadonlyArray<unknown>) => Promise<unknown>;
   readonly onMonitorItems?: () => void;
   readonly failCall?: (callIndex: number) => boolean;
@@ -155,22 +175,26 @@ const makeFakeSubscription = (options?: {
           throw new Error("monitorItems failed");
         }
         inFlight++;
-        maxInFlight = Math.max(maxInFlight, inFlight);
-        if (options?.monitorDelayMs) {
-          await new Promise((resolve) =>
-            setTimeout(resolve, options.monitorDelayMs),
+        try {
+          maxInFlight = Math.max(maxInFlight, inFlight);
+          if (options?.monitorDelayMs) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, options.monitorDelayMs),
+            );
+          }
+          await options?.beforeMonitorResolve?.({ callIndex, items });
+          const group = new FakeMonitorGroup(
+            items.map(
+              (_, itemIndex) =>
+                options?.statusForItem?.({ callIndex, itemIndex }) ??
+                StatusCodes.Good,
+            ),
           );
+          groups.push(group);
+          return group;
+        } finally {
+          inFlight--;
         }
-        inFlight--;
-        const group = new FakeMonitorGroup(
-          items.map(
-            (_, itemIndex) =>
-              options?.statusForItem?.({ callIndex, itemIndex }) ??
-              StatusCodes.Good,
-          ),
-        );
-        groups.push(group);
-        return group;
       },
     } as unknown as ClientSubscription;
     const subscription = makeSubscription(
@@ -195,6 +219,16 @@ const makeItems = (count: number) =>
       Opcua.variable({ nodeId: `ns=1;s=item${index}` }),
     ]),
   ) as Record<string, ReadableVariableDef>;
+
+const numberDataValue = (value: number) => ({
+  statusCode: StatusCodes.Good,
+  value: new Variant({
+    dataType: DataType.Double,
+    value,
+  }),
+  sourceTimestamp: new Date(0),
+  serverTimestamp: new Date(0),
+});
 
 const EVENT_BUFFER_SIZE = 16;
 
@@ -273,6 +307,42 @@ describe("monitoring", () => {
     ).rejects.toBeInstanceOf(OpcuaMonitorConfigurationError);
   });
 
+  it("rejects missing option objects and invalid deadbands", async () => {
+    await expect(
+      Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const fake = yield* makeFakeSubscription();
+            return yield* fake.subscription.monitor(
+              makeItems(1),
+              null as never,
+            );
+          }),
+        ),
+      ),
+    ).rejects.toBeInstanceOf(OpcuaMonitorConfigurationError);
+
+    for (const filter of [
+      Opcua.MonitorFilter.statusValue(Opcua.MonitorDeadband.absolute(-1)),
+      Opcua.MonitorFilter.statusValue(Opcua.MonitorDeadband.percent(-1)),
+      Opcua.MonitorFilter.statusValue(Opcua.MonitorDeadband.percent(101)),
+    ]) {
+      await expect(
+        Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const fake = yield* makeFakeSubscription();
+              return yield* fake.subscription.monitor(
+                makeItems(1),
+                unitMonitorOptions({ filter }),
+              );
+            }),
+          ),
+        ),
+      ).rejects.toBeInstanceOf(OpcuaMonitorConfigurationError);
+    }
+  });
+
   it("chunks compatible items and respects create concurrency", async () => {
     const result = await Effect.runPromise(
       Effect.scoped(
@@ -347,6 +417,51 @@ describe("monitoring", () => {
     expect(result.failed.has("item1")).toBe(true);
   });
 
+  it("keeps later same-chunk successes after a failed middle item", async () => {
+    const samples = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* makeFakeSubscription({
+            statusForItem: ({ itemIndex }) =>
+              itemIndex === 1 ? StatusCodes.BadNodeIdUnknown : StatusCodes.Good,
+          });
+          const monitor = yield* fake.subscription.monitor(
+            {
+              A: Opcua.variable({
+                nodeId: "ns=1;s=A",
+                codec: Opcua.schema(Schema.Number),
+              }),
+              B: Opcua.variable({
+                nodeId: "ns=1;s=B",
+                codec: Opcua.schema(Schema.Number),
+              }),
+              C: Opcua.variable({
+                nodeId: "ns=1;s=C",
+                codec: Opcua.schema(Schema.Number),
+              }),
+            } as const,
+            unitMonitorOptions({ startup: "bestEffort" }),
+          );
+
+          expect(monitor.startup.active.has("C")).toBe(true);
+          expect(monitor.startup.failed.has("B")).toBe(true);
+          fake.groups[0]?.emitChangedForOriginalIndex(2, numberDataValue(3));
+          return yield* monitor.samples.pipe(
+            Stream.take(1),
+            Stream.runCollect,
+            Effect.timeout(Duration.millis(200)),
+          );
+        }),
+      ),
+    );
+
+    expect(samples[0]).toMatchObject({
+      _tag: "Value",
+      key: "C",
+      value: 3,
+    });
+  });
+
   it("cleans up successful groups when strict startup later fails", async () => {
     const fake = await Effect.runPromise(
       makeFakeSubscription({
@@ -371,6 +486,77 @@ describe("monitoring", () => {
 
     expect(fake.groups[0]?.terminated).toBe(true);
     expect(fake.groups[1]?.terminated).toBe(true);
+  });
+
+  it("terminates created groups if monitor startup is interrupted", async () => {
+    let unblockSecond: (() => void) | undefined;
+    const secondStarted = new Promise<void>((resolve) => {
+      unblockSecond = resolve;
+    });
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* makeFakeSubscription({
+            beforeMonitorResolve: ({ callIndex }) => {
+              if (callIndex !== 1) return undefined;
+              unblockSecond?.();
+              return new Promise<void>(() => undefined);
+            },
+          });
+          const fiber = yield* Effect.forkScoped(
+            fake.subscription.monitor(makeItems(2), {
+              ...unitMonitorOptions(),
+              create: {
+                maxItemsPerRequest: 1,
+                maxConcurrentRequests: 1,
+              },
+            }),
+          );
+
+          yield* Effect.tryPromise(() => secondStarted);
+          yield* Fiber.interrupt(fiber);
+          return fake;
+        }),
+      ),
+    );
+
+    expect(result.groups[0]?.terminated).toBe(true);
+    expect(result.groups[0]?.listenerCount("changed")).toBe(0);
+  });
+
+  it("does not publish MonitorItemsCreated for failed strict startup", async () => {
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* makeFakeSubscription({
+            statusForItem: ({ callIndex }) =>
+              callIndex === 1 ? StatusCodes.BadNodeIdUnknown : StatusCodes.Good,
+          });
+          const events = yield* Effect.forkScoped(
+            fake.subscription.events.pipe(
+              Stream.filter((event) => event._tag === "MonitorItemsCreated"),
+              Stream.take(1),
+              Stream.runCollect,
+              Effect.timeoutOption(Duration.millis(50)),
+            ),
+          );
+          const created = yield* Effect.result(
+            fake.subscription.monitor(makeItems(2), {
+              ...unitMonitorOptions(),
+              create: {
+                maxItemsPerRequest: 1,
+                maxConcurrentRequests: 1,
+              },
+            }),
+          );
+          const observed = yield* Fiber.join(events);
+          return { created, observed };
+        }),
+      ),
+    );
+
+    expect(Result.isFailure(result.created)).toBe(true);
+    expect(Option.isNone(result.observed)).toBe(true);
   });
 
   it("validation none skips metadata reads and access validation only reads access", async () => {
@@ -427,6 +613,41 @@ describe("monitoring", () => {
     expect(readCalls).toBe(1);
   });
 
+  it("chunks access validation reads with the create request size", async () => {
+    const readSizes: Array<number> = [];
+    const startup = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* makeFakeSubscription({
+            read: async (nodes) => {
+              const readNodes = nodes as ReadonlyArray<unknown>;
+              readSizes.push(readNodes.length);
+              return readNodes.map((_, index) =>
+                index % 2 === 0
+                  ? {
+                      statusCode: StatusCodes.Good,
+                      value: { value: AccessLevelFlag.CurrentRead },
+                    }
+                  : {
+                      statusCode: StatusCodes.Good,
+                      value: { value: undefined },
+                    },
+              );
+            },
+          });
+          const monitor = yield* fake.subscription.monitor(
+            makeItems(251),
+            unitMonitorOptions({ validation: "access" }),
+          );
+          return monitor.startup;
+        }),
+      ),
+    );
+
+    expect(startup.activeCount).toBe(251);
+    expect(readSizes).toEqual([500, 2]);
+  });
+
   it("emits status and decode problems as samples", async () => {
     const samples = await Effect.runPromise(
       Effect.scoped(
@@ -475,6 +696,34 @@ describe("monitoring", () => {
       "Status",
       "DecodeError",
     ]);
+  });
+
+  it("preserves changed notification order", async () => {
+    const samples = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* makeFakeSubscription();
+          const monitor = yield* fake.subscription.monitor(
+            {
+              A: Opcua.variable({
+                nodeId: "ns=1;s=A",
+                codec: Opcua.schema(Schema.Number),
+              }),
+              B: Opcua.variable({
+                nodeId: "ns=1;s=B",
+                codec: Opcua.schema(Schema.Number),
+              }),
+            } as const,
+            unitMonitorOptions(),
+          );
+          fake.groups[0]?.emitChangedForOriginalIndex(0, numberDataValue(1));
+          fake.groups[0]?.emitChangedForOriginalIndex(1, numberDataValue(2));
+          return yield* monitor.samples.pipe(Stream.take(2), Stream.runCollect);
+        }),
+      ),
+    );
+
+    expect(samples.map((sample) => sample.key)).toEqual(["A", "B"]);
   });
 
   it("streams typed and dynamic monitored samples from a named item dictionary", async () => {

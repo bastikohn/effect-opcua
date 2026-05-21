@@ -1,4 +1,5 @@
 export { Opcua } from "./Opcua.js";
+export type { BatchOptions } from "./Opcua.js";
 export { OpcuaClient } from "./client.js";
 export type {
   OpcuaClientLayerConfig,
@@ -62,6 +63,7 @@ export type {
   WritableVariableHandle,
 } from "./values.js";
 export type {
+  AnyMethodHandle,
   InputOfMethodDef,
   InputOfMethodHandle,
   MethodArg,
@@ -78,12 +80,10 @@ export type {
 } from "./methods.js";
 export type {
   ActiveMonitor,
-  AnyVariableDefinition,
   BufferPolicy,
   MonitorDeadband,
   MonitorFilter,
   MonitorCreateOptions,
-  MonitorItemDictionary,
   MonitorItemOverride,
   MonitorOptions,
   MonitorSample,
@@ -93,8 +93,5 @@ export type {
   MonitorStarted,
   MonitorTimestamps,
   MonitorValidation,
-  MonitorValueForKey,
   OpcuaSubscription,
-  RevisedMonitorItemOptions,
-  EffectiveMonitorItemOptions,
 } from "./monitoring.js";

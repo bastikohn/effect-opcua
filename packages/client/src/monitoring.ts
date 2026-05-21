@@ -283,12 +283,22 @@ type RetainedMonitorGroup<Items> = {
   readonly nodeIds: ReadonlyArray<NodeIdString>;
 };
 
+type RawMonitorNotification<Items> = {
+  readonly entry: WireMonitorEntry<Items>;
+  readonly dataValue: DataValue;
+};
+
 type CreatedChunk<Items> = {
   readonly retained?: RetainedMonitorGroup<Items>;
   readonly active: ReadonlyArray<readonly [MonitorKey<Items>, MonitorStarted]>;
   readonly failed: ReadonlyArray<
     readonly [MonitorKey<Items>, MonitorStartupFailure]
   >;
+};
+
+type MonitorGroupRegistry = {
+  readonly add: (group: ClientMonitoredItemGroup) => void;
+  readonly remove: (group: ClientMonitoredItemGroup) => void;
 };
 
 const defaultCreate: NormalizedCreateOptions = {
@@ -320,6 +330,7 @@ export const makeSubscription = (
         unsafeRaw,
         effective,
         options.validation,
+        createOptions,
         handleVariable,
       );
 
@@ -338,21 +349,42 @@ export const makeSubscription = (
         );
       }
 
-      const sampleQueue = yield* makeQueue<
-        MonitorSample<Items>,
+      const notificationQueue = yield* makeQueue<
+        RawMonitorNotification<Items>,
         OpcuaMonitorRuntimeError
       >(options.clientBuffer);
+      const createdGroups: Array<ClientMonitoredItemGroup> = [];
+      const retainedGroups: Array<RetainedMonitorGroup<Items>> = [];
+      const teardowns: Array<() => void> = [];
+      const groupRegistry: MonitorGroupRegistry = {
+        add: (group) => {
+          createdGroups.push(group);
+        },
+        remove: (group) => {
+          removeCreatedMonitorGroup(createdGroups, group);
+        },
+      };
+
+      yield* Effect.addFinalizer(() =>
+        cleanupMonitor(
+          createdGroups,
+          teardowns,
+          notificationQueue,
+          finalizingMonitorGroups,
+        ),
+      );
+
       const created =
         validation.active.length > 0
           ? yield* createMonitorChunks(
               unsafeRaw,
               validation.active,
               createOptions,
+              groupRegistry,
             )
           : [];
       const active = new Map<MonitorKey<Items>, MonitorStarted>();
       const failed = new Map(validation.failed);
-      const retainedGroups: Array<RetainedMonitorGroup<Items>> = [];
 
       for (const chunk of created) {
         for (const [key, started] of chunk.active) active.set(key, started);
@@ -360,18 +392,6 @@ export const makeSubscription = (
         if (chunk.retained) retainedGroups.push(chunk.retained);
       }
 
-      const teardowns = retainedGroups.map((retained) =>
-        wireMonitorGroup(
-          unsafeRaw,
-          events,
-          retained.group,
-          retained.entries,
-          sampleQueue,
-          options.clientBuffer,
-          structureRuntime,
-          finalizingMonitorGroups,
-        ),
-      );
       const report = makeStartupReport<Items>(
         normalized.length,
         active,
@@ -380,9 +400,9 @@ export const makeSubscription = (
 
       if (options.startup === "strict" && failed.size > 0) {
         yield* cleanupMonitor(
-          retainedGroups,
+          createdGroups,
           teardowns,
-          sampleQueue,
+          notificationQueue,
           finalizingMonitorGroups,
         );
         return yield* Effect.fail(
@@ -394,18 +414,29 @@ export const makeSubscription = (
         );
       }
 
-      yield* Effect.addFinalizer(() =>
-        cleanupMonitor(
-          retainedGroups,
-          teardowns,
-          sampleQueue,
-          finalizingMonitorGroups,
-        ),
-      );
+      for (const retained of retainedGroups) {
+        teardowns.push(
+          wireMonitorGroup(
+            unsafeRaw,
+            events,
+            retained.group,
+            retained.entries,
+            notificationQueue,
+            options.clientBuffer,
+            finalizingMonitorGroups,
+          ),
+        );
+      }
 
       return {
         startup: report,
-        samples: Stream.fromQueue(sampleQueue),
+        samples: Stream.fromQueue(notificationQueue).pipe(
+          Stream.mapEffect(
+            ({ entry, dataValue }) =>
+              monitorSampleFromDataValue(entry, dataValue, structureRuntime),
+            { concurrency: 1 },
+          ),
+        ),
       };
     });
 
@@ -489,6 +520,13 @@ const validateMonitorOptions = <Items>(
   options: MonitorOptions<Items>,
 ): Effect.Effect<NormalizedCreateOptions, OpcuaMonitorConfigurationError> =>
   Effect.suspend(() => {
+    if (!isPlainRecord(options)) {
+      return Effect.fail(
+        monitorConfigurationError("monitor.options", {
+          cause: "options must be an object",
+        }),
+      );
+    }
     if (options.startup !== "strict" && options.startup !== "bestEffort") {
       return Effect.fail(
         monitorConfigurationError("monitor.options.startup", {
@@ -641,13 +679,14 @@ const validateStartupItems = <Items>(
   subscription: ClientSubscription,
   items: ReadonlyArray<EffectiveMonitorItem<Items>>,
   validation: MonitorValidation,
+  create: NormalizedCreateOptions,
   handleVariable: HandleVariable,
 ): Effect.Effect<ValidationResult<Items>, never> => {
   switch (validation) {
     case "none":
       return Effect.succeed({ active: items, failed: new Map() });
     case "access":
-      return validateAccess(subscription, items);
+      return validateAccess(subscription, items, create);
     case "strict":
       return validateStrict(items, handleVariable);
   }
@@ -680,9 +719,31 @@ const validateStrict = <Items>(
 const validateAccess = <Items>(
   subscription: ClientSubscription,
   items: ReadonlyArray<EffectiveMonitorItem<Items>>,
+  create: NormalizedCreateOptions,
 ): Effect.Effect<ValidationResult<Items>, never> =>
   Effect.gen(function* () {
-    const nodes = items.flatMap((item) => [
+    const results = yield* Effect.forEach(
+      chunkArray(items, create.maxItemsPerRequest),
+      (chunk) => validateAccessChunk(subscription, chunk),
+      {
+        concurrency: create.maxConcurrentRequests,
+      },
+    );
+    const active: Array<EffectiveMonitorItem<Items>> = [];
+    const failed = new Map<MonitorKey<Items>, MonitorStartupFailure>();
+    for (const result of results) {
+      active.push(...result.active);
+      for (const [key, failure] of result.failed) failed.set(key, failure);
+    }
+    return { active, failed };
+  });
+
+const validateAccessChunk = <Items>(
+  subscription: ClientSubscription,
+  chunk: ReadonlyArray<EffectiveMonitorItem<Items>>,
+): Effect.Effect<ValidationResult<Items>, never> =>
+  Effect.gen(function* () {
+    const nodes = chunk.flatMap((item) => [
       { nodeId: item.rawNodeId, attributeId: AttributeIds.AccessLevel },
       { nodeId: item.rawNodeId, attributeId: AttributeIds.UserAccessLevel },
     ]);
@@ -696,7 +757,7 @@ const validateAccess = <Items>(
       return {
         active: [],
         failed: new Map(
-          items.map((item) => [
+          chunk.map((item) => [
             item.key,
             startupFailure(item, "Validation", readResult.failure),
           ]),
@@ -709,8 +770,8 @@ const validateAccess = <Items>(
       : [readResult.success];
     const active: Array<EffectiveMonitorItem<Items>> = [];
     const failed = new Map<MonitorKey<Items>, MonitorStartupFailure>();
-    for (let index = 0; index < items.length; index++) {
-      const item = items[index]!;
+    for (let index = 0; index < chunk.length; index++) {
+      const item = chunk[index]!;
       const accessLevelValue = values[index * 2];
       const userAccessLevelValue = values[index * 2 + 1];
       if (
@@ -754,13 +815,14 @@ const createMonitorChunks = <Items>(
   subscription: ClientSubscription,
   items: ReadonlyArray<EffectiveMonitorItem<Items>>,
   create: NormalizedCreateOptions,
+  groupRegistry: MonitorGroupRegistry,
 ): Effect.Effect<ReadonlyArray<CreatedChunk<Items>>, never> => {
   const chunks = Array.from(groupCompatibleItems(items).values()).flatMap(
     (group) => chunkArray(group, create.maxItemsPerRequest),
   );
   return Effect.forEach(
     chunks,
-    (chunk) => createMonitorChunk(subscription, chunk),
+    (chunk) => createMonitorChunk(subscription, chunk, groupRegistry),
     {
       concurrency: create.maxConcurrentRequests,
     },
@@ -770,28 +832,10 @@ const createMonitorChunks = <Items>(
 const createMonitorChunk = <Items>(
   subscription: ClientSubscription,
   chunk: ReadonlyArray<EffectiveMonitorItem<Items>>,
+  groupRegistry: MonitorGroupRegistry,
 ): Effect.Effect<CreatedChunk<Items>, never> =>
   Effect.gen(function* () {
-    const first = chunk[0]!;
-    const groupResult = yield* Effect.result(
-      Effect.tryPromise({
-        try: () =>
-          subscription.monitorItems(
-            chunk.map((item) => ({
-              nodeId: item.rawNodeId,
-              attributeId: AttributeIds.Value,
-            })),
-            {
-              samplingInterval: first.requested.samplingInterval,
-              queueSize: first.requested.queueSize,
-              discardOldest: first.requested.discardOldest,
-              filter: first.nodeOpcuaFilter,
-            },
-            first.timestampsToReturn,
-          ),
-        catch: (cause) => cause,
-      }),
-    );
+    const groupResult = yield* Effect.result(monitorItems(subscription, chunk));
     if (Result.isFailure(groupResult)) {
       return {
         active: [],
@@ -802,12 +846,13 @@ const createMonitorChunk = <Items>(
       };
     }
 
-    const group = groupResult.success;
+    const { group, disposeAbort } = groupResult.success;
+    groupRegistry.add(group);
+    disposeAbort();
     const active: Array<readonly [MonitorKey<Items>, MonitorStarted]> = [];
     const failed: Array<readonly [MonitorKey<Items>, MonitorStartupFailure]> =
       [];
     const entries: Array<WireMonitorEntry<Items> | undefined> = [];
-    const retainedIndexes = new Set<number>();
     const retainedNodeIds: Array<NodeIdString> = [];
 
     for (let index = 0; index < chunk.length; index++) {
@@ -837,13 +882,11 @@ const createMonitorChunk = <Items>(
         def: item.def,
         timestamps: item.requested.timestamps,
       });
-      retainedIndexes.add(index);
       retainedNodeIds.push(item.nodeId);
     }
 
-    pruneMonitorGroup(group, retainedIndexes);
-    if (retainedIndexes.size === 0) {
-      yield* terminateMonitorGroup(group);
+    if (retainedNodeIds.length === 0) {
+      yield* terminateCreatedMonitorGroup(group, groupRegistry);
       return { active, failed };
     }
     return {
@@ -857,14 +900,57 @@ const createMonitorChunk = <Items>(
     };
   });
 
+const monitorItems = <Items>(
+  subscription: ClientSubscription,
+  chunk: ReadonlyArray<EffectiveMonitorItem<Items>>,
+) => {
+  const first = chunk[0]!;
+  return Effect.tryPromise({
+    try: (signal) =>
+      subscription
+        .monitorItems(
+          chunk.map((item) => ({
+            nodeId: item.rawNodeId,
+            attributeId: AttributeIds.Value,
+          })),
+          {
+            samplingInterval: first.requested.samplingInterval,
+            queueSize: first.requested.queueSize,
+            discardOldest: first.requested.discardOldest,
+            filter: first.nodeOpcuaFilter,
+          },
+          first.timestampsToReturn,
+        )
+        .then((group) => monitorItemsSuccess(group, signal)),
+    catch: (cause) => cause,
+  });
+};
+
+const monitorItemsSuccess = (
+  group: ClientMonitoredItemGroup,
+  signal: AbortSignal,
+) => {
+  if (signal.aborted) {
+    terminateMonitorGroupUnsafe(group);
+    return { group, disposeAbort: () => undefined };
+  }
+  const abort = () => terminateMonitorGroupUnsafe(group);
+  signal.addEventListener("abort", abort, { once: true });
+  return {
+    group,
+    disposeAbort: () => {
+      signal.removeEventListener("abort", abort);
+    },
+  };
+};
+
 const wireMonitorGroup = <Items>(
   subscription: ClientSubscription,
   events: PubSub.PubSub<OpcuaSubscriptionEvent>,
   group: ClientMonitoredItemGroup,
   entries: ReadonlyArray<WireMonitorEntry<Items> | undefined>,
-  queue: Queue.Queue<MonitorSample<Items>, OpcuaMonitorRuntimeError>,
+  queue: Queue.Queue<RawMonitorNotification<Items>, OpcuaMonitorRuntimeError>,
   policy: BufferPolicy,
-  structureRuntime: OpcuaStructureRuntime,
   finalizingMonitorGroups: WeakSet<ClientMonitoredItemGroup>,
 ) => {
   const nodeIds = entries.flatMap((entry) => (entry ? [entry.nodeId] : []));
@@ -889,15 +975,10 @@ const wireMonitorGroup = <Items>(
   ) => {
     const entry = entries[index];
     if (!entry) return;
-    Effect.runFork(
-      monitorSampleFromDataValue(entry, dataValue, structureRuntime).pipe(
-        Effect.tap((sample) =>
-          Effect.sync(() =>
-            offerMonitorSample(subscription, events, queue, policy, sample),
-          ),
-        ),
-      ),
-    );
+    offerMonitorNotification(subscription, events, queue, policy, {
+      entry,
+      dataValue,
+    });
   };
   const onError = (message: unknown) => {
     failRuntime(message);
@@ -979,38 +1060,40 @@ const monitorSampleBase = <Items>(
       : undefined,
 });
 
-const offerMonitorSample = <Items>(
+const offerMonitorNotification = <Items>(
   subscription: ClientSubscription,
   events: PubSub.PubSub<OpcuaSubscriptionEvent>,
-  queue: Queue.Queue<MonitorSample<Items>, OpcuaMonitorRuntimeError>,
+  queue: Queue.Queue<RawMonitorNotification<Items>, OpcuaMonitorRuntimeError>,
   policy: BufferPolicy,
-  sample: MonitorSample<Items>,
+  notification: RawMonitorNotification<Items>,
 ) => {
   const willDrop =
     policy._tag === "Sliding" && Queue.sizeUnsafe(queue) >= policy.capacity;
-  const offered = Queue.offerUnsafe(queue, sample);
+  const offered = Queue.offerUnsafe(queue, notification);
   if (willDrop || !offered) {
     EventBus.publishUnsafe(events, {
       _tag: "ClientBufferDropped",
       subscriptionId: subscription.subscriptionId,
-      nodeId: sample.nodeId,
+      nodeId: notification.entry.nodeId,
     });
   }
 };
 
 const cleanupMonitor = <Items>(
-  retainedGroups: ReadonlyArray<RetainedMonitorGroup<Items>>,
-  teardowns: ReadonlyArray<() => void>,
-  queue: Queue.Queue<MonitorSample<Items>, OpcuaMonitorRuntimeError>,
+  createdGroups: Array<ClientMonitoredItemGroup>,
+  teardowns: Array<() => void>,
+  queue: Queue.Queue<RawMonitorNotification<Items>, OpcuaMonitorRuntimeError>,
   finalizingMonitorGroups: WeakSet<ClientMonitoredItemGroup>,
 ) =>
   Effect.gen(function* () {
-    for (const teardown of teardowns) yield* Effect.sync(teardown);
-    for (const retained of retainedGroups) {
+    const listeners = teardowns.splice(0);
+    for (const teardown of listeners) yield* Effect.sync(teardown);
+    const groups = createdGroups.splice(0);
+    for (const group of groups) {
       yield* Effect.sync(() => {
-        finalizingMonitorGroups.add(retained.group);
+        finalizingMonitorGroups.add(group);
       });
-      yield* terminateMonitorGroup(retained.group);
+      yield* terminateMonitorGroup(group);
     }
     yield* Queue.shutdown(queue);
   }).pipe(Effect.ignore);
@@ -1166,16 +1249,27 @@ const terminateMonitorGroup = (group: ClientMonitoredItemGroup) =>
     catch: (cause) => cause,
   }).pipe(Effect.ignore);
 
-const pruneMonitorGroup = (
+const terminateCreatedMonitorGroup = (
   group: ClientMonitoredItemGroup,
-  retainedIndexes: ReadonlySet<number>,
-) => {
-  const retained = group.monitoredItems.filter((_item, index) =>
-    retainedIndexes.has(index),
+  registry: MonitorGroupRegistry,
+) =>
+  Effect.uninterruptible(
+    Effect.gen(function* () {
+      yield* terminateMonitorGroup(group);
+      yield* Effect.sync(() => registry.remove(group));
+    }),
   );
-  (
-    group as { monitoredItems: ReadonlyArray<ClientMonitoredItemBase> }
-  ).monitoredItems = retained;
+
+const terminateMonitorGroupUnsafe = (group: ClientMonitoredItemGroup) => {
+  void group.terminate().catch(() => undefined);
+};
+
+const removeCreatedMonitorGroup = (
+  groups: Array<ClientMonitoredItemGroup>,
+  group: ClientMonitoredItemGroup,
+) => {
+  const index = groups.indexOf(group);
+  if (index >= 0) groups.splice(index, 1);
 };
 
 const revisedMonitorItemOptions = (
@@ -1351,8 +1445,18 @@ const isMonitorDeadband = (value: unknown): value is MonitorDeadband => {
     case "None":
       return true;
     case "Absolute":
+      return (
+        typeof value.value === "number" &&
+        Number.isFinite(value.value) &&
+        value.value >= 0
+      );
     case "Percent":
-      return typeof value.value === "number" && Number.isFinite(value.value);
+      return (
+        typeof value.value === "number" &&
+        Number.isFinite(value.value) &&
+        value.value >= 0 &&
+        value.value <= 100
+      );
     default:
       return false;
   }

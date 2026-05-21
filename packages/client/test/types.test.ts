@@ -4,6 +4,7 @@ import { expect, it } from "vitest";
 import {
   Opcua,
   OpcuaClient,
+  type MethodHandle,
   type OpcuaSession,
   type VariableHandle,
   type WritableVariableHandle,
@@ -69,6 +70,27 @@ const expectMethodTypes = (session: OpcuaSession) => {
 };
 
 void expectMethodTypes;
+
+const expectCallAllTypes = (
+  handle: MethodHandle<
+    { readonly Value: number },
+    { readonly Accepted: boolean },
+    "ns=1;s=Object",
+    "ns=1;s=Method"
+  >,
+) => {
+  Opcua.callAll([{ handle, input: { Value: 1 } }] as const);
+
+  Opcua.callAll([
+    {
+      handle,
+      // @ts-expect-error input values must match their method handle type
+      input: { Value: "wrong" },
+    },
+  ] as const);
+};
+
+void expectCallAllTypes;
 
 const expectMonitorTypes = (
   session: OpcuaSession,

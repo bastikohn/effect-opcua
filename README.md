@@ -53,7 +53,7 @@ const written = yield * setpoint.write(42);
 const resetResult = yield * reset.call({ mode: "soft" });
 ```
 
-Batch helpers operate on handles:
+Batch helpers issue true OPC-UA batch service calls when possible and preserve tuple order:
 
 ```ts
 const [temperature, pressure] =
@@ -186,7 +186,9 @@ const monitor =
 Duplicate NodeIds inside one monitor are rejected locally with
 `OpcuaMonitorConfigurationError`. `validation: "none"` skips metadata pre-reads
 and lets server create results plus runtime decode events report per-tag
-problems.
+problems. `validation: "access"` batches metadata reads using
+`create.maxItemsPerRequest`; `validation: "strict"` validates one item at a time
+and may be slow for large tag sets.
 
 ## Unsafe Access
 

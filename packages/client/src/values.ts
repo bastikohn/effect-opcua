@@ -6,11 +6,14 @@ import {
   coerceNodeId,
   type ClientSession,
   type DataValue,
+  type ReadValueIdOptions,
   type StatusCode,
   type Variant,
+  type WriteValueOptions,
 } from "node-opcua";
 import { Effect, Result } from "effect";
 
+import { runChunked, type BatchOptions } from "./batch.js";
 import type { NodeIdString, VariableCapability } from "./capabilities.js";
 import {
   Codec,
@@ -204,6 +207,23 @@ export type WriteEntry<H extends WritableVariableHandle> = {
   readonly value: ValueOfVariableHandle<H>;
 };
 
+const variableHandleSession = Symbol("@effect-opcua/client/VariableSession");
+const variableHandleStructureRuntime = Symbol(
+  "@effect-opcua/client/VariableStructureRuntime",
+);
+
+export const getVariableHandleSession = (handle: unknown) =>
+  (handle as { readonly [variableHandleSession]?: ClientSession })[
+    variableHandleSession
+  ];
+
+export const getVariableHandleStructureRuntime = (handle: unknown) =>
+  (
+    handle as {
+      readonly [variableHandleStructureRuntime]?: OpcuaStructureRuntime;
+    }
+  )[variableHandleStructureRuntime];
+
 export const makeVariableDef = <
   const Id extends string,
   C extends OpcuaCodec<unknown> = OpcuaCodec<OpcuaDynamicValue>,
@@ -252,8 +272,10 @@ export const makeVariableHandle = <
     def,
     metadata,
     unsafeRaw: { nodeId, builtInDataType: metadata.unsafeRaw.builtInDataType },
+    [variableHandleSession]: session,
+    [variableHandleStructureRuntime]: structureRuntime,
   };
-  const handle: Record<string, unknown> = { ...base };
+  const handle: Record<PropertyKey, unknown> = { ...base };
   if (hasAccessPart(def.access, "read")) {
     handle.read = () => readVariable(session, def, structureRuntime);
   }
@@ -277,6 +299,50 @@ export const readVariable = <const Id extends string, A>(
     }
     const dataValue = yield* readDataValue(session, def.nodeId);
     return yield* sampleFromDataValue(def, dataValue, structureRuntime);
+  });
+
+export const readVariables = (
+  session: ClientSession,
+  handles: ReadonlyArray<ReadableVariableHandle>,
+  structureRuntime: OpcuaStructureRuntime,
+  options?: BatchOptions,
+) =>
+  Effect.gen(function* () {
+    if (
+      handles.some((handle) => Codec.requiresStructureRuntime(handle.def.codec))
+    ) {
+      yield* structureRuntime.ensureInitialized();
+    }
+    const dataValues = yield* runChunked(handles, options, (chunk) =>
+      Effect.gen(function* () {
+        const readValueIds: ReadonlyArray<ReadValueIdOptions> = chunk.map(
+          (handle) => ({
+            nodeId: handle.unsafeRaw.nodeId,
+            attributeId: AttributeIds.Value,
+          }),
+        );
+        const dataValues = yield* Effect.tryPromise({
+          try: () => session.read([...readValueIds], 0),
+          catch: (cause) =>
+            new OpcuaServiceError({
+              operation: "read",
+              cause,
+            }),
+        });
+        if (dataValues.length !== chunk.length) {
+          return yield* Effect.fail(
+            new OpcuaServiceError({
+              operation: "read",
+              cause: `Expected ${chunk.length} DataValues, got ${dataValues.length}`,
+            }),
+          );
+        }
+        return dataValues;
+      }),
+    );
+    return yield* Effect.forEach(handles, (handle, index) =>
+      sampleFromDataValue(handle.def, dataValues[index]!, structureRuntime),
+    );
   });
 
 export const sampleFromDataValue = <const Id extends string, A>(
@@ -340,6 +406,49 @@ export const writeVariable = <const Id extends string, A>(
     return writeResult(def.nodeId, statusCode);
   });
 
+export const writeVariables = (
+  session: ClientSession,
+  entries: ReadonlyArray<WriteEntry<WritableVariableHandle>>,
+  structureRuntime: OpcuaStructureRuntime,
+  options?: BatchOptions,
+) =>
+  Effect.gen(function* () {
+    if (
+      entries.some((entry) =>
+        Codec.requiresStructureRuntime(entry.handle.def.codec),
+      )
+    ) {
+      yield* structureRuntime.ensureInitialized();
+    }
+    const writeValues = yield* Effect.forEach(entries, (entry) =>
+      encodeWriteValue(entry, structureRuntime),
+    );
+    const statusCodes = yield* runChunked(writeValues, options, (chunk) =>
+      Effect.gen(function* () {
+        const statusCodes = yield* Effect.tryPromise({
+          try: () => session.write([...chunk]),
+          catch: (cause) =>
+            new OpcuaServiceError({
+              operation: "write",
+              cause,
+            }),
+        });
+        if (statusCodes.length !== chunk.length) {
+          return yield* Effect.fail(
+            new OpcuaServiceError({
+              operation: "write",
+              cause: `Expected ${chunk.length} StatusCodes, got ${statusCodes.length}`,
+            }),
+          );
+        }
+        return statusCodes;
+      }),
+    );
+    return entries.map((entry, index) =>
+      writeResult(entry.handle.nodeId, statusCodes[index]!),
+    );
+  });
+
 export const writeResult = <Id extends string>(
   nodeId: Id,
   statusCode: StatusCode,
@@ -351,6 +460,24 @@ export const writeResult = <Id extends string>(
         nodeId,
         status: normalizeStatusCode(statusCode),
       };
+
+const encodeWriteValue = (
+  entry: WriteEntry<WritableVariableHandle>,
+  structureRuntime: OpcuaStructureRuntime,
+): Effect.Effect<WriteValueOptions, OpcuaEncodeError | OpcuaServiceError> =>
+  Effect.gen(function* () {
+    const variant = yield* Codec.encode(
+      entry.handle.def.codec as OpcuaCodec<unknown>,
+      entry.value as unknown,
+      codecMetadata(entry.handle.metadata),
+      structureRuntime,
+    );
+    return {
+      nodeId: entry.handle.unsafeRaw.nodeId,
+      attributeId: AttributeIds.Value,
+      value: { value: variant },
+    };
+  });
 
 export const accessDeniedError = (
   nodeId: NodeIdString,
