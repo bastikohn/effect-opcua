@@ -6,27 +6,26 @@ import {
   DeadbandType,
   StatusCodes,
   TimestampsToReturn,
+  coerceNodeId,
+  type ClientMonitoredItemBase,
   type ClientMonitoredItemGroup,
+  type DataValue,
+  type NodeId,
+  type StatusCode,
 } from "node-opcua";
-import {
-  Duration,
-  Effect,
-  PubSub,
-  Queue,
-  Ref,
-  Result,
-  Scope,
-  Semaphore,
-  Stream,
-} from "effect";
+import { Duration, Effect, PubSub, Queue, Result, Scope, Stream } from "effect";
 
-import { EVENT_BUFFER_SIZE } from "./constants.js";
+import { Codec } from "./codecs.js";
 import type { NodeIdString } from "./capabilities.js";
 import { EventBus, type OpcuaSubscriptionEvent } from "./events.js";
 import {
   OpcuaAccessDeniedError,
   OpcuaConfigurationError,
+  OpcuaDecodeError,
+  OpcuaMonitorConfigurationError,
   OpcuaMonitorCreateError,
+  OpcuaMonitorRuntimeError,
+  OpcuaMonitorStartupError,
   OpcuaServiceError,
 } from "./errors.js";
 import {
@@ -36,9 +35,7 @@ import {
 } from "./normalize.js";
 import type { OpcuaStructureRuntime } from "./structure-runtime.js";
 import {
-  sampleFromDataValue,
-  type AnyReadResult,
-  type ReadResult,
+  accessDeniedError,
   type ReadableVariableDef,
   type ValueOfVariableDef,
   type VariableHandle,
@@ -106,115 +103,135 @@ export const MonitorFilter = {
   }),
 };
 
-export type MonitorOptions = {
+export type MonitorStartup = "strict" | "bestEffort";
+export type MonitorValidation = "none" | "access" | "strict";
+export type MonitorTimestamps = "none" | "source" | "server" | "both";
+
+export type MonitorCreateOptions = {
+  readonly maxItemsPerRequest?: number;
+  readonly maxConcurrentRequests?: number;
+};
+
+export type MonitorItemOverride = Partial<{
   readonly samplingInterval: Duration.Duration;
   readonly queueSize: number;
   readonly discardOldest: boolean;
-  readonly clientBuffer: BufferPolicy;
-  readonly filter?: MonitorFilter;
-};
+  readonly filter: MonitorFilter;
+  readonly timestamps: MonitorTimestamps;
+}>;
 
-export type MonitorDef<Def extends ReadableVariableDef = ReadableVariableDef> =
-  Def & {
-    readonly samplingInterval?: Duration.Duration;
-    readonly filter?: MonitorFilter;
+export type AnyVariableDefinition = ReadableVariableDef;
+export type MonitorItemDictionary = Record<string, AnyVariableDefinition>;
+
+export type MonitorOptions<Items = MonitorItemDictionary> = {
+  readonly startup: MonitorStartup;
+  readonly validation: MonitorValidation;
+
+  readonly samplingInterval: Duration.Duration;
+  readonly queueSize: number;
+  readonly discardOldest: boolean;
+  readonly filter: MonitorFilter;
+  readonly timestamps: MonitorTimestamps;
+
+  readonly clientBuffer: BufferPolicy;
+
+  readonly overrides?: {
+    readonly [K in keyof Items]?: MonitorItemOverride;
   };
 
-export type MonitorItemOptions = {
+  readonly create?: MonitorCreateOptions;
+};
+
+export type EffectiveMonitorItemOptions = {
   readonly samplingInterval: number;
-  readonly filter?: MonitorFilter;
+  readonly queueSize: number;
+  readonly discardOldest: boolean;
+  readonly filter: MonitorFilter;
+  readonly timestamps: MonitorTimestamps;
 };
 
-export type MonitoredItemState = {
-  readonly nodeId: NodeIdString;
-  readonly options: MonitorItemOptions;
+export type RevisedMonitorItemOptions = {
+  readonly samplingInterval?: number;
+  readonly queueSize?: number;
 };
 
-export type MonitorAddResult<Id extends string = string> =
-  | { readonly _tag: "Monitoring"; readonly nodeId: Id }
-  | { readonly _tag: "AlreadyMonitoring"; readonly nodeId: Id }
-  | {
-      readonly _tag: "AlreadyMonitoringWithDifferentOptions";
-      readonly nodeId: Id;
-      readonly current: MonitorItemOptions;
-      readonly requested: MonitorItemOptions;
-    }
-  | {
-      readonly _tag: "NonGoodStatus";
-      readonly nodeId: Id;
-      readonly status: OpcuaStatusInfo;
-      readonly cause?: unknown;
-    }
-  | {
-      readonly _tag: "ConfigurationError";
-      readonly nodeId: Id;
-      readonly error: OpcuaConfigurationError;
-    }
-  | {
-      readonly _tag: "AccessDenied";
-      readonly nodeId: Id;
-      readonly error: OpcuaAccessDeniedError;
-    }
-  | {
-      readonly _tag: "ServiceError";
-      readonly nodeId: Id;
-      readonly error: OpcuaServiceError;
-    };
+export type MonitorStarted = {
+  readonly key: string;
+  readonly nodeId: string;
+  readonly requested: EffectiveMonitorItemOptions;
+  readonly revised?: RevisedMonitorItemOptions;
+};
 
-export type MonitorRemoveResult<Id extends string = string> =
-  | { readonly _tag: "Removed"; readonly nodeId: Id }
-  | { readonly _tag: "NotMonitoring"; readonly nodeId: Id };
+export type MonitorStartupFailure = {
+  readonly key: string;
+  readonly nodeId: string;
+  readonly requested: EffectiveMonitorItemOptions;
+  readonly error: OpcuaMonitorStartupError;
+};
 
-export type MonitorItemEvent =
-  | MonitorAddResult
-  | MonitorRemoveResult
-  | {
-      readonly _tag: "Terminated";
-      readonly nodeId: NodeIdString;
-      readonly cause?: unknown;
-    };
+export type MonitorStartupReport<Items = MonitorItemDictionary> = {
+  readonly ok: boolean;
+  readonly requested: number;
+  readonly activeCount: number;
+  readonly failedCount: number;
+  readonly active: ReadonlyMap<keyof Items & string, MonitorStarted>;
+  readonly failed: ReadonlyMap<keyof Items & string, MonitorStartupFailure>;
+};
 
-export type MonitorSampleOf<Def> = Def extends ReadableVariableDef
-  ? ReadResult<ValueOfVariableDef<Def>, Def["nodeId"]>
+export type MonitorValueForKey<
+  Items,
+  Key extends keyof Items & string,
+> = Items[Key] extends ReadableVariableDef
+  ? ValueOfVariableDef<Items[Key]>
   : never;
 
-export type ValueMonitor = {
-  readonly add: <const Defs extends ReadonlyArray<MonitorDef>>(
-    defs: Defs,
-  ) => Effect.Effect<
-    ReadonlyArray<
-      Defs[number] extends MonitorDef<infer Def>
-        ? MonitorAddResult<Def["nodeId"]>
-        : never
-    >,
-    never
+type MonitorNodeIdForKey<
+  Items,
+  Key extends keyof Items & string,
+> = Items[Key] extends { readonly nodeId: infer Id extends string }
+  ? Id
+  : string;
+
+type MonitorSampleBase<Items, Key extends keyof Items & string> = {
+  readonly key: Key;
+  readonly nodeId: MonitorNodeIdForKey<Items, Key>;
+  readonly status: OpcuaStatusInfo;
+  readonly sourceTimestamp?: Date;
+  readonly serverTimestamp?: Date;
+};
+
+export type MonitorSample<Items = MonitorItemDictionary> = {
+  readonly [Key in keyof Items & string]:
+    | ({
+        readonly _tag: "Value";
+        readonly value: MonitorValueForKey<Items, Key>;
+      } & MonitorSampleBase<Items, Key>)
+    | ({
+        readonly _tag: "Status";
+      } & MonitorSampleBase<Items, Key>)
+    | ({
+        readonly _tag: "DecodeError";
+        readonly error: OpcuaDecodeError;
+        readonly rawValue: unknown;
+      } & MonitorSampleBase<Items, Key>);
+}[keyof Items & string];
+
+export type ActiveMonitor<Items = MonitorItemDictionary> = {
+  readonly startup: MonitorStartupReport<Items>;
+  readonly samples: Stream.Stream<
+    MonitorSample<Items>,
+    OpcuaMonitorRuntimeError
   >;
-  readonly remove: <const Ids extends ReadonlyArray<NodeIdString>>(
-    nodeIds: Ids,
-  ) => Effect.Effect<
-    ReadonlyArray<
-      Ids[number] extends infer Id extends string
-        ? MonitorRemoveResult<Id>
-        : never
-    >,
-    never
-  >;
-  readonly items: Effect.Effect<ReadonlyMap<string, MonitoredItemState>>;
-  readonly itemState: Stream.Stream<ReadonlyMap<string, MonitoredItemState>>;
-  readonly itemEvents: Stream.Stream<MonitorItemEvent>;
-  readonly samples: Stream.Stream<AnyReadResult>;
 };
 
 export type OpcuaSubscription = {
-  readonly monitor: (
-    options: MonitorOptions,
-  ) => Effect.Effect<ValueMonitor, OpcuaConfigurationError, Scope.Scope>;
-  readonly watch: <const Defs extends ReadonlyArray<MonitorDef>>(
-    defs: Defs,
-    options: MonitorOptions,
-  ) => Stream.Stream<
-    MonitorSampleOf<Defs[number]>,
-    OpcuaMonitorCreateError | OpcuaConfigurationError
+  readonly monitor: <const Items extends MonitorItemDictionary>(
+    items: Items,
+    options: MonitorOptions<Items>,
+  ) => Effect.Effect<
+    ActiveMonitor<Items>,
+    OpcuaMonitorCreateError<Items> | OpcuaMonitorConfigurationError,
+    Scope.Scope
   >;
   readonly events: Stream.Stream<OpcuaSubscriptionEvent>;
   readonly unsafeRaw: ClientSubscription;
@@ -227,6 +244,58 @@ type HandleVariable = <const Def extends ReadableVariableDef>(
   OpcuaAccessDeniedError | OpcuaConfigurationError | OpcuaServiceError
 >;
 
+type MonitorKey<Items> = keyof Items & string;
+
+type NormalizedCreateOptions = {
+  readonly maxItemsPerRequest: number;
+  readonly maxConcurrentRequests: number;
+};
+
+type NormalizedMonitorItem<Items> = {
+  readonly key: MonitorKey<Items>;
+  readonly def: ReadableVariableDef;
+  readonly nodeId: NodeIdString;
+  readonly rawNodeId: NodeId;
+};
+
+type EffectiveMonitorItem<Items> = NormalizedMonitorItem<Items> & {
+  readonly requested: EffectiveMonitorItemOptions;
+  readonly nodeOpcuaFilter?: DataChangeFilter;
+  readonly timestampsToReturn: TimestampsToReturn;
+  readonly compatibilityKey: string;
+};
+
+type ValidationResult<Items> = {
+  readonly active: ReadonlyArray<EffectiveMonitorItem<Items>>;
+  readonly failed: Map<MonitorKey<Items>, MonitorStartupFailure>;
+};
+
+type WireMonitorEntry<Items> = {
+  readonly key: MonitorKey<Items>;
+  readonly nodeId: NodeIdString;
+  readonly def: ReadableVariableDef;
+  readonly timestamps: MonitorTimestamps;
+};
+
+type RetainedMonitorGroup<Items> = {
+  readonly group: ClientMonitoredItemGroup;
+  readonly entries: ReadonlyArray<WireMonitorEntry<Items> | undefined>;
+  readonly nodeIds: ReadonlyArray<NodeIdString>;
+};
+
+type CreatedChunk<Items> = {
+  readonly retained?: RetainedMonitorGroup<Items>;
+  readonly active: ReadonlyArray<readonly [MonitorKey<Items>, MonitorStarted]>;
+  readonly failed: ReadonlyArray<
+    readonly [MonitorKey<Items>, MonitorStartupFailure]
+  >;
+};
+
+const defaultCreate: NormalizedCreateOptions = {
+  maxItemsPerRequest: 250,
+  maxConcurrentRequests: 1,
+};
+
 export const makeSubscription = (
   unsafeRaw: ClientSubscription,
   events: PubSub.PubSub<OpcuaSubscriptionEvent>,
@@ -235,391 +304,804 @@ export const makeSubscription = (
 ): OpcuaSubscription => {
   const finalizingMonitorGroups = new WeakSet<ClientMonitoredItemGroup>();
 
-  const monitor: OpcuaSubscription["monitor"] = (options) =>
+  const monitor = <const Items extends MonitorItemDictionary>(
+    items: Items,
+    options: MonitorOptions<Items>,
+  ): Effect.Effect<
+    ActiveMonitor<Items>,
+    OpcuaMonitorCreateError<Items> | OpcuaMonitorConfigurationError,
+    Scope.Scope
+  > =>
     Effect.gen(function* () {
-      const bufferError = bufferPolicyError(options.clientBuffer);
-      if (bufferError) return yield* Effect.fail(bufferError);
-      const sampleQueue = yield* makeQueue<AnyReadResult, never>(
-        options.clientBuffer,
+      const normalized = yield* normalizeMonitorItems(items);
+      const createOptions = yield* validateMonitorOptions(normalized, options);
+      const effective = yield* applyMonitorOptions(normalized, options);
+      const validation = yield* validateStartupItems(
+        unsafeRaw,
+        effective,
+        options.validation,
+        handleVariable,
       );
-      const itemEvents =
-        yield* PubSub.sliding<MonitorItemEvent>(EVENT_BUFFER_SIZE);
-      const itemState =
-        yield* PubSub.sliding<ReadonlyMap<string, MonitoredItemState>>(
-          EVENT_BUFFER_SIZE,
-        );
-      type ActiveItem = {
-        readonly handle: VariableHandle<string, unknown, "read" | "readWrite">;
-        readonly options: MonitorItemOptions;
-        readonly group: ClientMonitoredItemGroup;
-        readonly teardown: () => void;
-      };
-      const registry = yield* Ref.make(new Map<string, ActiveItem>());
-      const mutationLock = yield* Semaphore.make(1);
 
-      const publishState = Ref.get(registry).pipe(
-        Effect.flatMap((map) =>
-          PubSub.publish(
-            itemState,
-            new Map(
-              Array.from(map, ([nodeId, item]) => [
-                nodeId,
-                { nodeId, options: item.options },
-              ]),
-            ),
-          ),
+      if (options.startup === "strict" && validation.failed.size > 0) {
+        const report = makeStartupReport<Items>(
+          normalized.length,
+          new Map(),
+          validation.failed,
+        );
+        return yield* Effect.fail(
+          new OpcuaMonitorCreateError<Items>({
+            subscriptionId: unsafeRaw.subscriptionId,
+            startup: report,
+            cause: Array.from(validation.failed.values()),
+          }),
+        );
+      }
+
+      const sampleQueue = yield* makeQueue<
+        MonitorSample<Items>,
+        OpcuaMonitorRuntimeError
+      >(options.clientBuffer);
+      const created =
+        validation.active.length > 0
+          ? yield* createMonitorChunks(
+              unsafeRaw,
+              validation.active,
+              createOptions,
+            )
+          : [];
+      const active = new Map<MonitorKey<Items>, MonitorStarted>();
+      const failed = new Map(validation.failed);
+      const retainedGroups: Array<RetainedMonitorGroup<Items>> = [];
+
+      for (const chunk of created) {
+        for (const [key, started] of chunk.active) active.set(key, started);
+        for (const [key, failure] of chunk.failed) failed.set(key, failure);
+        if (chunk.retained) retainedGroups.push(chunk.retained);
+      }
+
+      const teardowns = retainedGroups.map((retained) =>
+        wireMonitorGroup(
+          unsafeRaw,
+          events,
+          retained.group,
+          retained.entries,
+          sampleQueue,
+          options.clientBuffer,
+          structureRuntime,
+          finalizingMonitorGroups,
         ),
       );
+      const report = makeStartupReport<Items>(
+        normalized.length,
+        active,
+        failed,
+      );
 
-      const add: ValueMonitor["add"] = (defs) =>
-        Effect.gen(function* () {
-          const results: Array<MonitorAddResult> = [];
-          for (const def of defs) {
-            const effective = effectiveMonitorOptions(def, options);
-            const current = (yield* Ref.get(registry)).get(def.nodeId);
-            if (current) {
-              const result = monitorOptionsEqual(current.options, effective)
-                ? ({
-                    _tag: "AlreadyMonitoring",
-                    nodeId: def.nodeId,
-                  } as const)
-                : ({
-                    _tag: "AlreadyMonitoringWithDifferentOptions",
-                    nodeId: def.nodeId,
-                    current: current.options,
-                    requested: effective,
-                  } as const);
-              results.push(result);
-              yield* PubSub.publish(itemEvents, result);
-              continue;
-            }
-
-            const handleResult = yield* Effect.result(handleVariable(def));
-            if (Result.isFailure(handleResult)) {
-              const result = monitorAddErrorResult(
-                def.nodeId,
-                handleResult.failure,
-              );
-              results.push(result);
-              yield* PubSub.publish(itemEvents, result);
-              continue;
-            }
-
-            const handle = handleResult.success;
-            const groupResult = yield* Effect.result(
-              Effect.tryPromise({
-                try: () =>
-                  unsafeRaw.monitorItems(
-                    [
-                      {
-                        nodeId: handle.unsafeRaw.nodeId,
-                        attributeId: AttributeIds.Value,
-                      },
-                    ],
-                    {
-                      samplingInterval: effective.samplingInterval,
-                      filter: toNodeOpcuaDataChangeFilter(effective.filter),
-                      queueSize: options.queueSize,
-                      discardOldest: options.discardOldest,
-                    },
-                    TimestampsToReturn.Both,
-                  ),
-                catch: (cause) =>
-                  new OpcuaServiceError({
-                    operation: "monitor.add",
-                    nodeId: def.nodeId,
-                    cause,
-                  }),
-              }),
-            );
-            if (Result.isFailure(groupResult)) {
-              const result = monitorAddErrorResult(
-                def.nodeId,
-                groupResult.failure,
-              );
-              results.push(result);
-              yield* PubSub.publish(itemEvents, result);
-              continue;
-            }
-
-            const group = groupResult.success;
-            const failure = monitorCreateFailures(group, [def.nodeId])[0];
-            if (failure) {
-              yield* terminateMonitorGroup(group);
-              const result = {
-                _tag: "NonGoodStatus",
-                nodeId: def.nodeId,
-                status: normalizeStatusCode(
-                  failure.statusCode ?? StatusCodes.Bad,
-                ),
-                cause: failure.cause,
-              } as const;
-              results.push(result);
-              yield* PubSub.publish(itemEvents, result);
-              continue;
-            }
-
-            const teardown = wireMonitorGroup(
-              unsafeRaw,
-              events,
-              group,
-              [{ nodeId: def.nodeId, handle }],
-              sampleQueue,
-              options.clientBuffer,
-              structureRuntime,
-              finalizingMonitorGroups,
-              (nodeId, cause) =>
-                Effect.runSync(
-                  Ref.update(registry, (map) => {
-                    const next = new Map(map);
-                    next.delete(nodeId);
-                    return next;
-                  }).pipe(
-                    Effect.andThen(publishState),
-                    Effect.andThen(
-                      PubSub.publish(itemEvents, {
-                        _tag: "Terminated",
-                        nodeId,
-                        cause,
-                      }),
-                    ),
-                  ),
-                ),
-            );
-
-            yield* Ref.update(registry, (map) => {
-              const next = new Map(map);
-              next.set(def.nodeId, {
-                handle,
-                options: effective,
-                group,
-                teardown,
-              });
-              return next;
-            });
-            const result = {
-              _tag: "Monitoring",
-              nodeId: def.nodeId,
-            } as const;
-            results.push(result);
-            yield* PubSub.publish(itemEvents, result);
-            yield* publishState;
-          }
-          return results as never;
-        }).pipe(mutationLock.withPermits(1));
-
-      const remove: ValueMonitor["remove"] = (nodeIds) =>
-        Effect.gen(function* () {
-          const results: Array<MonitorRemoveResult> = [];
-          for (const nodeId of nodeIds) {
-            const current = (yield* Ref.get(registry)).get(nodeId);
-            if (!current) {
-              const result = { _tag: "NotMonitoring", nodeId } as const;
-              results.push(result);
-              yield* PubSub.publish(itemEvents, result);
-              continue;
-            }
-            yield* Ref.update(registry, (map) => {
-              const next = new Map(map);
-              next.delete(nodeId);
-              return next;
-            });
-            current.teardown();
-            yield* Effect.sync(() =>
-              finalizingMonitorGroups.add(current.group),
-            );
-            yield* terminateMonitorGroup(current.group);
-            const result = { _tag: "Removed", nodeId } as const;
-            results.push(result);
-            yield* PubSub.publish(itemEvents, result);
-            yield* publishState;
-          }
-          return results as never;
-        }).pipe(mutationLock.withPermits(1));
+      if (options.startup === "strict" && failed.size > 0) {
+        yield* cleanupMonitor(
+          retainedGroups,
+          teardowns,
+          sampleQueue,
+          finalizingMonitorGroups,
+        );
+        return yield* Effect.fail(
+          new OpcuaMonitorCreateError<Items>({
+            subscriptionId: unsafeRaw.subscriptionId,
+            startup: report,
+            cause: Array.from(failed.values()),
+          }),
+        );
+      }
 
       yield* Effect.addFinalizer(() =>
-        Ref.get(registry).pipe(
-          Effect.flatMap((map) =>
-            Effect.forEach(
-              Array.from(map.values()),
-              (item) =>
-                Effect.sync(() => {
-                  item.teardown();
-                  finalizingMonitorGroups.add(item.group);
-                }).pipe(Effect.andThen(terminateMonitorGroup(item.group))),
-              { discard: true },
-            ),
-          ),
-          Effect.andThen(Queue.shutdown(sampleQueue)),
-          Effect.andThen(PubSub.shutdown(itemEvents)),
-          Effect.andThen(PubSub.shutdown(itemState)),
-          Effect.ignore,
+        cleanupMonitor(
+          retainedGroups,
+          teardowns,
+          sampleQueue,
+          finalizingMonitorGroups,
         ),
       );
 
       return {
-        add,
-        remove,
-        items: Ref.get(registry).pipe(
-          Effect.map(
-            (map) =>
-              new Map(
-                Array.from(map, ([nodeId, item]) => [
-                  nodeId,
-                  { nodeId, options: item.options },
-                ]),
-              ),
-          ),
-        ),
-        itemState: Stream.fromPubSub(itemState),
-        itemEvents: Stream.fromPubSub(itemEvents),
+        startup: report,
         samples: Stream.fromQueue(sampleQueue),
       };
     });
 
-  const watch: OpcuaSubscription["watch"] = (defs, options) =>
-    Stream.scoped(
-      Stream.unwrap(
-        Effect.gen(function* () {
-          const active = yield* monitor(options);
-          const results = yield* active.add(defs);
-          yield* assertWatchStarted(results);
-          return active.samples as unknown as Stream.Stream<
-            MonitorSampleOf<(typeof defs)[number]>,
-            OpcuaMonitorCreateError | OpcuaConfigurationError
-          >;
-        }),
-      ),
-    );
-
   return {
-    monitor,
-    watch,
+    monitor: monitor as OpcuaSubscription["monitor"],
     events: Stream.fromPubSub(events),
     unsafeRaw,
   };
 };
 
-type MonitorAddError =
-  | OpcuaAccessDeniedError
-  | OpcuaConfigurationError
-  | OpcuaServiceError;
-
-const monitorAddErrorResult = <Id extends string>(
-  nodeId: Id,
-  error: MonitorAddError,
-): MonitorAddResult<Id> => {
-  switch (error._tag) {
-    case "OpcuaAccessDeniedError":
-      return { _tag: "AccessDenied", nodeId, error };
-    case "OpcuaConfigurationError":
-      return { _tag: "ConfigurationError", nodeId, error };
-    case "OpcuaServiceError":
-      return { _tag: "ServiceError", nodeId, error };
-  }
-};
-
-const assertWatchStarted = (
-  results: ReadonlyArray<MonitorAddResult>,
-): Effect.Effect<void, OpcuaMonitorCreateError> => {
-  const failures = results.filter(isMonitorAddFailure);
-  return failures.length === 0
-    ? Effect.void
-    : Effect.fail(
-        new OpcuaMonitorCreateError({
-          nodeIds: failures.map((failure) => failure.nodeId),
-          details: failures.map(monitorCreateFailureDetail),
-          cause: failures,
+const normalizeMonitorItems = <Items extends MonitorItemDictionary>(
+  items: Items,
+): Effect.Effect<
+  ReadonlyArray<NormalizedMonitorItem<Items>>,
+  OpcuaMonitorConfigurationError
+> =>
+  Effect.suspend(() => {
+    if (!isPlainRecord(items) || Array.isArray(items)) {
+      return Effect.fail(
+        monitorConfigurationError("monitor.items", {
+          cause: "items must be a named item dictionary",
         }),
       );
-};
+    }
+    const entries = Object.entries(items);
+    if (entries.length === 0) {
+      return Effect.fail(
+        monitorConfigurationError("monitor.items", {
+          cause: "items dictionary must not be empty",
+        }),
+      );
+    }
 
-const isMonitorAddFailure = (
-  result: MonitorAddResult,
-): result is Exclude<
-  MonitorAddResult,
-  | { readonly _tag: "Monitoring"; readonly nodeId: string }
-  | { readonly _tag: "AlreadyMonitoring"; readonly nodeId: string }
-> => result._tag !== "Monitoring" && result._tag !== "AlreadyMonitoring";
+    const normalized: Array<NormalizedMonitorItem<Items>> = [];
+    const seenNodeIds = new Map<string, string>();
+    for (const [key, value] of entries) {
+      if (!isReadableVariableDef(value)) {
+        return Effect.fail(
+          monitorConfigurationError("monitor.items", {
+            key,
+            cause: "monitor inputs must be readable variable definitions",
+          }),
+        );
+      }
+      let rawNodeId: NodeId;
+      try {
+        rawNodeId = coerceNodeId(value.nodeId);
+      } catch (cause) {
+        return Effect.fail(
+          monitorConfigurationError("monitor.items", {
+            key,
+            nodeId: value.nodeId,
+            cause,
+          }),
+        );
+      }
+      const nodeId = rawNodeId.toString();
+      const duplicate = seenNodeIds.get(nodeId);
+      if (duplicate) {
+        return Effect.fail(
+          monitorConfigurationError("monitor.items", {
+            key,
+            nodeId,
+            cause: `duplicate NodeId also used by ${duplicate}`,
+          }),
+        );
+      }
+      seenNodeIds.set(nodeId, key);
+      normalized.push({
+        key: key as MonitorKey<Items>,
+        def: value,
+        nodeId,
+        rawNodeId,
+      });
+    }
+    return Effect.succeed(normalized);
+  });
 
-const monitorCreateFailureDetail = (
-  failure: Exclude<
-    MonitorAddResult,
-    | { readonly _tag: "Monitoring"; readonly nodeId: string }
-    | { readonly _tag: "AlreadyMonitoring"; readonly nodeId: string }
-  >,
-) => {
-  switch (failure._tag) {
-    case "AlreadyMonitoringWithDifferentOptions":
-      return {
-        nodeId: failure.nodeId,
-        cause: {
-          current: failure.current,
-          requested: failure.requested,
-        },
-      };
-    case "NonGoodStatus":
-      return {
-        nodeId: failure.nodeId,
-        status: failure.status,
-        cause: failure.cause,
-      };
-    case "ConfigurationError":
-    case "AccessDenied":
-    case "ServiceError":
-      return { nodeId: failure.nodeId, cause: failure.error };
+const validateMonitorOptions = <Items>(
+  items: ReadonlyArray<NormalizedMonitorItem<Items>>,
+  options: MonitorOptions<Items>,
+): Effect.Effect<NormalizedCreateOptions, OpcuaMonitorConfigurationError> =>
+  Effect.suspend(() => {
+    if (options.startup !== "strict" && options.startup !== "bestEffort") {
+      return Effect.fail(
+        monitorConfigurationError("monitor.options.startup", {
+          cause: 'startup must be "strict" or "bestEffort"',
+        }),
+      );
+    }
+    if (
+      options.validation !== "none" &&
+      options.validation !== "access" &&
+      options.validation !== "strict"
+    ) {
+      return Effect.fail(
+        monitorConfigurationError("monitor.options.validation", {
+          cause: 'validation must be "none", "access", or "strict"',
+        }),
+      );
+    }
+    const bufferError = bufferPolicyError(options.clientBuffer);
+    if (bufferError) return Effect.fail(bufferError);
+    const globalError = effectiveOptionsError({
+      samplingInterval: options.samplingInterval,
+      queueSize: options.queueSize,
+      discardOldest: options.discardOldest,
+      filter: options.filter,
+      timestamps: options.timestamps,
+    });
+    if (globalError) return Effect.fail(globalError);
+
+    const itemKeys = new Set(items.map((item) => item.key));
+    const overrides = options.overrides;
+    if (overrides !== undefined) {
+      if (!isPlainRecord(overrides) || Array.isArray(overrides)) {
+        return Effect.fail(
+          monitorConfigurationError("monitor.options.overrides", {
+            cause: "overrides must be an object keyed by item name",
+          }),
+        );
+      }
+      for (const [key, override] of Object.entries(overrides)) {
+        if (!itemKeys.has(key as MonitorKey<Items>)) {
+          return Effect.fail(
+            monitorConfigurationError("monitor.options.overrides", {
+              key,
+              cause: "override key does not exist in monitor items",
+            }),
+          );
+        }
+        if (!isPlainRecord(override)) {
+          return Effect.fail(
+            monitorConfigurationError("monitor.options.overrides", {
+              key,
+              cause: "override must be an object",
+            }),
+          );
+        }
+        const unknown = Object.keys(override).filter(
+          (name) => !allowedOverrideKeys.has(name),
+        );
+        if (unknown.length > 0) {
+          return Effect.fail(
+            monitorConfigurationError("monitor.options.overrides", {
+              key,
+              cause: `unsupported override option: ${unknown.join(", ")}`,
+            }),
+          );
+        }
+      }
+    }
+
+    const maxItemsPerRequest =
+      options.create?.maxItemsPerRequest ?? defaultCreate.maxItemsPerRequest;
+    const maxConcurrentRequests =
+      options.create?.maxConcurrentRequests ??
+      defaultCreate.maxConcurrentRequests;
+    if (!positiveInteger(maxItemsPerRequest)) {
+      return Effect.fail(
+        monitorConfigurationError("monitor.options.create", {
+          cause: "maxItemsPerRequest must be a positive integer",
+        }),
+      );
+    }
+    if (!positiveInteger(maxConcurrentRequests)) {
+      return Effect.fail(
+        monitorConfigurationError("monitor.options.create", {
+          cause: "maxConcurrentRequests must be a positive integer",
+        }),
+      );
+    }
+    return Effect.succeed({
+      maxItemsPerRequest,
+      maxConcurrentRequests,
+    });
+  });
+
+const applyMonitorOptions = <Items>(
+  items: ReadonlyArray<NormalizedMonitorItem<Items>>,
+  options: MonitorOptions<Items>,
+): Effect.Effect<
+  ReadonlyArray<EffectiveMonitorItem<Items>>,
+  OpcuaMonitorConfigurationError
+> =>
+  Effect.forEach(items, (item) => {
+    const override = options.overrides?.[item.key];
+    return normalizeEffectiveOptions(item, {
+      samplingInterval: override?.samplingInterval ?? options.samplingInterval,
+      queueSize: override?.queueSize ?? options.queueSize,
+      discardOldest: override?.discardOldest ?? options.discardOldest,
+      filter: override?.filter ?? options.filter,
+      timestamps: override?.timestamps ?? options.timestamps,
+    });
+  });
+
+const normalizeEffectiveOptions = <Items>(
+  item: NormalizedMonitorItem<Items>,
+  options: {
+    readonly samplingInterval: Duration.Duration;
+    readonly queueSize: number;
+    readonly discardOldest: boolean;
+    readonly filter: MonitorFilter;
+    readonly timestamps: MonitorTimestamps;
+  },
+): Effect.Effect<EffectiveMonitorItem<Items>, OpcuaMonitorConfigurationError> =>
+  Effect.suspend(() => {
+    const error = effectiveOptionsError(options, item.key, item.nodeId);
+    if (error) return Effect.fail(error);
+    const requested = {
+      samplingInterval: durationMillis(options.samplingInterval),
+      queueSize: options.queueSize,
+      discardOldest: options.discardOldest,
+      filter: options.filter,
+      timestamps: options.timestamps,
+    };
+    const nodeOpcuaFilter = toNodeOpcuaDataChangeFilter(options.filter);
+    const timestampsToReturn = toNodeOpcuaTimestamps(options.timestamps);
+    return Effect.succeed({
+      ...item,
+      requested,
+      nodeOpcuaFilter,
+      timestampsToReturn,
+      compatibilityKey: compatibilityKey(
+        requested,
+        nodeOpcuaFilter,
+        timestampsToReturn,
+      ),
+    });
+  });
+
+const validateStartupItems = <Items>(
+  subscription: ClientSubscription,
+  items: ReadonlyArray<EffectiveMonitorItem<Items>>,
+  validation: MonitorValidation,
+  handleVariable: HandleVariable,
+): Effect.Effect<ValidationResult<Items>, never> => {
+  switch (validation) {
+    case "none":
+      return Effect.succeed({ active: items, failed: new Map() });
+    case "access":
+      return validateAccess(subscription, items);
+    case "strict":
+      return validateStrict(items, handleVariable);
   }
 };
 
-type MonitorGroupEntry = {
-  readonly nodeId: NodeIdString;
-  readonly handle: VariableHandle<string, unknown, "read" | "readWrite">;
+const validateStrict = <Items>(
+  items: ReadonlyArray<EffectiveMonitorItem<Items>>,
+  handleVariable: HandleVariable,
+): Effect.Effect<ValidationResult<Items>, never> =>
+  Effect.gen(function* () {
+    const active: Array<EffectiveMonitorItem<Items>> = [];
+    const failed = new Map<MonitorKey<Items>, MonitorStartupFailure>();
+    for (const item of items) {
+      const result = yield* Effect.result(handleVariable(item.def));
+      if (Result.isFailure(result)) {
+        failed.set(
+          item.key,
+          startupFailure(item, "Validation", result.failure),
+        );
+        continue;
+      }
+      active.push({
+        ...item,
+        rawNodeId: result.success.unsafeRaw.nodeId,
+      });
+    }
+    return { active, failed };
+  });
+
+const validateAccess = <Items>(
+  subscription: ClientSubscription,
+  items: ReadonlyArray<EffectiveMonitorItem<Items>>,
+): Effect.Effect<ValidationResult<Items>, never> =>
+  Effect.gen(function* () {
+    const nodes = items.flatMap((item) => [
+      { nodeId: item.rawNodeId, attributeId: AttributeIds.AccessLevel },
+      { nodeId: item.rawNodeId, attributeId: AttributeIds.UserAccessLevel },
+    ]);
+    const readResult = yield* Effect.result(
+      Effect.tryPromise({
+        try: () => subscription.session.read(nodes, 0),
+        catch: (cause) => cause,
+      }),
+    );
+    if (Result.isFailure(readResult)) {
+      return {
+        active: [],
+        failed: new Map(
+          items.map((item) => [
+            item.key,
+            startupFailure(item, "Validation", readResult.failure),
+          ]),
+        ),
+      };
+    }
+
+    const values = Array.isArray(readResult.success)
+      ? readResult.success
+      : [readResult.success];
+    const active: Array<EffectiveMonitorItem<Items>> = [];
+    const failed = new Map<MonitorKey<Items>, MonitorStartupFailure>();
+    for (let index = 0; index < items.length; index++) {
+      const item = items[index]!;
+      const accessLevelValue = values[index * 2];
+      const userAccessLevelValue = values[index * 2 + 1];
+      if (
+        !accessLevelValue ||
+        !isGood(accessLevelValue.statusCode) ||
+        typeof accessLevelValue.value?.value !== "number"
+      ) {
+        failed.set(
+          item.key,
+          startupFailure(
+            item,
+            "Validation",
+            "AccessLevel is unreadable",
+            accessLevelValue?.statusCode,
+          ),
+        );
+        continue;
+      }
+      const userAccessLevel =
+        userAccessLevelValue &&
+        isGood(userAccessLevelValue.statusCode) &&
+        typeof userAccessLevelValue.value?.value === "number"
+          ? (userAccessLevelValue.value.value as number)
+          : undefined;
+      const error = accessDeniedError(
+        item.nodeId,
+        "read",
+        accessLevelValue.value.value as number,
+        userAccessLevel,
+      );
+      if (error) {
+        failed.set(item.key, startupFailure(item, "Validation", error));
+        continue;
+      }
+      active.push(item);
+    }
+    return { active, failed };
+  });
+
+const createMonitorChunks = <Items>(
+  subscription: ClientSubscription,
+  items: ReadonlyArray<EffectiveMonitorItem<Items>>,
+  create: NormalizedCreateOptions,
+): Effect.Effect<ReadonlyArray<CreatedChunk<Items>>, never> => {
+  const chunks = Array.from(groupCompatibleItems(items).values()).flatMap(
+    (group) => chunkArray(group, create.maxItemsPerRequest),
+  );
+  return Effect.forEach(
+    chunks,
+    (chunk) => createMonitorChunk(subscription, chunk),
+    {
+      concurrency: create.maxConcurrentRequests,
+    },
+  );
 };
 
-const effectiveMonitorOptions = (
-  def: MonitorDef,
-  options: MonitorOptions,
-): MonitorItemOptions => ({
-  samplingInterval: def.samplingInterval
-    ? durationMillis(def.samplingInterval)
-    : durationMillis(options.samplingInterval),
-  filter: def.filter ?? options.filter,
+const createMonitorChunk = <Items>(
+  subscription: ClientSubscription,
+  chunk: ReadonlyArray<EffectiveMonitorItem<Items>>,
+): Effect.Effect<CreatedChunk<Items>, never> =>
+  Effect.gen(function* () {
+    const first = chunk[0]!;
+    const groupResult = yield* Effect.result(
+      Effect.tryPromise({
+        try: () =>
+          subscription.monitorItems(
+            chunk.map((item) => ({
+              nodeId: item.rawNodeId,
+              attributeId: AttributeIds.Value,
+            })),
+            {
+              samplingInterval: first.requested.samplingInterval,
+              queueSize: first.requested.queueSize,
+              discardOldest: first.requested.discardOldest,
+              filter: first.nodeOpcuaFilter,
+            },
+            first.timestampsToReturn,
+          ),
+        catch: (cause) => cause,
+      }),
+    );
+    if (Result.isFailure(groupResult)) {
+      return {
+        active: [],
+        failed: chunk.map((item) => [
+          item.key,
+          startupFailure(item, "Create", groupResult.failure),
+        ]),
+      };
+    }
+
+    const group = groupResult.success;
+    const active: Array<readonly [MonitorKey<Items>, MonitorStarted]> = [];
+    const failed: Array<readonly [MonitorKey<Items>, MonitorStartupFailure]> =
+      [];
+    const entries: Array<WireMonitorEntry<Items> | undefined> = [];
+    const retainedIndexes = new Set<number>();
+    const retainedNodeIds: Array<NodeIdString> = [];
+
+    for (let index = 0; index < chunk.length; index++) {
+      const item = chunk[index]!;
+      const monitoredItem = group.monitoredItems[index];
+      const statusCode = monitoredItem?.statusCode ?? StatusCodes.Bad;
+      if (!isGood(statusCode)) {
+        failed.push([
+          item.key,
+          startupFailure(item, "Create", monitoredItem?.result, statusCode),
+        ]);
+        entries.push(undefined);
+        continue;
+      }
+      active.push([
+        item.key,
+        {
+          key: item.key,
+          nodeId: item.nodeId,
+          requested: item.requested,
+          revised: revisedMonitorItemOptions(monitoredItem),
+        },
+      ]);
+      entries.push({
+        key: item.key,
+        nodeId: item.nodeId,
+        def: item.def,
+        timestamps: item.requested.timestamps,
+      });
+      retainedIndexes.add(index);
+      retainedNodeIds.push(item.nodeId);
+    }
+
+    pruneMonitorGroup(group, retainedIndexes);
+    if (retainedIndexes.size === 0) {
+      yield* terminateMonitorGroup(group);
+      return { active, failed };
+    }
+    return {
+      active,
+      failed,
+      retained: {
+        group,
+        entries,
+        nodeIds: retainedNodeIds,
+      },
+    };
+  });
+
+const wireMonitorGroup = <Items>(
+  subscription: ClientSubscription,
+  events: PubSub.PubSub<OpcuaSubscriptionEvent>,
+  group: ClientMonitoredItemGroup,
+  entries: ReadonlyArray<WireMonitorEntry<Items> | undefined>,
+  queue: Queue.Queue<MonitorSample<Items>, OpcuaMonitorRuntimeError>,
+  policy: BufferPolicy,
+  structureRuntime: OpcuaStructureRuntime,
+  finalizingMonitorGroups: WeakSet<ClientMonitoredItemGroup>,
+) => {
+  const nodeIds = entries.flatMap((entry) => (entry ? [entry.nodeId] : []));
+  const failRuntime = (cause: unknown) => {
+    if (finalizingMonitorGroups.has(group)) return;
+    const error = new OpcuaMonitorRuntimeError({
+      subscriptionId: subscription.subscriptionId,
+      nodeIds,
+      cause,
+    });
+    EventBus.publishUnsafe(events, {
+      _tag: "InternalError",
+      subscriptionId: subscription.subscriptionId,
+      cause,
+    });
+    Effect.runSync(Queue.fail(queue, error));
+  };
+  const onChanged = (
+    _item: ClientMonitoredItemBase,
+    dataValue: DataValue,
+    index: number,
+  ) => {
+    const entry = entries[index];
+    if (!entry) return;
+    Effect.runFork(
+      monitorSampleFromDataValue(entry, dataValue, structureRuntime).pipe(
+        Effect.tap((sample) =>
+          Effect.sync(() =>
+            offerMonitorSample(subscription, events, queue, policy, sample),
+          ),
+        ),
+      ),
+    );
+  };
+  const onError = (message: unknown) => {
+    failRuntime(message);
+  };
+  const onTerminatedGroup = (cause: unknown) => {
+    if (finalizingMonitorGroups.has(group)) return;
+    EventBus.publishUnsafe(events, {
+      _tag: "MonitorItemsTerminated",
+      subscriptionId: subscription.subscriptionId,
+      nodeIds,
+    });
+    failRuntime(cause);
+  };
+  group.on("changed", onChanged);
+  group.on("err", onError);
+  group.on("terminated", onTerminatedGroup);
+  EventBus.publishUnsafe(events, {
+    _tag: "MonitorItemsCreated",
+    subscriptionId: subscription.subscriptionId,
+    nodeIds,
+  });
+  return () => {
+    group.removeListener("changed", onChanged);
+    group.removeListener("err", onError);
+    group.removeListener("terminated", onTerminatedGroup);
+  };
+};
+
+const monitorSampleFromDataValue = <Items>(
+  entry: WireMonitorEntry<Items>,
+  dataValue: DataValue,
+  structureRuntime: OpcuaStructureRuntime,
+): Effect.Effect<MonitorSample<Items>> =>
+  Effect.gen(function* () {
+    const base = monitorSampleBase(entry, dataValue);
+    if (!isGood(dataValue.statusCode)) {
+      return { _tag: "Status", ...base } as MonitorSample<Items>;
+    }
+    const decoded = yield* Effect.result(
+      Codec.decode(
+        entry.def.codec,
+        dataValue.value,
+        dataValue,
+        structureRuntime,
+      ),
+    );
+    if (Result.isFailure(decoded)) {
+      return {
+        _tag: "DecodeError",
+        ...base,
+        error: new OpcuaDecodeError({
+          nodeId: entry.nodeId,
+          cause: decoded.failure,
+        }),
+        rawValue: dataValue.value?.value,
+      } as MonitorSample<Items>;
+    }
+    return {
+      _tag: "Value",
+      ...base,
+      value: decoded.success,
+    } as MonitorSample<Items>;
+  });
+
+const monitorSampleBase = <Items>(
+  entry: WireMonitorEntry<Items>,
+  dataValue: DataValue,
+) => ({
+  key: entry.key,
+  nodeId: entry.nodeId,
+  status: normalizeStatusCode(dataValue.statusCode),
+  sourceTimestamp:
+    entry.timestamps === "source" || entry.timestamps === "both"
+      ? dateTimestamp(dataValue.sourceTimestamp)
+      : undefined,
+  serverTimestamp:
+    entry.timestamps === "server" || entry.timestamps === "both"
+      ? dateTimestamp(dataValue.serverTimestamp)
+      : undefined,
 });
 
-const monitorOptionsEqual = (
-  left: MonitorItemOptions,
-  right: MonitorItemOptions,
+const offerMonitorSample = <Items>(
+  subscription: ClientSubscription,
+  events: PubSub.PubSub<OpcuaSubscriptionEvent>,
+  queue: Queue.Queue<MonitorSample<Items>, OpcuaMonitorRuntimeError>,
+  policy: BufferPolicy,
+  sample: MonitorSample<Items>,
+) => {
+  const willDrop =
+    policy._tag === "Sliding" && Queue.sizeUnsafe(queue) >= policy.capacity;
+  const offered = Queue.offerUnsafe(queue, sample);
+  if (willDrop || !offered) {
+    EventBus.publishUnsafe(events, {
+      _tag: "ClientBufferDropped",
+      subscriptionId: subscription.subscriptionId,
+      nodeId: sample.nodeId,
+    });
+  }
+};
+
+const cleanupMonitor = <Items>(
+  retainedGroups: ReadonlyArray<RetainedMonitorGroup<Items>>,
+  teardowns: ReadonlyArray<() => void>,
+  queue: Queue.Queue<MonitorSample<Items>, OpcuaMonitorRuntimeError>,
+  finalizingMonitorGroups: WeakSet<ClientMonitoredItemGroup>,
 ) =>
-  left.samplingInterval === right.samplingInterval &&
-  monitorFilterKey(left.filter) === monitorFilterKey(right.filter);
+  Effect.gen(function* () {
+    for (const teardown of teardowns) yield* Effect.sync(teardown);
+    for (const retained of retainedGroups) {
+      yield* Effect.sync(() => {
+        finalizingMonitorGroups.add(retained.group);
+      });
+      yield* terminateMonitorGroup(retained.group);
+    }
+    yield* Queue.shutdown(queue);
+  }).pipe(Effect.ignore);
 
-const monitorFilterKey = (filter: MonitorFilter | undefined) => {
+const groupCompatibleItems = <Items>(
+  items: ReadonlyArray<EffectiveMonitorItem<Items>>,
+) => {
+  const groups = new Map<string, Array<EffectiveMonitorItem<Items>>>();
+  for (const item of items) {
+    const group = groups.get(item.compatibilityKey);
+    if (group) {
+      group.push(item);
+    } else {
+      groups.set(item.compatibilityKey, [item]);
+    }
+  }
+  return groups;
+};
+
+const chunkArray = <A>(
+  values: ReadonlyArray<A>,
+  size: number,
+): ReadonlyArray<ReadonlyArray<A>> => {
+  const chunks: Array<ReadonlyArray<A>> = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
+};
+
+const startupFailure = <Items>(
+  item: EffectiveMonitorItem<Items>,
+  phase: "Validation" | "Create",
+  cause: unknown,
+  statusCode?: StatusCode,
+): MonitorStartupFailure => ({
+  key: item.key,
+  nodeId: item.nodeId,
+  requested: item.requested,
+  error: new OpcuaMonitorStartupError({
+    phase,
+    key: item.key,
+    nodeId: item.nodeId,
+    statusCode,
+    status: statusCode ? normalizeStatusCode(statusCode) : undefined,
+    cause,
+  }),
+});
+
+const makeStartupReport = <Items>(
+  requested: number,
+  active: ReadonlyMap<MonitorKey<Items>, MonitorStarted>,
+  failed: ReadonlyMap<MonitorKey<Items>, MonitorStartupFailure>,
+): MonitorStartupReport<Items> => ({
+  ok: failed.size === 0,
+  requested,
+  activeCount: active.size,
+  failedCount: failed.size,
+  active,
+  failed,
+});
+
+const compatibilityKey = (
+  requested: EffectiveMonitorItemOptions,
+  nodeOpcuaFilter: DataChangeFilter | undefined,
+  timestampsToReturn: TimestampsToReturn,
+) =>
+  JSON.stringify({
+    samplingInterval: requested.samplingInterval,
+    queueSize: requested.queueSize,
+    discardOldest: requested.discardOldest,
+    filter: nodeOpcuaFilterKey(nodeOpcuaFilter),
+    timestamps: timestampsToReturn,
+  });
+
+const nodeOpcuaFilterKey = (filter: DataChangeFilter | undefined) => {
   if (!filter) return "None";
-  switch (filter._tag) {
-    case "None":
-      return "None";
-    case "Status":
-      return "Status";
-    case "StatusValue":
-      return `StatusValue:${monitorDeadbandKey(filter.deadband)}`;
-    case "StatusValueTimestamp":
-      return `StatusValueTimestamp:${monitorDeadbandKey(filter.deadband)}`;
-  }
+  const normalized = filter as unknown as {
+    readonly trigger?: number;
+    readonly deadbandType?: number;
+    readonly deadbandValue?: number;
+  };
+  return JSON.stringify({
+    trigger: normalized.trigger ?? null,
+    deadbandType: normalized.deadbandType ?? null,
+    deadbandValue: normalized.deadbandValue ?? null,
+  });
 };
 
-const monitorDeadbandKey = (deadband: MonitorDeadband) => {
-  switch (deadband._tag) {
-    case "None":
-      return "None";
-    case "Absolute":
-      return `Absolute:${deadband.value}`;
-    case "Percent":
-      return `Percent:${deadband.value}`;
-  }
-};
-
-const toNodeOpcuaDataChangeFilter = (filter: MonitorFilter | undefined) =>
-  filter && filter._tag !== "None"
+const toNodeOpcuaDataChangeFilter = (filter: MonitorFilter) =>
+  filter._tag !== "None"
     ? new DataChangeFilter({
         trigger: toNodeOpcuaDataChangeTrigger(filter),
         ...toNodeOpcuaDeadband(filter),
@@ -665,117 +1147,129 @@ const toNodeOpcuaDeadband = (
   }
 };
 
+const toNodeOpcuaTimestamps = (timestamps: MonitorTimestamps) => {
+  switch (timestamps) {
+    case "none":
+      return TimestampsToReturn.Neither;
+    case "source":
+      return TimestampsToReturn.Source;
+    case "server":
+      return TimestampsToReturn.Server;
+    case "both":
+      return TimestampsToReturn.Both;
+  }
+};
+
 const terminateMonitorGroup = (group: ClientMonitoredItemGroup) =>
   Effect.tryPromise({
     try: () => group.terminate(),
     catch: (cause) => cause,
   }).pipe(Effect.ignore);
 
-const monitorCreateFailures = (
+const pruneMonitorGroup = (
   group: ClientMonitoredItemGroup,
-  nodeIds: ReadonlyArray<NodeIdString>,
-) =>
-  group.monitoredItems
-    .flatMap((item, index) => {
-      const nodeId = nodeIds[index];
-      return nodeId
-        ? [
-            {
-              nodeId,
-              statusCode: item.statusCode,
-              cause: item.result,
-            },
-          ]
-        : [];
-    })
-    .filter((detail) => !detail.statusCode || !isGood(detail.statusCode));
-
-const wireMonitorGroup = (
-  subscription: ClientSubscription,
-  events: PubSub.PubSub<OpcuaSubscriptionEvent>,
-  group: ClientMonitoredItemGroup,
-  entries: ReadonlyArray<MonitorGroupEntry>,
-  queue: Queue.Queue<AnyReadResult, never>,
-  policy: BufferPolicy,
-  structureRuntime: OpcuaStructureRuntime,
-  finalizingMonitorGroups: WeakSet<ClientMonitoredItemGroup>,
-  onTerminated: (nodeId: NodeIdString, cause: unknown) => void,
+  retainedIndexes: ReadonlySet<number>,
 ) => {
-  const onChanged = (
-    _item: unknown,
-    dataValue: import("node-opcua").DataValue,
-    index: number,
-  ) => {
-    const entry = entries[index];
-    if (!entry) return;
-    Effect.runSync(
-      sampleFromDataValue(entry.handle.def, dataValue, structureRuntime).pipe(
-        Effect.tap((sample) =>
-          Effect.sync(() =>
-            offerMonitorSample(subscription, events, queue, policy, sample),
-          ),
-        ),
-      ),
-    );
-  };
-  const onError = (message: unknown) => {
-    EventBus.publishUnsafe(events, {
-      _tag: "InternalError",
-      subscriptionId: subscription.subscriptionId,
-      cause: message,
-    });
-  };
-  const onTerminatedGroup = (cause: unknown) => {
-    if (finalizingMonitorGroups.has(group)) return;
-    EventBus.publishUnsafe(events, {
-      _tag: "MonitorItemsTerminated",
-      subscriptionId: subscription.subscriptionId,
-      nodeIds: entries.map((entry) => entry.nodeId),
-    });
-    for (const entry of entries) onTerminated(entry.nodeId, cause);
-  };
-  group.on("changed", onChanged);
-  group.on("err", onError);
-  group.on("terminated", onTerminatedGroup);
-  EventBus.publishUnsafe(events, {
-    _tag: "MonitorItemsCreated",
-    subscriptionId: subscription.subscriptionId,
-    nodeIds: entries.map((entry) => entry.nodeId),
-  });
-  return () => {
-    group.removeListener("changed", onChanged);
-    group.removeListener("err", onError);
-    group.removeListener("terminated", onTerminatedGroup);
-  };
+  const retained = group.monitoredItems.filter((_item, index) =>
+    retainedIndexes.has(index),
+  );
+  (
+    group as { monitoredItems: ReadonlyArray<ClientMonitoredItemBase> }
+  ).monitoredItems = retained;
 };
 
-const offerMonitorSample = <E>(
-  subscription: ClientSubscription,
-  events: PubSub.PubSub<OpcuaSubscriptionEvent>,
-  queue: Queue.Queue<AnyReadResult, E>,
-  policy: BufferPolicy,
-  sample: AnyReadResult,
+const revisedMonitorItemOptions = (
+  monitoredItem: ClientMonitoredItemBase | undefined,
+): RevisedMonitorItemOptions | undefined => {
+  const result = monitoredItem?.result as
+    | {
+        readonly revisedSamplingInterval?: number;
+        readonly revisedQueueSize?: number;
+      }
+    | undefined;
+  if (!result) return undefined;
+  const revised: RevisedMonitorItemOptions = {
+    samplingInterval:
+      typeof result.revisedSamplingInterval === "number"
+        ? result.revisedSamplingInterval
+        : undefined,
+    queueSize:
+      typeof result.revisedQueueSize === "number"
+        ? result.revisedQueueSize
+        : undefined,
+  };
+  return revised.samplingInterval === undefined &&
+    revised.queueSize === undefined
+    ? undefined
+    : revised;
+};
+
+const effectiveOptionsError = (
+  options: {
+    readonly samplingInterval: Duration.Duration;
+    readonly queueSize: number;
+    readonly discardOldest: boolean;
+    readonly filter: MonitorFilter;
+    readonly timestamps: MonitorTimestamps;
+  },
+  key?: string,
+  nodeId?: NodeIdString,
 ) => {
-  const willDrop =
-    policy._tag === "Sliding" && Queue.sizeUnsafe(queue) >= policy.capacity;
-  const offered = Queue.offerUnsafe(queue, sample);
-  if (willDrop || !offered) {
-    EventBus.publishUnsafe(events, {
-      _tag: "ClientBufferDropped",
-      subscriptionId: subscription.subscriptionId,
-      nodeId: sample.nodeId,
+  if (!Duration.isDuration(options.samplingInterval)) {
+    return monitorConfigurationError("monitor.options.samplingInterval", {
+      key,
+      nodeId,
+      cause: "samplingInterval must be a Duration",
     });
   }
+  const samplingInterval = durationMillis(options.samplingInterval);
+  if (!Number.isFinite(samplingInterval) || samplingInterval < 0) {
+    return monitorConfigurationError("monitor.options.samplingInterval", {
+      key,
+      nodeId,
+      cause: "samplingInterval must be finite and non-negative",
+    });
+  }
+  if (!positiveInteger(options.queueSize)) {
+    return monitorConfigurationError("monitor.options.queueSize", {
+      key,
+      nodeId,
+      cause: "queueSize must be a positive integer",
+    });
+  }
+  if (typeof options.discardOldest !== "boolean") {
+    return monitorConfigurationError("monitor.options.discardOldest", {
+      key,
+      nodeId,
+      cause: "discardOldest must be a boolean",
+    });
+  }
+  if (!isMonitorFilter(options.filter)) {
+    return monitorConfigurationError("monitor.options.filter", {
+      key,
+      nodeId,
+      cause: "filter must be a MonitorFilter",
+    });
+  }
+  if (!isMonitorTimestamps(options.timestamps)) {
+    return monitorConfigurationError("monitor.options.timestamps", {
+      key,
+      nodeId,
+      cause: 'timestamps must be "none", "source", "server", or "both"',
+    });
+  }
+  return undefined;
 };
 
-const durationMillis = (duration: Duration.Duration) =>
-  Duration.toMillis(duration);
-
 const bufferPolicyError = (policy: BufferPolicy) => {
-  if (!Number.isInteger(policy.capacity) || policy.capacity < 1) {
-    return new OpcuaConfigurationError({
-      operation: "BufferPolicy",
-      cause: "capacity must be a positive integer",
+  if (
+    !policy ||
+    (policy._tag !== "Sliding" && policy._tag !== "Dropping") ||
+    !Number.isInteger(policy.capacity) ||
+    policy.capacity < 1
+  ) {
+    return monitorConfigurationError("monitor.options.clientBuffer", {
+      cause: "clientBuffer capacity must be a positive integer",
     });
   }
   return undefined;
@@ -785,3 +1279,81 @@ const makeQueue = <A, E>(policy: BufferPolicy) =>
   policy._tag === "Sliding"
     ? Queue.sliding<A, E>(policy.capacity)
     : Queue.dropping<A, E>(policy.capacity);
+
+const durationMillis = (duration: Duration.Duration) =>
+  Duration.toMillis(duration);
+
+const positiveInteger = (value: number) => Number.isInteger(value) && value > 0;
+
+const dateTimestamp = (timestamp: Date | null | undefined) =>
+  timestamp instanceof Date ? timestamp : undefined;
+
+const monitorConfigurationError = (
+  operation: string,
+  options?: {
+    readonly key?: string;
+    readonly nodeId?: NodeIdString;
+    readonly cause?: unknown;
+  },
+) =>
+  new OpcuaMonitorConfigurationError({
+    operation,
+    key: options?.key,
+    nodeId: options?.nodeId,
+    cause: options?.cause,
+  });
+
+const allowedOverrideKeys = new Set([
+  "samplingInterval",
+  "queueSize",
+  "discardOldest",
+  "filter",
+  "timestamps",
+]);
+
+const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+const isReadableVariableDef = (
+  value: unknown,
+): value is ReadableVariableDef => {
+  if (!isPlainRecord(value)) return false;
+  return (
+    value._tag === "VariableDef" &&
+    typeof value.nodeId === "string" &&
+    (value.access === "read" || value.access === "readWrite")
+  );
+};
+
+const isMonitorTimestamps = (value: unknown): value is MonitorTimestamps =>
+  value === "none" ||
+  value === "source" ||
+  value === "server" ||
+  value === "both";
+
+const isMonitorFilter = (value: unknown): value is MonitorFilter => {
+  if (!isPlainRecord(value) || typeof value._tag !== "string") return false;
+  switch (value._tag) {
+    case "None":
+    case "Status":
+      return true;
+    case "StatusValue":
+    case "StatusValueTimestamp":
+      return isMonitorDeadband(value.deadband);
+    default:
+      return false;
+  }
+};
+
+const isMonitorDeadband = (value: unknown): value is MonitorDeadband => {
+  if (!isPlainRecord(value) || typeof value._tag !== "string") return false;
+  switch (value._tag) {
+    case "None":
+      return true;
+    case "Absolute":
+    case "Percent":
+      return typeof value.value === "number" && Number.isFinite(value.value);
+    default:
+      return false;
+  }
+};

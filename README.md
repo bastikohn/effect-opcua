@@ -105,12 +105,9 @@ yield *
 
 ## Monitoring
 
-Subscriptions expose one primitive, `monitor`; `watch` is a scoped stream
-wrapper over it.
-
-`monitor.add` is best-effort and returns per-node startup results as data.
-`watch` requires every initial item to start cleanly and fails the stream with
-`OpcuaMonitorCreateError` when it cannot.
+Subscriptions expose one scoped, static `monitor(items, options)` primitive.
+Inputs are named variable-definition dictionaries, startup behavior is explicit,
+and samples are keyed by item name.
 
 ```ts
 const subscription =
@@ -119,14 +116,77 @@ const subscription =
     publishingInterval: Duration.millis(100),
   });
 
-const samples = subscription.watch([Temperature] as const, {
-  samplingInterval: Duration.millis(50),
-  queueSize: 5,
-  discardOldest: true,
-  clientBuffer: Opcua.BufferPolicy.latest(),
-  filter: Opcua.MonitorFilter.statusValue(),
-});
+const monitor =
+  yield *
+  subscription.monitor(
+    {
+      temperature: Temperature,
+      pressure: Pressure,
+    },
+    {
+      startup: "strict",
+      validation: "strict",
+
+      samplingInterval: Duration.millis(50),
+      queueSize: 5,
+      discardOldest: true,
+      filter: Opcua.MonitorFilter.statusValue(),
+      timestamps: "source",
+
+      clientBuffer: Opcua.BufferPolicy.latest(),
+    },
+  );
+
+yield *
+  monitor.samples.pipe(
+    Stream.runForEach((sample) =>
+      Effect.sync(() => {
+        console.log(sample.key, sample.nodeId, sample._tag);
+      }),
+    ),
+  );
 ```
+
+Use `startup: "bestEffort"` when an HMI should come up with the tags the server
+accepted and inspect `monitor.startup.failed` for rejected items:
+
+```ts
+const monitor =
+  yield *
+  subscription.monitor(
+    {
+      temperature: Temperature,
+      pressure: Pressure,
+      speed: Speed,
+    },
+    {
+      startup: "bestEffort",
+      validation: "none",
+
+      samplingInterval: Duration.millis(250),
+      queueSize: 1,
+      discardOldest: true,
+      filter: Opcua.MonitorFilter.statusValue(),
+      timestamps: "source",
+
+      clientBuffer: Opcua.BufferPolicy.latest(),
+      overrides: {
+        speed: {
+          samplingInterval: Duration.millis(50),
+        },
+      },
+      create: {
+        maxItemsPerRequest: 250,
+        maxConcurrentRequests: 1,
+      },
+    },
+  );
+```
+
+Duplicate NodeIds inside one monitor are rejected locally with
+`OpcuaMonitorConfigurationError`. `validation: "none"` skips metadata pre-reads
+and lets server create results plus runtime decode events report per-tag
+problems.
 
 ## Unsafe Access
 

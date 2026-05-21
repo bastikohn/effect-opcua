@@ -3,6 +3,7 @@ import {
   OpcuaClient,
   OpcuaSession,
   type NodeIdString,
+  type MonitorSample,
   type OpcuaBrowseReference,
   type OpcuaDynamicValue,
   type ReadResult,
@@ -54,7 +55,10 @@ export type TuiState = {
   readonly selectedNode?: SelectedNodeState;
   readonly monitors: {
     readonly desired: ReadonlySet<NodeIdString>;
-    readonly latest: ReadonlyMap<NodeIdString, ReadResult<unknown>>;
+    readonly latest: ReadonlyMap<
+      NodeIdString,
+      ReadResult<unknown> | MonitorSample
+    >;
   };
   readonly eventLog: ReadonlyArray<TuiEvent>;
   readonly writesEnabled: boolean;
@@ -105,7 +109,7 @@ export const createTuiRuntime = async (
     memoMap: Layer.makeMemoMapUnsafe(),
   });
   const listeners = new Set<(state: TuiState) => void>();
-  const monitorFibers = new Map<NodeIdString, Fiber.Fiber<void, unknown>>();
+  let monitorFiber: Fiber.Fiber<void, unknown> | undefined;
   let state: TuiState = {
     connection: "Connecting",
     tree: { entries: [], selectedEntryId: undefined },
@@ -298,55 +302,85 @@ export const createTuiRuntime = async (
     }
   };
 
-  const monitorSelected = async () => {
-    const entry = state.selectedNode?.entry;
-    if (!entry || entry.nodeClass !== "Variable") return;
-    if (monitorFibers.has(entry.nodeId)) return;
-    const fiber = runtime.runFork(
+  const restartMonitor = async () => {
+    const current = monitorFiber;
+    if (current) {
+      monitorFiber = undefined;
+      await Effect.runPromise(Fiber.interrupt(current));
+    }
+    const nodeIds = Array.from(state.monitors.desired);
+    if (nodeIds.length === 0) return;
+    const items = Object.fromEntries(
+      nodeIds.map((nodeId, index) => [
+        `item${index}`,
+        Opcua.variable({ nodeId }),
+      ]),
+    );
+    monitorFiber = runtime.runFork(
       Effect.scoped(
         Effect.gen(function* () {
           const session = yield* OpcuaSession;
           const subscription = yield* session.subscription({
             publishingInterval: Duration.millis(250),
           });
-          yield* subscription
-            .watch([Opcua.variable({ nodeId: entry.nodeId })], {
-              samplingInterval: Duration.millis(250),
-              queueSize: 5,
-              discardOldest: true,
-              clientBuffer: Opcua.BufferPolicy.latest(),
-              filter: Opcua.MonitorFilter.statusValue(),
-            })
-            .pipe(
-              Stream.runForEach((sample) =>
-                Effect.sync(() => {
-                  setState((current) => {
-                    const latest = new Map(current.monitors.latest);
-                    latest.set(entry.nodeId, sample);
-                    return {
-                      ...current,
-                      monitors: { ...current.monitors, latest },
-                    };
-                  });
-                }),
-              ),
-            );
+          const monitor = yield* subscription.monitor(items, {
+            startup: "bestEffort",
+            validation: "none",
+            samplingInterval: Duration.millis(250),
+            queueSize: 5,
+            discardOldest: true,
+            clientBuffer: Opcua.BufferPolicy.latest(),
+            filter: Opcua.MonitorFilter.statusValue(),
+            timestamps: "both",
+          });
+          if (monitor.startup.failedCount > 0) {
+            yield* Effect.sync(() => {
+              for (const failure of monitor.startup.failed.values()) {
+                log(`Monitor ${failure.nodeId} failed: ${failure.error._tag}`);
+              }
+            });
+          }
+          yield* monitor.samples.pipe(
+            Stream.runForEach((sample) =>
+              Effect.sync(() => {
+                setState((current) => {
+                  if (!current.monitors.desired.has(sample.nodeId)) {
+                    return current;
+                  }
+                  const latest = new Map(current.monitors.latest);
+                  latest.set(sample.nodeId, sample);
+                  return {
+                    ...current,
+                    monitors: { ...current.monitors, latest },
+                  };
+                });
+              }),
+            ),
+          );
         }),
       ).pipe(
         Effect.catchCause((cause) =>
-          Effect.sync(() => {
-            monitorFibers.delete(entry.nodeId);
-            log(`Monitor ${entry.label} failed: ${Cause.pretty(cause)}`);
-          }),
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.void
+            : Effect.sync(() => {
+                monitorFiber = undefined;
+                log(`Monitor set failed: ${Cause.pretty(cause)}`);
+              }),
         ),
       ),
     );
-    monitorFibers.set(entry.nodeId, fiber);
+  };
+
+  const monitorSelected = async () => {
+    const entry = state.selectedNode?.entry;
+    if (!entry || entry.nodeClass !== "Variable") return;
+    if (state.monitors.desired.has(entry.nodeId)) return;
     setState((current) => {
       const desired = new Set(current.monitors.desired);
       desired.add(entry.nodeId);
       return { ...current, monitors: { ...current.monitors, desired } };
     });
+    await restartMonitor();
     log(`Monitoring ${entry.label}`);
   };
 
@@ -401,11 +435,6 @@ export const createTuiRuntime = async (
     unmonitorSelected: async () => {
       const entry = state.selectedNode?.entry;
       if (!entry) return;
-      const fiber = monitorFibers.get(entry.nodeId);
-      if (fiber) {
-        monitorFibers.delete(entry.nodeId);
-        await Effect.runPromise(Fiber.interrupt(fiber));
-      }
       setState((current) => {
         const desired = new Set(current.monitors.desired);
         const latest = new Map(current.monitors.latest);
@@ -413,13 +442,14 @@ export const createTuiRuntime = async (
         latest.delete(entry.nodeId);
         return { ...current, monitors: { desired, latest } };
       });
+      await restartMonitor();
       log(`Unmonitored ${entry.label}`);
     },
     reportError: log,
     dispose: async () => {
-      const fibers = Array.from(monitorFibers.values());
-      monitorFibers.clear();
-      await Effect.runPromise(Fiber.interruptAll(fibers));
+      const fiber = monitorFiber;
+      monitorFiber = undefined;
+      if (fiber) await Effect.runPromise(Fiber.interrupt(fiber));
       await runtime.dispose();
     },
   };

@@ -35,17 +35,44 @@ export class OpcuaSubscriptionCreateError extends Data.TaggedError(
   readonly cause?: unknown;
 }> {}
 
-export class OpcuaMonitorCreateError extends Data.TaggedError(
-  "OpcuaMonitorCreateError",
+export class OpcuaMonitorCreateError<
+  Items = Record<string, unknown>,
+> extends Data.TaggedError("OpcuaMonitorCreateError")<{
+  readonly subscriptionId?: number;
+  readonly startup: import("./monitoring.js").MonitorStartupReport<Items>;
+  readonly cause?: unknown;
+}> {}
+
+export class OpcuaMonitorConfigurationError extends Data.TaggedError(
+  "OpcuaMonitorConfigurationError",
+)<{
+  readonly operation: string;
+  readonly key?: string;
+  readonly nodeId?: NodeIdString;
+  readonly cause?: unknown;
+}> {}
+
+export class OpcuaMonitorStartupError extends Data.TaggedError(
+  "OpcuaMonitorStartupError",
+)<{
+  readonly phase: "Validation" | "Create";
+  readonly key?: string;
+  readonly nodeId: NodeIdString;
+  readonly statusCode?: StatusCode;
+  readonly status?: OpcuaStatusInfo;
+  readonly cause?: unknown;
+}> {}
+
+export class OpcuaMonitorRuntimeError extends Data.TaggedError(
+  "OpcuaMonitorRuntimeError",
 )<{
   readonly subscriptionId?: number;
   readonly nodeIds?: ReadonlyArray<NodeIdString>;
-  readonly details?: ReadonlyArray<{
-    readonly nodeId: NodeIdString;
-    readonly statusCode?: StatusCode;
-    readonly status?: OpcuaStatusInfo;
-    readonly cause?: unknown;
-  }>;
+  readonly cause?: unknown;
+}> {}
+
+export class OpcuaDecodeError extends Data.TaggedError("OpcuaDecodeError")<{
+  readonly nodeId: NodeIdString;
   readonly cause?: unknown;
 }> {}
 

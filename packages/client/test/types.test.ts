@@ -1,4 +1,4 @@
-import { Config, Schema } from "effect";
+import { Config, Duration, Effect, Schema, Stream } from "effect";
 import { expect, it } from "vitest";
 
 import {
@@ -69,6 +69,113 @@ const expectMethodTypes = (session: OpcuaSession) => {
 };
 
 void expectMethodTypes;
+
+const expectMonitorTypes = (
+  session: OpcuaSession,
+  readOnly: VariableHandle<string, number, "read">,
+) => {
+  const Temperature = Opcua.variable({
+    nodeId: "ns=1;s=Temperature",
+    codec: Opcua.schema(Schema.Number),
+  });
+  const Pressure = Opcua.variable({
+    nodeId: "ns=1;s=Pressure",
+    codec: Opcua.schema(Schema.Boolean),
+  });
+  const options = {
+    startup: "strict" as const,
+    validation: "strict" as const,
+    samplingInterval: Duration.millis(250),
+    queueSize: 1,
+    discardOldest: true,
+    filter: Opcua.MonitorFilter.statusValue(),
+    timestamps: "source" as const,
+    clientBuffer: Opcua.BufferPolicy.latest(),
+  };
+
+  Effect.gen(function* () {
+    const subscription = yield* session.subscription({
+      publishingInterval: Duration.millis(100),
+    });
+    const monitor = yield* subscription.monitor(
+      { temperature: Temperature, pressure: Pressure } as const,
+      {
+        ...options,
+        overrides: {
+          pressure: { samplingInterval: Duration.millis(50) },
+        },
+      },
+    );
+
+    yield* monitor.samples.pipe(
+      Stream.runForEach((sample) =>
+        Effect.sync(() => {
+          const key: "temperature" | "pressure" = sample.key;
+          void key;
+          if (sample._tag === "Value" && sample.key === "temperature") {
+            const value: number = sample.value;
+            void value;
+          }
+          if (sample._tag === "Value" && sample.key === "pressure") {
+            const value: boolean = sample.value;
+            void value;
+          }
+        }),
+      ),
+    );
+
+    // @ts-expect-error handles are not accepted as monitor inputs
+    yield* subscription.monitor({ temperature: readOnly }, options);
+
+    yield* subscription.monitor({ temperature: Temperature } as const, {
+      ...options,
+      overrides: {
+        // @ts-expect-error override keys must exist in the item dictionary
+        missing: { queueSize: 2 },
+      },
+    });
+
+    yield* subscription.monitor(
+      { temperature: Temperature } as const,
+      // @ts-expect-error startup is required
+      {
+        validation: "strict" as const,
+        samplingInterval: Duration.millis(250),
+        queueSize: 1,
+        discardOldest: true,
+        filter: Opcua.MonitorFilter.statusValue(),
+        timestamps: "source" as const,
+        clientBuffer: Opcua.BufferPolicy.latest(),
+      },
+    );
+
+    yield* subscription.monitor(
+      { temperature: Temperature } as const,
+      // @ts-expect-error validation is required
+      {
+        startup: "strict" as const,
+        samplingInterval: Duration.millis(250),
+        queueSize: 1,
+        discardOldest: true,
+        filter: Opcua.MonitorFilter.statusValue(),
+        timestamps: "source" as const,
+        clientBuffer: Opcua.BufferPolicy.latest(),
+      },
+    );
+
+    yield* subscription.monitor(
+      { temperature: Temperature } as const,
+      // @ts-expect-error server-load options are required
+      {
+        startup: "strict" as const,
+        validation: "strict" as const,
+        clientBuffer: Opcua.BufferPolicy.latest(),
+      },
+    );
+  });
+};
+
+void expectMonitorTypes;
 
 const expectLayerConfigTypes = () => {
   OpcuaClient.layerConfig({
