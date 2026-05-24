@@ -19,7 +19,7 @@ definitions directly.
 ```ts
 import { Effect, Schema } from "effect";
 import { Opcua } from "@effect-opcua/client";
-import * as OpcuaSession from "@effect-opcua/client/OpcuaSession";
+import { OpcuaSession } from "@effect-opcua/client/OpcuaSession";
 
 const Temperature = Opcua.variable({
   nodeId: "ns=2;s=Machine.Temperature",
@@ -60,7 +60,7 @@ const Reset = Opcua.method({
 });
 
 const program = Effect.gen(function* () {
-  const session = yield* OpcuaSession.OpcuaSession;
+  const session = yield* OpcuaSession;
 
   const current = yield* session.read(Temperature);
   const written = yield* session.write(Setpoint, 42);
@@ -119,17 +119,17 @@ const batchProgram = Effect.gen(function* () {
     {
       temperature: Temperature,
       pressure: Pressure,
-    } as const,
+    },
     { validation: "strict" },
   );
 
   const written = yield* OpcuaSession.writeMany({
     setpoint: [Setpoint, 42],
-  } as const);
+  });
 
   const called = yield* OpcuaSession.callMany({
     reset: [Reset, { mode: "soft" }],
-  } as const);
+  });
 
   return { snapshot, written, called };
 });
@@ -197,10 +197,10 @@ and samples are keyed by item name.
 ```ts
 import { Duration, Effect, Stream } from "effect";
 import { Opcua } from "@effect-opcua/client";
-import * as OpcuaSession from "@effect-opcua/client/OpcuaSession";
+import { OpcuaSession } from "@effect-opcua/client/OpcuaSession";
 
 const monitorProgram = Effect.gen(function* () {
-  const session = yield* OpcuaSession.OpcuaSession;
+  const session = yield* OpcuaSession;
 
   const subscription = yield* session.makeSubscription({
     publishingInterval: Duration.millis(100),
@@ -240,7 +240,7 @@ accepted and inspect `monitor.startup.failed` for rejected items:
 
 ```ts
 const bestEffortMonitorProgram = Effect.gen(function* () {
-  const session = yield* OpcuaSession.OpcuaSession;
+  const session = yield* OpcuaSession;
   const subscription = yield* session.makeSubscription({
     publishingInterval: Duration.millis(100),
   });
@@ -291,11 +291,11 @@ Browsing stays on the session service because it is not definition-based:
 
 ```ts
 import { Effect } from "effect";
-import * as OpcuaSession from "@effect-opcua/client/OpcuaSession";
+import { OpcuaSession } from "@effect-opcua/client/OpcuaSession";
 import { makeNodeClassMask } from "@effect-opcua/client/node-opcua";
 
 const browseProgram = Effect.gen(function* () {
-  const session = yield* OpcuaSession.OpcuaSession;
+  const session = yield* OpcuaSession;
 
   const children = yield* session.browseChildren("ns=1;s=MyMachine", {
     nodeClassMask: makeNodeClassMask("Variable"),
