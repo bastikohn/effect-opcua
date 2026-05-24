@@ -1,5 +1,8 @@
 import { Effect } from "effect";
 
+import { chunksOf } from "./collections.js";
+import { positiveInteger } from "./predicates.js";
+
 export type BatchOptions = {
   readonly maxItemsPerRequest?: number;
   readonly maxConcurrentRequests?: number;
@@ -44,17 +47,4 @@ const positiveIntegerOrDefault = (
   value: number | undefined,
   fallback: number,
 ) =>
-  typeof value === "number" && Number.isFinite(value) && value >= 1
-    ? Math.floor(value)
-    : fallback;
-
-const chunksOf = <A>(
-  items: ReadonlyArray<A>,
-  size: number,
-): ReadonlyArray<ReadonlyArray<A>> => {
-  const chunks: Array<ReadonlyArray<A>> = [];
-  for (let index = 0; index < items.length; index += size) {
-    chunks.push(items.slice(index, index + size));
-  }
-  return chunks;
-};
+  positiveInteger(value) ? Math.floor(value) : fallback;

@@ -38,6 +38,7 @@ import {
   type OpcuaStatusInfo,
 } from "./internal/normalize.js";
 import type { OpcuaStructureRuntime } from "./internal/structure-runtime.js";
+import { isPlainRecord, isRecord } from "./internal/predicates.js";
 
 export type MethodArgSelector =
   | { readonly _tag: "Name"; readonly name: string }
@@ -69,8 +70,8 @@ export type MethodDef<
 export type AnyMethodDef = MethodDef<
   string,
   string,
-  any,
-  any
+  MethodArgRecord | undefined,
+  MethodArgRecord | undefined
 >;
 
 export type ArgType<Arg> = Arg extends MethodArg<infer A> ? A : never;
@@ -80,16 +81,16 @@ export type InputOfMethodDef<Spec> = Spec extends {
 }
   ? Input extends MethodArgRecord
     ? { readonly [Key in keyof Input]: ArgType<Input[Key]> }
-    : {}
-  : {};
+    : Record<never, never>
+  : Record<never, never>;
 
 export type OutputOfMethodDef<Spec> = Spec extends {
   readonly output?: infer Output;
 }
   ? Output extends MethodArgRecord
     ? { readonly [Key in keyof Output]: ArgType<Output[Key]> }
-    : {}
-  : {};
+    : Record<never, never>
+  : Record<never, never>;
 
 export type MethodMetadata = {
   readonly objectId: NodeIdString;
@@ -206,9 +207,10 @@ export type MethodHandle<
   >;
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type AnyMethodHandle = MethodHandle<
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   any,
   NodeIdString,
   NodeIdString
@@ -221,20 +223,24 @@ export type MethodCallEntry<H extends AnyMethodHandle> = {
 };
 
 export type InputOfMethodHandle<H> =
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  H extends MethodHandle<infer Input, any, any, any> ? Input : never;
+  H extends MethodHandle<infer Input, unknown, NodeIdString, NodeIdString>
+    ? Input
+    : never;
 
 export type OutputOfMethodHandle<H> =
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  H extends MethodHandle<any, infer Output, any, any> ? Output : never;
+  H extends MethodHandle<never, infer Output, NodeIdString, NodeIdString>
+    ? Output
+    : never;
 
 export type ObjectIdOfMethodHandle<H> =
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  H extends MethodHandle<any, any, infer ObjectId, any> ? ObjectId : never;
+  H extends MethodHandle<never, unknown, infer ObjectId, NodeIdString>
+    ? ObjectId
+    : never;
 
 export type MethodIdOfMethodHandle<H> =
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  H extends MethodHandle<any, any, any, infer MethodId> ? MethodId : never;
+  H extends MethodHandle<never, unknown, NodeIdString, infer MethodId>
+    ? MethodId
+    : never;
 
 type MethodPreflight = {
   readonly request: CallMethodRequestLike;
@@ -866,15 +872,7 @@ const normalizeInputArgumentResults = (
 };
 
 const objectRecord = (value: unknown): Record<string, unknown> | undefined =>
-  value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-
-const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null &&
-  typeof value === "object" &&
-  !Array.isArray(value) &&
-  Object.getPrototypeOf(value) === Object.prototype;
+  isRecord(value) ? value : undefined;
 
 const coerceNodeIdOrFail = (operation: string, nodeId: unknown) =>
   Effect.try({

@@ -25,7 +25,6 @@ import {
 import {
   accessDeniedError as makeAccessDeniedError,
   serviceError,
-  OpcuaAccessDeniedError,
   OpcuaEncodeError,
   OpcuaServiceError,
 } from "./OpcuaError.js";

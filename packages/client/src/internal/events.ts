@@ -83,7 +83,7 @@ type EventMapping<A> = {
 
 export const EventBus = {
   publishUnsafe: <A>(pubsub: PubSub.PubSub<A>, event: A) =>
-    Effect.runSync(PubSub.publish(pubsub, event)),
+    PubSub.publishUnsafe(pubsub, event),
   wireEmitter: <A>(
     emitter: Emitter,
     mappings: ReadonlyArray<EventMapping<A>>,

@@ -16,7 +16,6 @@ import {
   configurationError,
   encodeError,
   serviceError,
-  type OpcuaConfigurationError,
   type OpcuaEncodeError,
   type OpcuaServiceError,
 } from "../OpcuaError.js";
@@ -26,6 +25,7 @@ import {
   type OpcuaStructureArrayCodec,
   type OpcuaStructureCodec,
 } from "./structures.js";
+import { isPlainRecord } from "./predicates.js";
 
 export type OpcuaStructureRuntime = {
   readonly ensureInitialized: () => Effect.Effect<void, OpcuaServiceError>;
@@ -209,14 +209,6 @@ export const extractStructurePojo = (value: unknown): unknown => {
     if (entries.length > 0) return Object.fromEntries(entries);
   }
   throw new TypeError("Could not extract plain structure body");
-};
-
-const isPlainRecord = (value: unknown): value is Record<string, unknown> => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return false;
-  }
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
 };
 
 const isStructureDataKey = (key: string) =>

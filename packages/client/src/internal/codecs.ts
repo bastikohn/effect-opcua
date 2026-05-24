@@ -16,7 +16,6 @@ import {
 import {
   encodeError,
   type OpcuaConfigurationError,
-  type OpcuaEncodeError,
 } from "../OpcuaError.js";
 import {
   validateStructureMetadata,

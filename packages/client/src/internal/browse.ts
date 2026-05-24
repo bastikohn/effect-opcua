@@ -7,10 +7,7 @@ import {
   type ReferenceDescription,
 } from "node-opcua";
 
-import {
-  configurationError,
-  type OpcuaConfigurationError,
-} from "../OpcuaError.js";
+import { configurationError } from "../OpcuaError.js";
 import {
   isGood,
   normalizeExpandedNodeId,
@@ -23,6 +20,7 @@ import {
   type OpcuaStatusInfo,
 } from "./normalize.js";
 import type { NodeIdString } from "./capabilities.js";
+import { nonNegativeInteger } from "./predicates.js";
 
 export type OpcuaBrowseReference = {
   readonly nodeId: OpcuaExpandedNodeIdInfo;
@@ -88,8 +86,7 @@ export const browseOptionsError = (input: OpcuaBrowseOptions) => {
   }
   if (
     input.maxReferencesPerNode !== undefined &&
-    (!Number.isInteger(input.maxReferencesPerNode) ||
-      input.maxReferencesPerNode < 0)
+    !nonNegativeInteger(input.maxReferencesPerNode)
   ) {
     return configurationError({
       operation: "browse",

@@ -104,7 +104,7 @@ export type OpcuaErrorReason =
   | {
       readonly _tag: "MonitorCreate";
       readonly subscriptionId?: number;
-      readonly startup: import("./OpcuaSubscription.js").MonitorStartupReport<any>;
+      readonly startup: unknown;
       readonly cause?: unknown;
     }
   | {
