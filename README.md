@@ -18,7 +18,8 @@ definitions directly.
 
 ```ts
 import { Effect, Schema } from "effect";
-import { Opcua, OpcuaSession } from "@effect-opcua/client";
+import { Opcua } from "@effect-opcua/client";
+import * as OpcuaSession from "@effect-opcua/client/OpcuaSession";
 
 const Temperature = Opcua.variable({
   nodeId: "ns=2;s=Machine.Temperature",
@@ -74,7 +75,8 @@ program to an endpoint:
 
 ```ts
 import { Effect, Layer } from "effect";
-import { OpcuaClient, OpcuaSession } from "@effect-opcua/client";
+import { OpcuaClient } from "@effect-opcua/client";
+import * as OpcuaSession from "@effect-opcua/client/OpcuaSession";
 
 const MainLayer = OpcuaSession.layer({
   batching: {
@@ -194,7 +196,8 @@ and samples are keyed by item name.
 
 ```ts
 import { Duration, Effect, Stream } from "effect";
-import { Opcua, OpcuaSession } from "@effect-opcua/client";
+import { Opcua } from "@effect-opcua/client";
+import * as OpcuaSession from "@effect-opcua/client/OpcuaSession";
 
 const monitorProgram = Effect.gen(function* () {
   const session = yield* OpcuaSession.OpcuaSession;
@@ -288,7 +291,7 @@ Browsing stays on the session service because it is not definition-based:
 
 ```ts
 import { Effect } from "effect";
-import { OpcuaSession } from "@effect-opcua/client";
+import * as OpcuaSession from "@effect-opcua/client/OpcuaSession";
 import { makeNodeClassMask } from "@effect-opcua/client/node-opcua";
 
 const browseProgram = Effect.gen(function* () {
