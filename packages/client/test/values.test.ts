@@ -21,7 +21,7 @@ import {
 
 const { runLive } = makeLiveTestContext("values", 2);
 
-const ScanSettingsSpec = Opcua.Structure.make({
+const ScanSettings = Opcua.structure({
   name: "ScanSettings",
   dataTypeId: "ns=1;i=3010",
   schema: Schema.Struct({
@@ -30,9 +30,7 @@ const ScanSettingsSpec = Opcua.Structure.make({
     dataAvailable: Schema.Boolean,
   }),
 });
-const ScanSettingsQueue = Opcua.structureArray(
-  Opcua.Structure.array(ScanSettingsSpec),
-);
+const ScanSettingsQueue = Opcua.structureArray(ScanSettings);
 
 describe("values", () => {
   it("reads dynamic and schema-backed variables through definitions", async () => {

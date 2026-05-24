@@ -20,10 +20,10 @@ import {
   type OpcuaServiceError,
 } from "../OpcuaError.js";
 import {
-  isOpcuaStructureArrayCodec,
-  type AnyStructureSpec,
-  type OpcuaStructureArrayCodec,
-  type OpcuaStructureCodec,
+  isStructureArrayDef,
+  type AnyStructureDef,
+  type StructureArrayDef,
+  type StructureDef,
 } from "./structures.js";
 import { isPlainRecord } from "./predicates.js";
 
@@ -32,28 +32,28 @@ export type OpcuaStructureRuntime = {
   readonly invalidate: Effect.Effect<void>;
   readonly encodeStructure: <A>(
     nodeId: NodeIdString,
-    codec: OpcuaStructureCodec<A>,
+    codec: StructureDef<A>,
     value: A,
   ) => Effect.Effect<ExtensionObject, OpcuaEncodeError | OpcuaServiceError>;
   readonly encodeStructureArray: <A>(
     nodeId: NodeIdString,
-    codec: OpcuaStructureArrayCodec<A>,
+    codec: StructureArrayDef<A>,
     values: ReadonlyArray<A>,
   ) => Effect.Effect<
     ReadonlyArray<ExtensionObject>,
     OpcuaEncodeError | OpcuaServiceError
   >;
   readonly decodeStructure: <A>(
-    codec: OpcuaStructureCodec<A>,
+    codec: StructureDef<A>,
     rawValue: unknown,
   ) => A;
   readonly decodeStructureArray: <A>(
-    codec: OpcuaStructureArrayCodec<A>,
+    codec: StructureArrayDef<A>,
     rawValues: unknown,
   ) => ReadonlyArray<A>;
   readonly variantFromStructure: <A>(
     nodeId: NodeIdString,
-    codec: AnyStructureSpec,
+    codec: AnyStructureDef,
     value: A,
   ) => Effect.Effect<Variant, OpcuaEncodeError | OpcuaServiceError>;
 };
@@ -70,7 +70,7 @@ export const makeStructureRuntime = (
 
   const encodeStructure = <A>(
     nodeId: NodeIdString,
-    codec: OpcuaStructureCodec<A>,
+    codec: StructureDef<A>,
     value: A,
   ) =>
     Effect.gen(function* () {
@@ -97,7 +97,7 @@ export const makeStructureRuntime = (
 
   const encodeStructureArray = <A>(
     nodeId: NodeIdString,
-    codec: OpcuaStructureArrayCodec<A>,
+    codec: StructureArrayDef<A>,
     values: ReadonlyArray<A>,
   ) =>
     Effect.forEach(values, (value) =>
@@ -105,12 +105,12 @@ export const makeStructureRuntime = (
     );
 
   const decodeStructure = <A>(
-    codec: OpcuaStructureCodec<A>,
+    codec: StructureDef<A>,
     rawValue: unknown,
   ): A => decodeWithSchema(codec.schema, extractStructurePojo(rawValue)) as A;
 
   const decodeStructureArray = <A>(
-    codec: OpcuaStructureArrayCodec<A>,
+    codec: StructureArrayDef<A>,
     rawValues: unknown,
   ): ReadonlyArray<A> => {
     if (!Array.isArray(rawValues)) {
@@ -121,11 +121,11 @@ export const makeStructureRuntime = (
 
   const variantFromStructure = <A>(
     nodeId: NodeIdString,
-    codec: AnyStructureSpec,
+    codec: AnyStructureDef,
     value: A,
   ) =>
     Effect.gen(function* () {
-      if (isOpcuaStructureArrayCodec(codec)) {
+      if (isStructureArrayDef(codec)) {
         const values = yield* arrayValue(nodeId, value);
         const extensionObjects = yield* encodeStructureArray(
           nodeId,
@@ -229,9 +229,9 @@ export const validateStructureMetadata = (
       readonly builtInDataType: DataType;
     };
   },
-  structure: AnyStructureSpec,
+  structure: AnyStructureDef,
 ) => {
-  const codec = isOpcuaStructureArrayCodec(structure)
+  const codec = isStructureArrayDef(structure)
     ? structure.item
     : structure;
   if (metadata.raw.builtInDataType !== DataType.ExtensionObject) {
@@ -256,7 +256,7 @@ export const validateStructureMetadata = (
       cause: "Structure matrices are not supported",
     });
   }
-  if (isOpcuaStructureArrayCodec(structure)) {
+  if (isStructureArrayDef(structure)) {
     if (!isOneDimArrayCompatibleRank(metadata.valueRank)) {
       return configurationError({
         operation,

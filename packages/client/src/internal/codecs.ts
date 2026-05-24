@@ -19,10 +19,10 @@ import {
   type OpcuaStructureRuntime,
 } from "./structure-runtime.js";
 import {
-  isOpcuaStructureArrayCodec,
-  type AnyStructureSpec,
-  type OpcuaStructureArrayCodec,
-  type OpcuaStructureCodec,
+  isStructureArrayDef,
+  type AnyStructureDef,
+  type StructureArrayDef,
+  type StructureDef,
 } from "./structures.js";
 import type { NodeIdString } from "./capabilities.js";
 
@@ -33,13 +33,19 @@ export type SchemaType<S extends AnySchema> = Schema.Schema.Type<S>;
 export type OpcuaCodec<A> =
   | { readonly _tag: "Dynamic"; readonly _A?: A }
   | { readonly _tag: "Schema"; readonly schema: AnySchema; readonly _A?: A }
-  | {
-      readonly _tag: "Structure";
-      readonly structure: AnyStructureSpec;
-      readonly _A?: A;
-    };
+  | StructureDef<A>
+  | (unknown extends A
+      ? StructureArrayDef<unknown>
+      : A extends ReadonlyArray<infer Item>
+        ? StructureArrayDef<Item>
+        : never);
 
-export type CodecType<C> = C extends OpcuaCodec<infer A> ? A : never;
+export type CodecType<C> =
+  C extends StructureArrayDef<infer A>
+    ? ReadonlyArray<A>
+    : C extends OpcuaCodec<infer A>
+      ? A
+      : never;
 
 export type CodecMetadata = {
   readonly nodeId: NodeIdString;
@@ -62,18 +68,27 @@ export const schema = <S extends AnySchema>(
   schema,
 });
 
-export const structure = <A>(
-  structure: OpcuaStructureCodec<A>,
-): OpcuaCodec<A> => ({
+export const structure = <S extends AnySchema>(options: {
+  readonly name: string;
+  readonly dataTypeId: NodeIdString;
+  readonly schema: S;
+}): StructureDef<SchemaType<S>> => ({
   _tag: "Structure",
-  structure: structure as AnyStructureSpec,
+  name: options.name,
+  dataTypeId: options.dataTypeId,
+  schema: options.schema as Schema.Codec<
+    unknown,
+    SchemaType<S>,
+    never,
+    never
+  >,
 });
 
 export const structureArray = <A>(
-  structure: OpcuaStructureArrayCodec<A>,
-): OpcuaCodec<ReadonlyArray<A>> => ({
-  _tag: "Structure",
-  structure: structure as AnyStructureSpec,
+  structure: StructureDef<A>,
+): StructureArrayDef<A> => ({
+  _tag: "StructureArray",
+  item: structure,
 });
 
 export const Codec = {
@@ -92,7 +107,7 @@ export const Codec = {
   validateMetadata: (codec: OpcuaCodec<unknown>, metadata: CodecMetadata) =>
     validateCodecMetadata(codec, metadata),
   requiresStructureRuntime: (codec: OpcuaCodec<unknown>) =>
-    codec._tag === "Structure",
+    codec._tag === "Structure" || codec._tag === "StructureArray",
 };
 
 export const encodeWithSchema = <S extends AnySchema>(
@@ -210,7 +225,13 @@ const encodeCodec = <A>(
     case "Structure":
       return structureRuntime.variantFromStructure(
         metadata.nodeId,
-        codec.structure,
+        codec,
+        value,
+      );
+    case "StructureArray":
+      return structureRuntime.variantFromStructure(
+        metadata.nodeId,
+        codec,
         value,
       );
   }
@@ -230,25 +251,23 @@ const decodeCodec = <A>(
         case "Schema":
           return decodeWithSchema(codec.schema, variant?.value) as A;
         case "Structure":
-          return decodeStructureValue(
-            codec.structure,
-            variant,
-            structureRuntime,
-          ) as A;
+          return decodeStructureValue(codec, variant, structureRuntime) as A;
+        case "StructureArray":
+          return decodeStructureValue(codec, variant, structureRuntime) as A;
       }
     },
     catch: (error) => error,
   });
 
 const decodeStructureValue = (
-  structure: AnyStructureSpec,
+  structure: AnyStructureDef,
   variant: Variant | undefined,
   structureRuntime: OpcuaStructureRuntime,
 ) => {
   if (variant?.dataType !== DataType.ExtensionObject) {
     throw new TypeError("Expected ExtensionObject Variant");
   }
-  if (isOpcuaStructureArrayCodec(structure)) {
+  if (isStructureArrayDef(structure)) {
     if (variant.arrayType !== VariantArrayType.Array) {
       throw new TypeError("Expected ExtensionObject array Variant");
     }
@@ -264,12 +283,14 @@ const validateCodecMetadata = (
   codec: OpcuaCodec<unknown>,
   metadata: CodecMetadata,
 ): Effect.Effect<void, OpcuaConfigurationError> => {
-  if (codec._tag !== "Structure") return Effect.void;
+  if (codec._tag !== "Structure" && codec._tag !== "StructureArray") {
+    return Effect.void;
+  }
   const error = validateStructureMetadata(
     "codec.structure",
     metadata.nodeId,
     metadata,
-    codec.structure,
+    codec,
   );
   return error ? Effect.fail(error) : Effect.void;
 };

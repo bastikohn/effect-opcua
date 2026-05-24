@@ -23,7 +23,7 @@ import {
 const MACHINE_ID = "ns=1;s=MyMachine";
 const SCAN_SETTINGS_TYPE = "ns=1;i=3010";
 
-const ScanSettingsSpec = Opcua.Structure.make({
+const ScanSettings = Opcua.structure({
   name: "ScanSettings",
   dataTypeId: SCAN_SETTINGS_TYPE,
   schema: Schema.Struct({
@@ -32,10 +32,7 @@ const ScanSettingsSpec = Opcua.Structure.make({
     dataAvailable: Schema.Boolean,
   }),
 });
-const ScanSettings = Opcua.structure(ScanSettingsSpec);
-const ScanSettingsArray = Opcua.structureArray(
-  Opcua.Structure.array(ScanSettingsSpec),
-);
+const ScanSettingsArray = Opcua.structureArray(ScanSettings);
 
 const StartMethod = Opcua.method({
   objectId: MACHINE_ID,

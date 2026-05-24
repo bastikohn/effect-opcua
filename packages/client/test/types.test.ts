@@ -31,6 +31,59 @@ const expectVariableDefinitionTypes = (session: OpcuaSession.OpcuaSession) => {
 
 void expectVariableDefinitionTypes;
 
+const expectStructureDefinitionTypes = (session: OpcuaSession.OpcuaSession) => {
+  const ScanSettings = Opcua.structure({
+    name: "ScanSettings",
+    dataTypeId: "ns=1;i=3010",
+    schema: Schema.Struct({
+      duration: Schema.Number,
+      cycles: Schema.Number,
+      dataAvailable: Schema.Boolean,
+    }),
+  });
+  const ScanSettingsQueue = Opcua.structureArray(ScanSettings);
+  const Settings = Opcua.variable({
+    nodeId: "ns=1;s=ScanSettings",
+    codec: ScanSettings,
+    access: "readWrite",
+  });
+  const Queue = Opcua.variable({
+    nodeId: "ns=1;s=ScanSettingsQueue",
+    codec: ScanSettingsQueue,
+    access: "readWrite",
+  });
+  const Echo = Opcua.method({
+    objectId: "ns=1;s=MyMachine",
+    methodId: "ns=1;s=MyMachine.EchoScan",
+    input: {
+      Settings: Opcua.arg({ codec: ScanSettings }),
+      Queue: Opcua.arg({ codec: ScanSettingsQueue }),
+    },
+  });
+
+  const settings: Opcua.CodecType<typeof ScanSettings> = {
+    duration: 1,
+    cycles: 2,
+    dataAvailable: true,
+  };
+  const queue: Opcua.CodecType<typeof ScanSettingsQueue> = [settings];
+
+  session.write(Settings, settings);
+  session.write(Queue, queue);
+  session.call(Echo, { Settings: settings, Queue: queue });
+
+  // @ts-expect-error structure values must match the schema type
+  session.write(Settings, { duration: "wrong", cycles: 2, dataAvailable: true });
+
+  // @ts-expect-error structure arrays must be arrays of the item structure
+  session.write(Queue, settings);
+
+  // @ts-expect-error structureArray only accepts a scalar structure definition
+  Opcua.structureArray(ScanSettingsQueue);
+};
+
+void expectStructureDefinitionTypes;
+
 const expectKeyedBatchTypes = () => {
   const Temperature = Opcua.variable({
     nodeId: "ns=1;s=Temperature",

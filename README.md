@@ -135,11 +135,11 @@ const batchProgram = Effect.gen(function* () {
 
 ## Structures
 
-Define OPC-UA `ExtensionObject` structures, wrap them in the shared codec, and
-use the same codec for variables, method arguments, and monitoring.
+Define OPC-UA structures backed by `ExtensionObject` values, then use the same
+codec for variables, method arguments, and monitoring.
 
 ```ts
-const ScanSettingsSpec = Opcua.Structure.make({
+const ScanSettings = Opcua.structure({
   name: "ScanSettings",
   dataTypeId: "ns=1;i=3010",
   schema: Schema.Struct({
@@ -149,10 +149,7 @@ const ScanSettingsSpec = Opcua.Structure.make({
   }),
 });
 
-const ScanSettings = Opcua.structure(ScanSettingsSpec);
-const ScanSettingsQueue = Opcua.structureArray(
-  Opcua.Structure.array(ScanSettingsSpec),
-);
+const ScanSettingsQueue = Opcua.structureArray(ScanSettings);
 ```
 
 ```ts
@@ -172,6 +169,17 @@ const structureProgram = Effect.gen(function* () {
   const sample = yield* OpcuaSession.read(Settings);
 
   return sample;
+});
+```
+
+```ts
+const ApplyScanSettings = Opcua.method({
+  objectId: "ns=1;s=MyMachine",
+  methodId: "ns=1;s=MyMachine.ApplyScanSettings",
+  input: {
+    Settings: Opcua.arg({ codec: ScanSettings }),
+    Queue: Opcua.arg({ codec: ScanSettingsQueue }),
+  },
 });
 ```
 

@@ -49,9 +49,10 @@ export type MethodArgSelector =
 
 export type MethodArg<A> = {
   readonly _tag: "MethodArg";
-  readonly codec: OpcuaCodec<A>;
+  readonly codec: OpcuaCodec<unknown>;
   readonly selector?: MethodArgSelector;
   readonly selectorError?: string;
+  readonly _A?: A;
 };
 
 export type MethodArgRecord = Readonly<Record<string, MethodArg<unknown>>>;
@@ -234,7 +235,7 @@ export const makeMethodArg = <
   }
   return {
     _tag: "MethodArg",
-    codec: (options.codec ?? dynamic()) as unknown as OpcuaCodec<CodecType<C>>,
+    codec: (options.codec ?? dynamic()) as unknown as OpcuaCodec<unknown>,
     selector:
       options.name !== undefined
         ? { _tag: "Name", name: options.name }

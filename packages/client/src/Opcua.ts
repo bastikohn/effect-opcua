@@ -9,7 +9,11 @@ export {
   type OpcuaCodec,
   type SchemaType,
 } from "./internal/codecs.js";
-export { OpcuaStructure as Structure } from "./internal/structures.js";
+export type {
+  AnyStructureDef,
+  StructureArrayDef,
+  StructureDef,
+} from "./internal/structures.js";
 export {
   BufferPolicy,
   MonitorDeadband,

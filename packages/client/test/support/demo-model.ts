@@ -18,13 +18,13 @@ export const RunConfigurationSchema = Schema.Struct({
   zAxisSpeedMmPerSecond: Schema.Number,
 });
 
-export const RunConfigurationSpec = Opcua.Structure.make({
+export const RunConfiguration = Opcua.structure({
   name: "RunConfiguration",
   dataTypeId: dataTypeNodeId("RunConfiguration"),
   schema: RunConfigurationSchema,
 });
 
-export const MachineConfigurePayloadSpec = Opcua.Structure.make({
+export const MachineConfigurePayload = Opcua.structure({
   name: "MachineConfigurePayload",
   dataTypeId: dataTypeNodeId("MachineConfigurePayload"),
   schema: Schema.Struct({
@@ -33,7 +33,7 @@ export const MachineConfigurePayloadSpec = Opcua.Structure.make({
   }),
 });
 
-export const MoveAxisToPositionPayloadSpec = Opcua.Structure.make({
+export const MoveAxisToPositionPayload = Opcua.structure({
   name: "MoveAxisToPositionPayload",
   dataTypeId: dataTypeNodeId("MoveAxisToPositionPayload"),
   schema: Schema.Struct({
@@ -43,7 +43,7 @@ export const MoveAxisToPositionPayloadSpec = Opcua.Structure.make({
   }),
 });
 
-export const GlobalCommandSubmitRequestSpec = Opcua.Structure.make({
+export const GlobalCommandSubmitRequest = Opcua.structure({
   name: "GlobalCommandSubmitRequest",
   dataTypeId: dataTypeNodeId("GlobalCommandSubmitRequest"),
   schema: Schema.Struct({
@@ -52,17 +52,6 @@ export const GlobalCommandSubmitRequestSpec = Opcua.Structure.make({
     clientId: Schema.String,
   }),
 });
-
-export const RunConfiguration = Opcua.structure(RunConfigurationSpec);
-export const MachineConfigurePayload = Opcua.structure(
-  MachineConfigurePayloadSpec,
-);
-export const MoveAxisToPositionPayload = Opcua.structure(
-  MoveAxisToPositionPayloadSpec,
-);
-export const GlobalCommandSubmitRequest = Opcua.structure(
-  GlobalCommandSubmitRequestSpec,
-);
 
 export const defaultRunConfiguration = {
   productName: "Water",

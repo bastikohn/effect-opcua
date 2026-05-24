@@ -12,6 +12,9 @@ describe("exports", () => {
     expect(typeof Opcua.arg).toBe("function");
     expect(Opcua.arg()).toMatchObject({ _tag: "MethodArg" });
     expect(typeof Opcua.schema).toBe("function");
+    expect(typeof Opcua.structure).toBe("function");
+    expect(typeof Opcua.structureArray).toBe("function");
+    expect(Opcua).not.toHaveProperty("Structure");
     expect(typeof OpcuaError.OpcuaError).toBe("function");
     expect(typeof OpcuaError.isOpcuaError).toBe("function");
     expect(Root).toHaveProperty("OpcuaSession");
