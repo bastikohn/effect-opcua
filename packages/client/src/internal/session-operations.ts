@@ -30,6 +30,7 @@ import type {
   CallManyInput,
   CallManyOptions,
   CallManyResult,
+  OpcuaSessionBatchingOptions,
   ReadManyOptions,
   ReadManyResult,
   WriteManyInput,
@@ -41,6 +42,7 @@ export type SessionOperationsState = {
   readonly unsafeRaw: ClientSession;
   readonly metadata: ReturnType<typeof makeMetadataService>;
   readonly structureRuntime: ReturnType<typeof makeStructureRuntime>;
+  readonly batching?: OpcuaSessionBatchingOptions;
 };
 
 type AnyWriteManyRecord = Record<
@@ -84,7 +86,10 @@ export const readManyWithState = <
   options?: ReadManyOptions,
 ): Effect.Effect<ReadManyResult<Items>, OpcuaError> =>
   Effect.gen(function* () {
-    const normalizedOptions = yield* normalizeReadManyOptions(options);
+    const normalizedOptions = yield* normalizeReadManyOptions(
+      options,
+      state.batching?.read,
+    );
     const normalized = yield* normalizeReadManyItems(items);
     if (normalized.length === 0) return {} as ReadManyResult<Items>;
 
@@ -120,7 +125,10 @@ export const writeManyWithState = <const Items extends AnyWriteManyRecord>(
   options?: WriteManyOptions,
 ): Effect.Effect<WriteManyResult<Items>, OpcuaError> =>
   Effect.gen(function* () {
-    const normalizedOptions = yield* normalizeWriteManyOptions(options);
+    const normalizedOptions = yield* normalizeWriteManyOptions(
+      options,
+      state.batching?.write,
+    );
     const normalized = yield* normalizeWriteManyItems(items);
     if (normalized.length === 0) return {} as WriteManyResult<Items>;
 
@@ -152,7 +160,10 @@ export const callManyWithState = <const Items extends AnyCallManyRecord>(
   options?: CallManyOptions,
 ): Effect.Effect<CallManyResult<Items>, OpcuaError> =>
   Effect.gen(function* () {
-    const normalizedOptions = yield* normalizeCallManyOptions(options);
+    const normalizedOptions = yield* normalizeCallManyOptions(
+      options,
+      state.batching?.call,
+    );
     const normalized = yield* normalizeCallManyItems(items);
     if (normalized.length === 0) return {} as CallManyResult<Items>;
 
@@ -323,6 +334,7 @@ const normalizeCallManyItems = (
 
 const normalizeReadManyOptions = (
   options: ReadManyOptions | undefined,
+  defaults: OpcuaSessionBatchingOptions["read"] | undefined,
 ): Effect.Effect<
   {
     readonly validation: "strict" | "none";
@@ -350,6 +362,12 @@ const normalizeReadManyOptions = (
       );
     }
     const service = options?.service;
+    const defaultsError = serviceOptionsError(
+      "OpcuaSession.batching.read",
+      defaults,
+      ["maxNodesPerRead", "maxConcurrentRequests"],
+    );
+    if (defaultsError) return Effect.fail(defaultsError);
     const serviceError = serviceOptionsError(
       "readMany.options.service",
       service,
@@ -358,13 +376,16 @@ const normalizeReadManyOptions = (
     if (serviceError) return Effect.fail(serviceError);
     return Effect.succeed({
       validation: options?.validation ?? "strict",
-      maxNodesPerRead: service?.maxNodesPerRead ?? 250,
-      maxConcurrentRequests: service?.maxConcurrentRequests ?? 1,
+      maxNodesPerRead:
+        service?.maxNodesPerRead ?? defaults?.maxNodesPerRead ?? 250,
+      maxConcurrentRequests:
+        service?.maxConcurrentRequests ?? defaults?.maxConcurrentRequests ?? 1,
     });
   });
 
 const normalizeWriteManyOptions = (
   options: WriteManyOptions | undefined,
+  defaults: OpcuaSessionBatchingOptions["write"] | undefined,
 ): Effect.Effect<
   {
     readonly maxNodesPerWrite: number;
@@ -376,6 +397,12 @@ const normalizeWriteManyOptions = (
     const error = optionsShapeError("writeMany.options", options, ["service"]);
     if (error) return Effect.fail(error);
     const service = options?.service;
+    const defaultsError = serviceOptionsError(
+      "OpcuaSession.batching.write",
+      defaults,
+      ["maxNodesPerWrite", "maxConcurrentRequests"],
+    );
+    if (defaultsError) return Effect.fail(defaultsError);
     const serviceError = serviceOptionsError(
       "writeMany.options.service",
       service,
@@ -383,13 +410,16 @@ const normalizeWriteManyOptions = (
     );
     if (serviceError) return Effect.fail(serviceError);
     return Effect.succeed({
-      maxNodesPerWrite: service?.maxNodesPerWrite ?? 250,
-      maxConcurrentRequests: service?.maxConcurrentRequests ?? 1,
+      maxNodesPerWrite:
+        service?.maxNodesPerWrite ?? defaults?.maxNodesPerWrite ?? 250,
+      maxConcurrentRequests:
+        service?.maxConcurrentRequests ?? defaults?.maxConcurrentRequests ?? 1,
     });
   });
 
 const normalizeCallManyOptions = (
   options: CallManyOptions | undefined,
+  defaults: OpcuaSessionBatchingOptions["call"] | undefined,
 ): Effect.Effect<
   {
     readonly maxMethodsPerCall: number;
@@ -401,6 +431,12 @@ const normalizeCallManyOptions = (
     const error = optionsShapeError("callMany.options", options, ["service"]);
     if (error) return Effect.fail(error);
     const service = options?.service;
+    const defaultsError = serviceOptionsError(
+      "OpcuaSession.batching.call",
+      defaults,
+      ["maxMethodsPerCall", "maxConcurrentRequests"],
+    );
+    if (defaultsError) return Effect.fail(defaultsError);
     const serviceError = serviceOptionsError(
       "callMany.options.service",
       service,
@@ -408,8 +444,10 @@ const normalizeCallManyOptions = (
     );
     if (serviceError) return Effect.fail(serviceError);
     return Effect.succeed({
-      maxMethodsPerCall: service?.maxMethodsPerCall ?? 50,
-      maxConcurrentRequests: service?.maxConcurrentRequests ?? 1,
+      maxMethodsPerCall:
+        service?.maxMethodsPerCall ?? defaults?.maxMethodsPerCall ?? 50,
+      maxConcurrentRequests:
+        service?.maxConcurrentRequests ?? defaults?.maxConcurrentRequests ?? 1,
     });
   });
 

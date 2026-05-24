@@ -76,7 +76,13 @@ program to an endpoint:
 import { Effect, Layer } from "effect";
 import { OpcuaClient, OpcuaSession } from "@effect-opcua/client";
 
-const MainLayer = OpcuaSession.layer().pipe(
+const MainLayer = OpcuaSession.layer({
+  batching: {
+    read: { maxNodesPerRead: 250, maxConcurrentRequests: 1 },
+    write: { maxNodesPerWrite: 250, maxConcurrentRequests: 1 },
+    call: { maxMethodsPerCall: 50, maxConcurrentRequests: 1 },
+  },
+}).pipe(
   Layer.provideMerge(
     OpcuaClient.layer({
       endpointUrl: "opc.tcp://localhost:4840",
@@ -112,13 +118,7 @@ const batchProgram = Effect.gen(function* () {
       temperature: Temperature,
       pressure: Pressure,
     } as const,
-    {
-      validation: "strict",
-      service: {
-        maxNodesPerRead: 250,
-        maxConcurrentRequests: 1,
-      },
-    },
+    { validation: "strict" },
   );
 
   const written = yield* OpcuaSession.writeMany({
@@ -132,6 +132,9 @@ const batchProgram = Effect.gen(function* () {
   return { snapshot, written, called };
 });
 ```
+
+Per-call `service` options remain available when one batch needs a smaller
+chunk size or a different concurrency level than the session default.
 
 ## Structures
 

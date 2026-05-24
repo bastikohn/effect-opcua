@@ -91,26 +91,43 @@ import {
 
 export type { OpcuaBrowseReference } from "./internal/browse.js";
 
+export type ReadManyServiceOptions = {
+  readonly maxNodesPerRead?: number;
+  readonly maxConcurrentRequests?: number;
+};
+
+export type WriteManyServiceOptions = {
+  readonly maxNodesPerWrite?: number;
+  readonly maxConcurrentRequests?: number;
+};
+
+export type CallManyServiceOptions = {
+  readonly maxMethodsPerCall?: number;
+  readonly maxConcurrentRequests?: number;
+};
+
+export type OpcuaSessionBatchingOptions = {
+  readonly read?: ReadManyServiceOptions;
+  readonly write?: WriteManyServiceOptions;
+  readonly call?: CallManyServiceOptions;
+};
+
+export type OpcuaSessionOptions = {
+  readonly userIdentity?: UserIdentityInfo;
+  readonly batching?: OpcuaSessionBatchingOptions;
+};
+
 export type ReadManyOptions = {
   readonly validation?: "strict" | "none";
-  readonly service?: {
-    readonly maxNodesPerRead?: number;
-    readonly maxConcurrentRequests?: number;
-  };
+  readonly service?: ReadManyServiceOptions;
 };
 
 export type WriteManyOptions = {
-  readonly service?: {
-    readonly maxNodesPerWrite?: number;
-    readonly maxConcurrentRequests?: number;
-  };
+  readonly service?: WriteManyServiceOptions;
 };
 
 export type CallManyOptions = {
-  readonly service?: {
-    readonly maxMethodsPerCall?: number;
-    readonly maxConcurrentRequests?: number;
-  };
+  readonly service?: CallManyServiceOptions;
 };
 
 export type ReadManyResult<Items> = {
@@ -255,7 +272,7 @@ export type OpcuaSession = {
 export const OpcuaSession = Object.assign(
   Context.Service<OpcuaSession>("@effect-opcua/client/OpcuaSession"),
   {
-    layer: (options?: { readonly userIdentity?: UserIdentityInfo }) =>
+    layer: (options?: OpcuaSessionOptions) =>
       Layer.effect(
         OpcuaSession,
         Effect.gen(function* () {
@@ -274,7 +291,9 @@ export const OpcuaSession = Object.assign(
               }).pipe(Effect.ignore, Effect.andThen(PubSub.shutdown(events))),
           );
           yield* wireSessionEvents(raw, events);
-          return yield* makeSession(raw, events);
+          return yield* makeSession(raw, events, {
+            batching: options?.batching,
+          });
         }),
       ),
   },
@@ -325,6 +344,7 @@ export const makeSubscription = (
 export const makeSession = (
   unsafeRaw: ClientSession,
   events: PubSub.PubSub<OpcuaSessionEvent>,
+  options?: Pick<OpcuaSessionOptions, "batching">,
 ): Effect.Effect<OpcuaSession, never, Scope.Scope> =>
   Effect.gen(function* () {
     const browseSemaphore = Semaphore.makeUnsafe(1);
@@ -334,6 +354,7 @@ export const makeSession = (
       unsafeRaw,
       metadata,
       structureRuntime,
+      batching: options?.batching,
     };
     yield* Effect.acquireRelease(
       Effect.sync(() => {

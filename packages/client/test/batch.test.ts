@@ -69,6 +69,85 @@ describe("keyed batch APIs", () => {
     expect(result.values.pressure).toMatchObject({ _tag: "Value", value: 2 });
   });
 
+  it("uses session batching defaults for batch service calls", async () => {
+    const A = Opcua.variable({
+      nodeId: "ns=1;s=Batch.Default.A",
+      codec: Opcua.schema(Schema.Number),
+      access: "readWrite",
+    });
+    const B = Opcua.variable({
+      nodeId: "ns=1;s=Batch.Default.B",
+      codec: Opcua.schema(Schema.Number),
+      access: "readWrite",
+    });
+    const C = Opcua.variable({
+      nodeId: "ns=1;s=Batch.Default.C",
+      codec: Opcua.schema(Schema.Number),
+      access: "readWrite",
+    });
+    const Echo = Opcua.method({
+      objectId: "ns=1;s=Object",
+      methodId: "ns=1;s=Method",
+      input: { Value: Opcua.arg({ codec: Opcua.schema(Schema.Number) }) },
+      output: { Value: Opcua.arg({ codec: Opcua.schema(Schema.Number) }) },
+    });
+
+    const calls = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* makeFakeSession({
+            batching: {
+              read: { maxNodesPerRead: 2 },
+              write: { maxNodesPerWrite: 2 },
+              call: { maxMethodsPerCall: 2 },
+            },
+          });
+          yield* fake.session.readMany({ a: A, b: B, c: C } as const, {
+            validation: "none",
+          });
+          yield* fake.session.writeMany({
+            a: [A, 1],
+            b: [B, 2],
+            c: [C, 3],
+          } as const);
+          yield* fake.session.callMany({
+            a: [Echo, { Value: 1 }],
+            b: [Echo, { Value: 2 }],
+            c: [Echo, { Value: 3 }],
+          } as const);
+          return fake.calls;
+        }),
+      ),
+    );
+
+    expect(calls.valueReads.map((call) => call.length)).toEqual([2, 1]);
+    expect(calls.writes.map((call) => call.length)).toEqual([2, 1]);
+    expect(calls.calls.map((call) => call.length)).toEqual([2, 1]);
+  });
+
+  it("lets per-call service options override session batching defaults", async () => {
+    const A = Opcua.variable({ nodeId: "ns=1;s=Batch.Override.A" });
+    const B = Opcua.variable({ nodeId: "ns=1;s=Batch.Override.B" });
+    const C = Opcua.variable({ nodeId: "ns=1;s=Batch.Override.C" });
+
+    const calls = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* makeFakeSession({
+            batching: { read: { maxNodesPerRead: 3 } },
+          });
+          yield* fake.session.readMany({ a: A, b: B, c: C } as const, {
+            validation: "none",
+            service: { maxNodesPerRead: 1 },
+          });
+          return fake.calls;
+        }),
+      ),
+    );
+
+    expect(calls.valueReads.map((call) => call.length)).toEqual([1, 1, 1]);
+  });
+
   it("caches strict read validation until session_restored", async () => {
     const Temperature = Opcua.variable({
       nodeId: "ns=1;s=Batch.Strict",

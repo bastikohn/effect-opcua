@@ -16,6 +16,7 @@ import type {
 import { ExtensionObject } from "node-opcua";
 
 import { makeSession } from "../../src/OpcuaSession.js";
+import type { OpcuaSessionBatchingOptions } from "../../src/OpcuaSession.js";
 import type { OpcuaSessionEvent } from "../../src/internal/events.js";
 import {
   AttributeIds,
@@ -41,6 +42,7 @@ export type FakeMethodDefinition = {
 };
 
 export type FakeSessionOptions = {
+  readonly batching?: OpcuaSessionBatchingOptions;
   readonly readValues?: (
     nodesToRead: ReadonlyArray<ReadValueIdOptions>,
   ) => ReadonlyArray<DataValue>;
@@ -139,7 +141,9 @@ export const makeFakeSession = (options: FakeSessionOptions = {}) =>
       extractNamespaceDataType: async () => undefined,
     }) as unknown as ClientSession & EventEmitter;
 
-    const session = yield* makeSession(raw, events);
+    const session = yield* makeSession(raw, events, {
+      batching: options.batching,
+    });
     return { raw, session, calls };
   });
 
