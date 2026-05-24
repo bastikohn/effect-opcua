@@ -14,17 +14,20 @@ import { Effect, Result } from "effect";
 
 import { runChunked, type BatchOptions } from "./internal/batch.js";
 import type { NodeIdString } from "./internal/capabilities.js";
-import { Codec, dynamic, type CodecType, type OpcuaCodec } from "./internal/codecs.js";
+import {
+  Codec,
+  dynamic,
+  type CodecType,
+  type OpcuaCodec,
+} from "./internal/codecs.js";
 import {
   configurationError,
   isConfigurationError,
   methodInputError,
   methodNotExecutableError,
   serviceError,
-  OpcuaAccessDeniedError,
   OpcuaConfigurationError,
   OpcuaMethodInputError,
-  OpcuaMethodNotExecutableError,
   OpcuaServiceError,
 } from "./OpcuaError.js";
 import {
@@ -172,21 +175,11 @@ export type MethodCallResult<
       readonly unsafeRaw?: MethodCallRaw;
     };
 
-export type MethodHandle<
-  Input = Record<string, OpcuaDynamicValue>,
-  Output = Record<string, OpcuaDynamicValue>,
-  ObjectId extends NodeIdString = NodeIdString,
-  MethodId extends NodeIdString = NodeIdString,
-> = {
-  readonly _tag: "MethodHandle";
-  readonly objectId: ObjectId;
-  readonly methodId: MethodId;
-  readonly def: MethodDef<
-    ObjectId,
-    MethodId,
-    MethodArgRecord | undefined,
-    MethodArgRecord | undefined
-  >;
+export type ResolvedMethod<Spec extends AnyMethodDef = AnyMethodDef> = {
+  readonly _tag: "ResolvedMethod";
+  readonly objectId: Spec["objectId"];
+  readonly methodId: Spec["methodId"];
+  readonly def: Spec;
   readonly metadata: MethodMetadata;
   readonly unsafeRaw: {
     readonly objectId: NodeId;
@@ -194,60 +187,34 @@ export type MethodHandle<
     readonly inputArguments: ReadonlyArray<Argument>;
     readonly outputArguments: ReadonlyArray<Argument>;
   };
-  readonly call: (
-    input: Input,
-    options?: MethodCallOptions,
-  ) => Effect.Effect<
-    MethodCallResult<Output, ObjectId, MethodId>,
-    | OpcuaConfigurationError
-    | OpcuaServiceError
-    | OpcuaMethodInputError
-    | OpcuaMethodNotExecutableError
-    | OpcuaAccessDeniedError
-  >;
 };
 
-export type AnyMethodHandle = MethodHandle<
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  any,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  any,
-  NodeIdString,
-  NodeIdString
->;
+export type AnyResolvedMethod = ResolvedMethod<AnyMethodDef>;
 
-export type MethodCallEntry<H extends AnyMethodHandle> = {
-  readonly handle: H;
-  readonly input: InputOfMethodHandle<H>;
+export type MethodCallEntry<M extends AnyResolvedMethod> = {
+  readonly method: M;
+  readonly input: InputOfResolvedMethod<M>;
   readonly options?: MethodCallOptions;
 };
 
-export type InputOfMethodHandle<H> =
-  H extends MethodHandle<infer Input, unknown, NodeIdString, NodeIdString>
-    ? Input
-    : never;
+export type InputOfResolvedMethod<M> =
+  M extends ResolvedMethod<infer Spec> ? InputOfMethodDef<Spec> : never;
 
-export type OutputOfMethodHandle<H> =
-  H extends MethodHandle<never, infer Output, NodeIdString, NodeIdString>
-    ? Output
-    : never;
+export type OutputOfResolvedMethod<M> =
+  M extends ResolvedMethod<infer Spec> ? OutputOfMethodDef<Spec> : never;
 
-export type ObjectIdOfMethodHandle<H> =
-  H extends MethodHandle<never, unknown, infer ObjectId, NodeIdString>
-    ? ObjectId
-    : never;
+export type ObjectIdOfResolvedMethod<M> =
+  M extends ResolvedMethod<infer Spec> ? Spec["objectId"] : never;
 
-export type MethodIdOfMethodHandle<H> =
-  H extends MethodHandle<never, unknown, NodeIdString, infer MethodId>
-    ? MethodId
-    : never;
+export type MethodIdOfResolvedMethod<M> =
+  M extends ResolvedMethod<infer Spec> ? Spec["methodId"] : never;
 
 type MethodPreflight = {
   readonly request: CallMethodRequestLike;
   readonly includeRaw: boolean;
 };
 
-type MethodHandleInfo = {
+type MethodInfo = {
   readonly objectId: NodeIdString;
   readonly methodId: NodeIdString;
   readonly metadata: MethodMetadata;
@@ -301,19 +268,17 @@ export const makeMethodDef = <
 
 export const make = makeMethodDef;
 
-export const makeMethodHandle = <const Spec extends AnyMethodDef>(
-  session: ClientSession,
+export const resolveMethod = <const Spec extends AnyMethodDef>(
   spec: Spec,
   metadata: MethodMetadata,
-  structureRuntime: OpcuaStructureRuntime,
 ) =>
   Effect.gen(function* () {
     const objectId = yield* coerceNodeIdOrFail(
-      "handle.method.objectId",
+      "method.objectId",
       spec.objectId,
     );
     const methodId = yield* coerceNodeIdOrFail(
-      "handle.method.methodId",
+      "method.methodId",
       spec.methodId,
     );
     if (!metadata.executable || metadata.userExecutable === false) {
@@ -326,14 +291,12 @@ export const makeMethodHandle = <const Spec extends AnyMethodDef>(
         }),
       );
     }
-    const handle = {
-      _tag: "MethodHandle" as const,
+    return {
+      _tag: "ResolvedMethod" as const,
       objectId: spec.objectId,
       methodId: spec.methodId,
       def: spec,
       metadata,
-      [methodHandleSession]: session,
-      [methodHandleStructureRuntime]: structureRuntime,
       unsafeRaw: {
         objectId,
         methodId,
@@ -344,49 +307,19 @@ export const makeMethodHandle = <const Spec extends AnyMethodDef>(
           (argument) => argument.unsafeRaw.argument,
         ),
       },
-      call: (input: InputOfMethodDef<Spec>, options?: MethodCallOptions) =>
-        callHandle(session, handle, input, structureRuntime, options),
-    } as unknown as MethodHandle<
-      InputOfMethodDef<Spec>,
-      OutputOfMethodDef<Spec>,
-      Spec["objectId"],
-      Spec["methodId"]
-    >;
-    return handle;
+    } as ResolvedMethod<Spec>;
   });
 
-const methodHandleSession = Symbol("@effect-opcua/client/MethodSession");
-const methodHandleStructureRuntime = Symbol(
-  "@effect-opcua/client/MethodStructureRuntime",
-);
-
-export const getMethodHandleSession = (handle: unknown) =>
-  (handle as { readonly [methodHandleSession]?: ClientSession })[
-    methodHandleSession
-  ];
-
-export const getMethodHandleStructureRuntime = (handle: unknown) =>
-  (
-    handle as {
-      readonly [methodHandleStructureRuntime]?: OpcuaStructureRuntime;
-    }
-  )[methodHandleStructureRuntime];
-
-export const callHandle = <
-  Input,
-  Output,
-  ObjectId extends NodeIdString,
-  MethodId extends NodeIdString,
->(
+export const callResolvedMethod = <const Spec extends AnyMethodDef>(
   session: ClientSession,
-  handle: MethodHandle<Input, Output, ObjectId, MethodId>,
-  input: Input,
+  method: ResolvedMethod<Spec>,
+  input: InputOfMethodDef<Spec>,
   structureRuntime: OpcuaStructureRuntime,
   options?: MethodCallOptions,
 ) =>
   Effect.gen(function* () {
     const preflight = yield* preflightMethodCall(
-      handle,
+      method,
       input,
       structureRuntime,
       options,
@@ -396,12 +329,12 @@ export const callHandle = <
       catch: (cause) =>
         serviceError({
           operation: "call",
-          nodeId: handle.methodId,
+          nodeId: method.methodId,
           cause,
         }),
     });
     return yield* methodResultFromRaw(
-      handle,
+      method,
       preflight,
       result,
       structureRuntime,
@@ -410,14 +343,14 @@ export const callHandle = <
 
 export const callMethods = (
   session: ClientSession,
-  entries: ReadonlyArray<MethodCallEntry<AnyMethodHandle>>,
+  entries: ReadonlyArray<MethodCallEntry<AnyResolvedMethod>>,
   structureRuntime: OpcuaStructureRuntime,
   options?: BatchOptions,
 ) =>
   Effect.gen(function* () {
     const preflights = yield* Effect.forEach(entries, (entry) =>
       preflightMethodCall(
-        entry.handle,
+        entry.method,
         entry.input,
         structureRuntime,
         entry.options,
@@ -446,7 +379,7 @@ export const callMethods = (
     );
     return yield* Effect.forEach(entries, (entry, index) =>
       methodResultFromRaw(
-        entry.handle,
+        entry.method,
         preflights[index]!,
         rawResults[index]!,
         structureRuntime,
@@ -517,17 +450,16 @@ export const resolveMethodMapping = (
         entry.arg.codec,
         argumentCodecMetadata(nodeId, argument),
       ).pipe(
-        Effect.mapError(
-          (cause) =>
-            configurationError({
-              operation,
-              nodeId,
-              cause: {
-                argumentName: argument.name,
-                argumentIndex: entry.index,
-                cause,
-              },
-            }),
+        Effect.mapError((cause) =>
+          configurationError({
+            operation,
+            nodeId,
+            cause: {
+              argumentName: argument.name,
+              argumentIndex: entry.index,
+              cause,
+            },
+          }),
         ),
       );
     }
@@ -575,14 +507,9 @@ export const readBooleanAttribute = (
   });
 };
 
-export const preflightMethodCall = <
-  Input,
-  Output,
-  ObjectId extends NodeIdString,
-  MethodId extends NodeIdString,
->(
-  handle: MethodHandle<Input, Output, ObjectId, MethodId>,
-  input: Input,
+export const preflightMethodCall = <const Spec extends AnyMethodDef>(
+  method: ResolvedMethod<Spec>,
+  input: InputOfMethodDef<Spec>,
   structureRuntime: OpcuaStructureRuntime,
   options?: MethodCallOptions,
 ): Effect.Effect<
@@ -592,16 +519,16 @@ export const preflightMethodCall = <
   Effect.gen(function* () {
     const optionsError = methodCallOptionsError(
       "method.call.options",
-      handle.objectId,
-      handle.methodId,
+      method.objectId,
+      method.methodId,
       options,
     );
     if (optionsError) return yield* Effect.fail(optionsError);
     if (
-      handle.metadata.inputMapping.some((mapping) =>
+      method.metadata.inputMapping.some((mapping) =>
         Codec.requiresStructureRuntime(mapping.arg.codec),
       ) ||
-      handle.metadata.outputMapping.some((mapping) =>
+      method.metadata.outputMapping.some((mapping) =>
         Codec.requiresStructureRuntime(mapping.arg.codec),
       )
     ) {
@@ -611,38 +538,37 @@ export const preflightMethodCall = <
     if (!inputRecord) {
       return yield* Effect.fail(
         methodInputError({
-          objectId: handle.objectId,
-          methodId: handle.methodId,
+          objectId: method.objectId,
+          methodId: method.methodId,
           input,
           phase: "ArgumentMapping",
           cause: "input must be an object",
         }),
       );
     }
-    const keyError = validateInputKeys(handle, inputRecord, input);
+    const keyError = validateInputKeys(method, inputRecord, input);
     if (keyError) return yield* Effect.fail(keyError);
 
     const inputArguments: Array<Variant> = [];
-    for (const mapping of handle.metadata.inputMapping) {
-      const argument = handle.metadata.inputArguments[mapping.index]!;
+    for (const mapping of method.metadata.inputMapping) {
+      const argument = method.metadata.inputArguments[mapping.index]!;
       const rawValue = inputRecord[mapping.key];
       const variant = yield* Codec.encode(
         mapping.arg.codec,
         rawValue,
-        argumentCodecMetadata(handle.methodId, argument),
+        argumentCodecMetadata(method.methodId, argument),
         structureRuntime,
       ).pipe(
-        Effect.mapError(
-          (error) =>
-            methodInputError({
-              objectId: handle.objectId,
-              methodId: handle.methodId,
-              input,
-              phase: "Encoding",
-              argumentKey: mapping.key,
-              argumentIndex: mapping.index,
-              error,
-            }),
+        Effect.mapError((error) =>
+          methodInputError({
+            objectId: method.objectId,
+            methodId: method.methodId,
+            input,
+            phase: "Encoding",
+            argumentKey: mapping.key,
+            argumentIndex: mapping.index,
+            error,
+          }),
         ),
       );
       inputArguments[mapping.index] = variant;
@@ -650,21 +576,16 @@ export const preflightMethodCall = <
 
     return {
       request: {
-        objectId: handle.unsafeRaw.objectId,
-        methodId: handle.unsafeRaw.methodId,
+        objectId: method.unsafeRaw.objectId,
+        methodId: method.unsafeRaw.methodId,
         inputArguments,
       },
-      includeRaw: options?.includeRaw ?? handle.def.includeRaw ?? false,
+      includeRaw: options?.includeRaw ?? method.def.includeRaw ?? false,
     };
   });
 
-export const methodResultFromRaw = <
-  Input,
-  Output,
-  ObjectId extends NodeIdString,
-  MethodId extends NodeIdString,
->(
-  handle: MethodHandle<Input, Output, ObjectId, MethodId>,
+export const methodResultFromRaw = <const Spec extends AnyMethodDef>(
+  method: ResolvedMethod<Spec>,
   preflight: MethodPreflight,
   result: CallMethodResult,
   structureRuntime: OpcuaStructureRuntime,
@@ -674,41 +595,59 @@ export const methodResultFromRaw = <
       ? { request: preflight.request, result }
       : undefined;
     const status = normalizeStatusCode(result.statusCode);
-    const inputArgumentResults = normalizeInputArgumentResults(handle, result);
+    const inputArgumentResults = normalizeInputArgumentResults(method, result);
     if (!isGood(result.statusCode)) {
       return {
         _tag: "NonGoodStatus",
-        objectId: handle.objectId,
-        methodId: handle.methodId,
+        objectId: method.objectId,
+        methodId: method.methodId,
         status,
         inputArgumentResults,
         unsafeRaw,
-      } as MethodCallResult<Output, ObjectId, MethodId>;
+      } as MethodCallResult<
+        OutputOfMethodDef<Spec>,
+        Spec["objectId"],
+        Spec["methodId"]
+      >;
     }
 
     const output = yield* Effect.result(
-      outputObjectFromResult(handle, result, structureRuntime),
+      outputObjectFromResult(method, result, structureRuntime),
     );
     if (Result.isFailure(output)) {
       return {
         _tag: "DecodeError",
-        objectId: handle.objectId,
-        methodId: handle.methodId,
+        objectId: method.objectId,
+        methodId: method.methodId,
         status,
         error: output.failure,
         unsafeRaw,
-      } as MethodCallResult<Output, ObjectId, MethodId>;
+      } as MethodCallResult<
+        OutputOfMethodDef<Spec>,
+        Spec["objectId"],
+        Spec["methodId"]
+      >;
     }
     return {
       _tag: "Called",
-      objectId: handle.objectId,
-      methodId: handle.methodId,
-      output: output.success as Output,
+      objectId: method.objectId,
+      methodId: method.methodId,
+      output: output.success as OutputOfMethodDef<Spec>,
       status,
       inputArgumentResults,
       unsafeRaw,
-    } as MethodCallResult<Output, ObjectId, MethodId>;
-  }) as Effect.Effect<MethodCallResult<Output, ObjectId, MethodId>>;
+    } as MethodCallResult<
+      OutputOfMethodDef<Spec>,
+      Spec["objectId"],
+      Spec["methodId"]
+    >;
+  }) as Effect.Effect<
+    MethodCallResult<
+      OutputOfMethodDef<Spec>,
+      Spec["objectId"],
+      Spec["methodId"]
+    >
+  >;
 
 const emptyMapping = (
   operation: string,
@@ -734,7 +673,7 @@ const explicitMapping = (
   for (const [key, arg] of Object.entries(fields)) {
     if (arg.selectorError) {
       return configurationError({
-        operation: "handle.method.argumentMap",
+        operation: "method.argumentMap",
         cause: `Argument field ${key}: ${arg.selectorError}`,
       });
     }
@@ -750,19 +689,19 @@ const explicitMapping = (
     const index = matches[0] ?? -1;
     if (!Number.isInteger(index) || index < 0 || index >= arguments_.length) {
       return configurationError({
-        operation: "handle.method.argumentMap",
+        operation: "method.argumentMap",
         cause: `Argument selector for ${key} did not resolve`,
       });
     }
     if (matches.length !== 1) {
       return configurationError({
-        operation: "handle.method.argumentMap",
+        operation: "method.argumentMap",
         cause: `Argument selector for ${key} did not resolve exactly once`,
       });
     }
     if (usedIndexes.has(index)) {
       return configurationError({
-        operation: "handle.method.argumentMap",
+        operation: "method.argumentMap",
         cause: "Two public keys target the same argument",
       });
     }
@@ -776,7 +715,7 @@ const explicitMapping = (
   }
   if (usedIndexes.size !== arguments_.length) {
     return configurationError({
-      operation: "handle.method.argumentMap",
+      operation: "method.argumentMap",
       cause: "Method arguments must cover every OPC UA argument",
     });
   }
@@ -784,19 +723,19 @@ const explicitMapping = (
 };
 
 const validateInputKeys = (
-  handle: MethodHandleInfo,
+  method: MethodInfo,
   inputRecord: Record<string, unknown>,
   input: unknown,
 ) => {
   const expected = new Set(
-    handle.metadata.inputMapping.map((mapping) => mapping.key),
+    method.metadata.inputMapping.map((mapping) => mapping.key),
   );
   for (const key of expected) {
     if (!(key in inputRecord)) {
-      const mapping = handle.metadata.inputMapping.find((m) => m.key === key);
+      const mapping = method.metadata.inputMapping.find((m) => m.key === key);
       return methodInputError({
-        objectId: handle.objectId,
-        methodId: handle.methodId,
+        objectId: method.objectId,
+        methodId: method.methodId,
         input,
         phase: "MissingInputKey",
         argumentKey: key,
@@ -807,8 +746,8 @@ const validateInputKeys = (
   for (const key of Object.keys(inputRecord)) {
     if (!expected.has(key)) {
       return methodInputError({
-        objectId: handle.objectId,
-        methodId: handle.methodId,
+        objectId: method.objectId,
+        methodId: method.methodId,
         input,
         phase: "UnknownInputKey",
         argumentKey: key,
@@ -819,15 +758,15 @@ const validateInputKeys = (
 };
 
 const outputObjectFromResult = (
-  handle: MethodHandleInfo,
+  method: MethodInfo,
   result: CallMethodResult,
   structureRuntime: OpcuaStructureRuntime,
 ) =>
   Effect.gen(function* () {
     const output: Record<string, unknown> = {};
     const outputArguments = result.outputArguments ?? [];
-    for (const mapping of handle.metadata.outputMapping) {
-      const argument = handle.metadata.outputArguments[mapping.index]!;
+    for (const mapping of method.metadata.outputMapping) {
+      const argument = method.metadata.outputArguments[mapping.index]!;
       const variant = outputArguments[mapping.index];
       output[mapping.key] = yield* Codec.decode(
         mapping.arg.codec,
@@ -846,7 +785,7 @@ const outputObjectFromResult = (
   });
 
 const normalizeInputArgumentResults = (
-  handle: MethodHandleInfo,
+  method: MethodInfo,
   result: CallMethodResult,
 ) => {
   const statuses = result.inputArgumentResults;
@@ -855,7 +794,7 @@ const normalizeInputArgumentResults = (
     result as { readonly inputArgumentDiagnosticInfos?: ReadonlyArray<unknown> }
   ).inputArgumentDiagnosticInfos;
   return statuses.map((statusCode: StatusCode, index: number) => {
-    const mapping = handle.metadata.inputMapping.find(
+    const mapping = method.metadata.inputMapping.find(
       (candidate) => candidate.index === index,
     );
     return {
@@ -863,7 +802,7 @@ const normalizeInputArgumentResults = (
       index,
       argumentName:
         mapping?.argumentName ??
-        handle.metadata.inputArguments[index]?.name ??
+        method.metadata.inputArguments[index]?.name ??
         "",
       status: normalizeStatusCode(statusCode),
       diagnosticInfo: diagnostics?.[index],

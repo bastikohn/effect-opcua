@@ -155,23 +155,23 @@ export const makeMetadataService = (
         );
       }
       if (
-        (Object.values(def.input ?? {}) as ReadonlyArray<MethodArg<unknown>>).some((arg) =>
-          Codec.requiresStructureRuntime(arg.codec),
-        ) ||
-        (Object.values(def.output ?? {}) as ReadonlyArray<MethodArg<unknown>>).some((arg) =>
-          Codec.requiresStructureRuntime(arg.codec),
-        )
+        (
+          Object.values(def.input ?? {}) as ReadonlyArray<MethodArg<unknown>>
+        ).some((arg) => Codec.requiresStructureRuntime(arg.codec)) ||
+        (
+          Object.values(def.output ?? {}) as ReadonlyArray<MethodArg<unknown>>
+        ).some((arg) => Codec.requiresStructureRuntime(arg.codec))
       ) {
         yield* structureRuntime.ensureInitialized();
       }
       const inputMapping = yield* resolveMethodMapping(
-        "handle.method.input",
+        "method.input",
         def.methodId,
         base.inputArguments,
         def.input,
       );
       const outputMapping = yield* resolveMethodMapping(
-        "handle.method.output",
+        "method.output",
         def.methodId,
         base.outputArguments,
         def.output,

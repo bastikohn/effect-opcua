@@ -143,7 +143,9 @@ const makeFakeSubscription = (options?: {
   readonly read?: (...args: ReadonlyArray<unknown>) => Promise<unknown>;
   readonly onMonitorItems?: () => void;
   readonly failCall?: (callIndex: number) => boolean;
-  readonly handleVariable?: (def: ReadableVariableDef) => Effect.Effect<never>;
+  readonly validateVariable?: (
+    def: ReadableVariableDef,
+  ) => Effect.Effect<never>;
 }) =>
   Effect.gen(function* () {
     const calls: Array<FakeMonitorItemsCall> = [];
@@ -199,8 +201,8 @@ const makeFakeSubscription = (options?: {
       raw,
       events,
       fakeStructureRuntime,
-      (options?.handleVariable ??
-        (() => Effect.die("unexpected strict validation handle"))) as never,
+      (options?.validateVariable ??
+        (() => Effect.die("unexpected strict validation"))) as never,
     );
     return {
       calls,
@@ -302,7 +304,10 @@ describe("monitoring", () => {
           }),
         ),
       ),
-    ).rejects.toMatchObject({ _tag: "OpcuaError", reason: { _tag: "MonitorConfiguration" } });
+    ).rejects.toMatchObject({
+      _tag: "OpcuaError",
+      reason: { _tag: "MonitorConfiguration" },
+    });
   });
 
   it("rejects missing option objects and invalid deadbands", async () => {
@@ -318,7 +323,10 @@ describe("monitoring", () => {
           }),
         ),
       ),
-    ).rejects.toMatchObject({ _tag: "OpcuaError", reason: { _tag: "MonitorConfiguration" } });
+    ).rejects.toMatchObject({
+      _tag: "OpcuaError",
+      reason: { _tag: "MonitorConfiguration" },
+    });
 
     for (const filter of [
       Opcua.MonitorFilter.statusValue(Opcua.MonitorDeadband.absolute(-1)),
@@ -337,7 +345,10 @@ describe("monitoring", () => {
             }),
           ),
         ),
-      ).rejects.toMatchObject({ _tag: "OpcuaError", reason: { _tag: "MonitorConfiguration" } });
+      ).rejects.toMatchObject({
+        _tag: "OpcuaError",
+        reason: { _tag: "MonitorConfiguration" },
+      });
     }
   });
 
@@ -480,7 +491,10 @@ describe("monitoring", () => {
           }),
         ),
       ),
-    ).rejects.toMatchObject({ _tag: "OpcuaError", reason: { _tag: "MonitorCreate" } });
+    ).rejects.toMatchObject({
+      _tag: "OpcuaError",
+      reason: { _tag: "MonitorCreate" },
+    });
 
     expect(fake.groups[0]?.terminated).toBe(true);
     expect(fake.groups[1]?.terminated).toBe(true);
@@ -558,15 +572,15 @@ describe("monitoring", () => {
   });
 
   it("validation none skips metadata reads and access validation only reads access", async () => {
-    let handleCalls = 0;
+    let validationCalls = 0;
     let readCalls = 0;
     const none = await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
           const fake = yield* makeFakeSubscription({
-            handleVariable: () => {
-              handleCalls++;
-              return Effect.die("unexpected handle");
+            validateVariable: () => {
+              validationCalls++;
+              return Effect.die("unexpected validation");
             },
           });
           const monitor = yield* fake.subscription.monitor(
@@ -591,9 +605,9 @@ describe("monitoring", () => {
                 { statusCode: StatusCodes.Good, value: { value: undefined } },
               ];
             },
-            handleVariable: () => {
-              handleCalls++;
-              return Effect.die("unexpected handle");
+            validateVariable: () => {
+              validationCalls++;
+              return Effect.die("unexpected validation");
             },
           });
           const monitor = yield* fake.subscription.monitor(
@@ -607,7 +621,7 @@ describe("monitoring", () => {
 
     expect(none.activeCount).toBe(1);
     expect(access.activeCount).toBe(1);
-    expect(handleCalls).toBe(0);
+    expect(validationCalls).toBe(0);
     expect(readCalls).toBe(1);
   });
 
@@ -878,7 +892,10 @@ describe("monitoring", () => {
           );
         }),
       ),
-    ).rejects.toMatchObject({ _tag: "OpcuaError", reason: { _tag: "MonitorConfiguration" } });
+    ).rejects.toMatchObject({
+      _tag: "OpcuaError",
+      reason: { _tag: "MonitorConfiguration" },
+    });
   }, 20_000);
 
   it("streams structure samples through monitor", async () => {
@@ -930,6 +947,9 @@ describe("monitoring", () => {
           );
         }),
       ),
-    ).rejects.toMatchObject({ _tag: "OpcuaError", reason: { _tag: "MonitorCreate" } });
+    ).rejects.toMatchObject({
+      _tag: "OpcuaError",
+      reason: { _tag: "MonitorCreate" },
+    });
   }, 20_000);
 });

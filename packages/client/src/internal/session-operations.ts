@@ -1,8 +1,4 @@
-import {
-  coerceNodeId,
-  type ClientSession,
-  type NodeId,
-} from "node-opcua";
+import { coerceNodeId, type ClientSession, type NodeId } from "node-opcua";
 import { Effect } from "effect";
 
 import { keyedResults } from "./collections.js";
@@ -13,24 +9,22 @@ import type { makeStructureRuntime } from "./structure-runtime.js";
 import type { NodeIdString } from "./capabilities.js";
 import {
   callMethods,
-  makeMethodHandle,
   methodCallOptionsError,
+  resolveMethod,
   type AnyMethodDef,
-  type AnyMethodHandle,
+  type AnyResolvedMethod,
   type MethodCallEntry,
   type MethodCallOptions,
 } from "../OpcuaMethod.js";
 import {
-  makeVariableHandle,
   readPreparedVariables,
-  writeVariables,
+  writePreparedVariables,
   type AnyVariableDef,
   type PreparedReadVariable,
+  type PreparedWriteVariable,
   type ReadableVariableDef,
   type VariableAccess,
   type WritableVariableDef,
-  type WritableVariableHandle,
-  type WriteEntry,
 } from "../OpcuaVariable.js";
 import type {
   CallManyInput,
@@ -72,6 +66,7 @@ type NormalizedWriteItem = {
   readonly def: WritableVariableDef;
   readonly value: unknown;
   readonly nodeId: NodeIdString;
+  readonly rawNodeId: NodeId;
 };
 
 type NormalizedCallItem = {
@@ -129,22 +124,17 @@ export const writeManyWithState = <const Items extends AnyWriteManyRecord>(
     const normalized = yield* normalizeWriteManyItems(items);
     if (normalized.length === 0) return {} as WriteManyResult<Items>;
 
-    const handles = yield* Effect.forEach(normalized, (item) =>
-      Effect.gen(function* () {
-        const variableMetadata = yield* state.metadata.variable(item.def);
-        return makeVariableHandle(
-          state.unsafeRaw,
-          item.def,
-          variableMetadata,
-          state.structureRuntime,
-        );
-      }),
+    const entries: ReadonlyArray<PreparedWriteVariable> = yield* Effect.forEach(
+      normalized,
+      (item) =>
+        Effect.map(state.metadata.variable(item.def), (metadata) => ({
+          def: item.def,
+          metadata,
+          value: item.value,
+          rawNodeId: item.rawNodeId,
+        })),
     );
-    const entries = normalized.map((item, index) => ({
-      handle: handles[index] as WritableVariableHandle,
-      value: item.value,
-    })) as ReadonlyArray<WriteEntry<WritableVariableHandle>>;
-    const results = yield* writeVariables(
+    const results = yield* writePreparedVariables(
       state.unsafeRaw,
       entries,
       state.structureRuntime,
@@ -166,22 +156,17 @@ export const callManyWithState = <const Items extends AnyCallManyRecord>(
     const normalized = yield* normalizeCallManyItems(items);
     if (normalized.length === 0) return {} as CallManyResult<Items>;
 
-    const handles = yield* Effect.forEach(normalized, (item) =>
+    const methods = yield* Effect.forEach(normalized, (item) =>
       Effect.gen(function* () {
         const methodMetadata = yield* state.metadata.method(item.def);
-        return yield* makeMethodHandle(
-          state.unsafeRaw,
-          item.def,
-          methodMetadata,
-          state.structureRuntime,
-        );
+        return yield* resolveMethod(item.def, methodMetadata);
       }),
     );
     const entries = normalized.map((item, index) => ({
-      handle: handles[index]!,
+      method: methods[index]!,
       input: item.input,
       options: item.options,
-    })) as ReadonlyArray<MethodCallEntry<AnyMethodHandle>>;
+    })) as ReadonlyArray<MethodCallEntry<AnyResolvedMethod>>;
     const results = yield* callMethods(
       state.unsafeRaw,
       entries,
@@ -203,7 +188,9 @@ const normalizeReadManyItems = (
 
     const normalized: Array<NormalizedReadItem> = [];
     const seen = new Map<string, string>();
-    for (const [key, value] of Object.entries(items as Record<string, unknown>)) {
+    for (const [key, value] of Object.entries(
+      items as Record<string, unknown>,
+    )) {
       if (!isReadableVariableDef(value)) {
         return Effect.fail(
           configurationError({
@@ -214,7 +201,8 @@ const normalizeReadManyItems = (
         );
       }
       const rawNodeId = coerceNodeIdForKey("readMany.items", key, value.nodeId);
-      if (rawNodeId instanceof Error) return Effect.fail(rawNodeId as OpcuaError);
+      if (rawNodeId instanceof Error)
+        return Effect.fail(rawNodeId as OpcuaError);
       const nodeId = rawNodeId.toString();
       const duplicate = seen.get(nodeId);
       if (duplicate) {
@@ -242,7 +230,9 @@ const normalizeWriteManyItems = (
 
     const normalized: Array<NormalizedWriteItem> = [];
     const seen = new Map<string, string>();
-    for (const [key, tuple] of Object.entries(items as Record<string, unknown>)) {
+    for (const [key, tuple] of Object.entries(
+      items as Record<string, unknown>,
+    )) {
       if (!Array.isArray(tuple) || tuple.length !== 2) {
         return Effect.fail(
           configurationError({
@@ -263,7 +253,8 @@ const normalizeWriteManyItems = (
         );
       }
       const rawNodeId = coerceNodeIdForKey("writeMany.items", key, def.nodeId);
-      if (rawNodeId instanceof Error) return Effect.fail(rawNodeId as OpcuaError);
+      if (rawNodeId instanceof Error)
+        return Effect.fail(rawNodeId as OpcuaError);
       const nodeId = rawNodeId.toString();
       const duplicate = seen.get(nodeId);
       if (duplicate) {
@@ -277,7 +268,7 @@ const normalizeWriteManyItems = (
         );
       }
       seen.set(nodeId, key);
-      normalized.push({ key, def, value, nodeId });
+      normalized.push({ key, def, value, nodeId, rawNodeId });
     }
     return Effect.succeed(normalized);
   });
@@ -290,13 +281,16 @@ const normalizeCallManyItems = (
     if (dictionaryError) return Effect.fail(dictionaryError);
 
     const normalized: Array<NormalizedCallItem> = [];
-    for (const [key, tuple] of Object.entries(items as Record<string, unknown>)) {
+    for (const [key, tuple] of Object.entries(
+      items as Record<string, unknown>,
+    )) {
       if (!Array.isArray(tuple) || (tuple.length !== 2 && tuple.length !== 3)) {
         return Effect.fail(
           configurationError({
             operation: "callMany.items",
             key,
-            cause: "call entries must be [definition, input] or [definition, input, options] tuples",
+            cause:
+              "call entries must be [definition, input] or [definition, input, options] tuples",
           }),
         );
       }
@@ -356,10 +350,11 @@ const normalizeReadManyOptions = (
       );
     }
     const service = options?.service;
-    const serviceError = serviceOptionsError("readMany.options.service", service, [
-      "maxNodesPerRead",
-      "maxConcurrentRequests",
-    ]);
+    const serviceError = serviceOptionsError(
+      "readMany.options.service",
+      service,
+      ["maxNodesPerRead", "maxConcurrentRequests"],
+    );
     if (serviceError) return Effect.fail(serviceError);
     return Effect.succeed({
       validation: options?.validation ?? "strict",
@@ -381,10 +376,11 @@ const normalizeWriteManyOptions = (
     const error = optionsShapeError("writeMany.options", options, ["service"]);
     if (error) return Effect.fail(error);
     const service = options?.service;
-    const serviceError = serviceOptionsError("writeMany.options.service", service, [
-      "maxNodesPerWrite",
-      "maxConcurrentRequests",
-    ]);
+    const serviceError = serviceOptionsError(
+      "writeMany.options.service",
+      service,
+      ["maxNodesPerWrite", "maxConcurrentRequests"],
+    );
     if (serviceError) return Effect.fail(serviceError);
     return Effect.succeed({
       maxNodesPerWrite: service?.maxNodesPerWrite ?? 250,
@@ -405,10 +401,11 @@ const normalizeCallManyOptions = (
     const error = optionsShapeError("callMany.options", options, ["service"]);
     if (error) return Effect.fail(error);
     const service = options?.service;
-    const serviceError = serviceOptionsError("callMany.options.service", service, [
-      "maxMethodsPerCall",
-      "maxConcurrentRequests",
-    ]);
+    const serviceError = serviceOptionsError(
+      "callMany.options.service",
+      service,
+      ["maxMethodsPerCall", "maxConcurrentRequests"],
+    );
     if (serviceError) return Effect.fail(serviceError);
     return Effect.succeed({
       maxMethodsPerCall: service?.maxMethodsPerCall ?? 50,
@@ -423,7 +420,10 @@ const optionsShapeError = (
 ) => {
   if (value === undefined) return undefined;
   if (!isPlainRecord(value)) {
-    return configurationError({ operation, cause: "options must be an object" });
+    return configurationError({
+      operation,
+      cause: "options must be an object",
+    });
   }
   const allowed = new Set(allowedKeys);
   const unknown = Object.keys(value).filter((key) => !allowed.has(key));

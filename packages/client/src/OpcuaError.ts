@@ -128,7 +128,10 @@ export class OpcuaError extends Data.TaggedError("OpcuaError")<{
 }> {}
 
 export type OpcuaConfigurationError = OpcuaError & {
-  readonly reason: Extract<OpcuaErrorReason, { readonly _tag: "Configuration" }>;
+  readonly reason: Extract<
+    OpcuaErrorReason,
+    { readonly _tag: "Configuration" }
+  >;
 };
 export type OpcuaServiceError = OpcuaError & {
   readonly reason: Extract<OpcuaErrorReason, { readonly _tag: "Service" }>;
@@ -140,7 +143,10 @@ export type OpcuaDisconnectError = OpcuaError & {
   readonly reason: Extract<OpcuaErrorReason, { readonly _tag: "Disconnect" }>;
 };
 export type OpcuaSessionCreateError = OpcuaError & {
-  readonly reason: Extract<OpcuaErrorReason, { readonly _tag: "SessionCreate" }>;
+  readonly reason: Extract<
+    OpcuaErrorReason,
+    { readonly _tag: "SessionCreate" }
+  >;
 };
 export type OpcuaSessionCloseError = OpcuaError & {
   readonly reason: Extract<OpcuaErrorReason, { readonly _tag: "SessionClose" }>;
@@ -185,10 +191,16 @@ export type OpcuaMonitorCreateError<Items = Record<string, unknown>> =
     };
   };
 export type OpcuaMonitorStartupError = OpcuaError & {
-  readonly reason: Extract<OpcuaErrorReason, { readonly _tag: "MonitorStartup" }>;
+  readonly reason: Extract<
+    OpcuaErrorReason,
+    { readonly _tag: "MonitorStartup" }
+  >;
 };
 export type OpcuaMonitorRuntimeError = OpcuaError & {
-  readonly reason: Extract<OpcuaErrorReason, { readonly _tag: "MonitorRuntime" }>;
+  readonly reason: Extract<
+    OpcuaErrorReason,
+    { readonly _tag: "MonitorRuntime" }
+  >;
 };
 
 export const isOpcuaError = (value: unknown): value is OpcuaError =>
@@ -212,42 +224,36 @@ export const configurationError = (
     Extract<OpcuaErrorReason, { readonly _tag: "Configuration" }>,
     "_tag"
   >,
-): OpcuaConfigurationError =>
-  makeError({ _tag: "Configuration", ...reason });
+): OpcuaConfigurationError => makeError({ _tag: "Configuration", ...reason });
 
 export const serviceError = (
   reason: Omit<Extract<OpcuaErrorReason, { readonly _tag: "Service" }>, "_tag">,
-): OpcuaServiceError =>
-  makeError({ _tag: "Service", ...reason });
+): OpcuaServiceError => makeError({ _tag: "Service", ...reason });
 
 export const connectError = (
   reason: Omit<Extract<OpcuaErrorReason, { readonly _tag: "Connect" }>, "_tag">,
-): OpcuaConnectError =>
-  makeError({ _tag: "Connect", ...reason });
+): OpcuaConnectError => makeError({ _tag: "Connect", ...reason });
 
 export const disconnectError = (
   reason: Omit<
     Extract<OpcuaErrorReason, { readonly _tag: "Disconnect" }>,
     "_tag"
   >,
-): OpcuaDisconnectError =>
-  makeError({ _tag: "Disconnect", ...reason });
+): OpcuaDisconnectError => makeError({ _tag: "Disconnect", ...reason });
 
 export const sessionCreateError = (
   reason: Omit<
     Extract<OpcuaErrorReason, { readonly _tag: "SessionCreate" }>,
     "_tag"
   >,
-): OpcuaSessionCreateError =>
-  makeError({ _tag: "SessionCreate", ...reason });
+): OpcuaSessionCreateError => makeError({ _tag: "SessionCreate", ...reason });
 
 export const sessionCloseError = (
   reason: Omit<
     Extract<OpcuaErrorReason, { readonly _tag: "SessionClose" }>,
     "_tag"
   >,
-): OpcuaSessionCloseError =>
-  makeError({ _tag: "SessionClose", ...reason });
+): OpcuaSessionCloseError => makeError({ _tag: "SessionClose", ...reason });
 
 export const subscriptionCreateError = (
   reason: Omit<
@@ -262,26 +268,22 @@ export const accessDeniedError = (
     Extract<OpcuaErrorReason, { readonly _tag: "AccessDenied" }>,
     "_tag"
   >,
-): OpcuaAccessDeniedError =>
-  makeError({ _tag: "AccessDenied", ...reason });
+): OpcuaAccessDeniedError => makeError({ _tag: "AccessDenied", ...reason });
 
 export const encodeError = (
   reason: Omit<Extract<OpcuaErrorReason, { readonly _tag: "Encode" }>, "_tag">,
-): OpcuaEncodeError =>
-  makeError({ _tag: "Encode", ...reason });
+): OpcuaEncodeError => makeError({ _tag: "Encode", ...reason });
 
 export const decodeError = (
   reason: Omit<Extract<OpcuaErrorReason, { readonly _tag: "Decode" }>, "_tag">,
-): OpcuaDecodeError =>
-  makeError({ _tag: "Decode", ...reason });
+): OpcuaDecodeError => makeError({ _tag: "Decode", ...reason });
 
 export const methodInputError = (
   reason: Omit<
     Extract<OpcuaErrorReason, { readonly _tag: "MethodInput" }>,
     "_tag"
   >,
-): OpcuaMethodInputError =>
-  makeError({ _tag: "MethodInput", ...reason });
+): OpcuaMethodInputError => makeError({ _tag: "MethodInput", ...reason });
 
 export const methodNotExecutableError = (
   reason: Omit<
@@ -299,27 +301,26 @@ export const monitorConfigurationError = (
 ): OpcuaMonitorConfigurationError =>
   makeError({ _tag: "MonitorConfiguration", ...reason });
 
-export const monitorCreateError = <Items>(
-  reason: {
-    readonly subscriptionId?: number;
-    readonly startup: import("./OpcuaSubscription.js").MonitorStartupReport<Items>;
-    readonly cause?: unknown;
-  },
-): OpcuaMonitorCreateError<Items> =>
-  makeError({ _tag: "MonitorCreate", ...reason }) as OpcuaMonitorCreateError<Items>;
+export const monitorCreateError = <Items>(reason: {
+  readonly subscriptionId?: number;
+  readonly startup: import("./OpcuaSubscription.js").MonitorStartupReport<Items>;
+  readonly cause?: unknown;
+}): OpcuaMonitorCreateError<Items> =>
+  makeError({
+    _tag: "MonitorCreate",
+    ...reason,
+  }) as OpcuaMonitorCreateError<Items>;
 
 export const monitorStartupError = (
   reason: Omit<
     Extract<OpcuaErrorReason, { readonly _tag: "MonitorStartup" }>,
     "_tag"
   >,
-): OpcuaMonitorStartupError =>
-  makeError({ _tag: "MonitorStartup", ...reason });
+): OpcuaMonitorStartupError => makeError({ _tag: "MonitorStartup", ...reason });
 
 export const monitorRuntimeError = (
   reason: Omit<
     Extract<OpcuaErrorReason, { readonly _tag: "MonitorRuntime" }>,
     "_tag"
   >,
-): OpcuaMonitorRuntimeError =>
-  makeError({ _tag: "MonitorRuntime", ...reason });
+): OpcuaMonitorRuntimeError => makeError({ _tag: "MonitorRuntime", ...reason });

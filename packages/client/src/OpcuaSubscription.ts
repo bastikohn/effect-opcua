@@ -45,7 +45,6 @@ import {
   accessDeniedError,
   type ReadableVariableDef,
   type ValueOfVariableDef,
-  type VariableHandle,
 } from "./OpcuaVariable.js";
 
 export type BufferPolicy =
@@ -244,10 +243,10 @@ export type OpcuaSubscription = {
   readonly unsafeRaw: ClientSubscription;
 };
 
-type HandleVariable = <const Def extends ReadableVariableDef>(
+type ValidateVariable = <const Def extends ReadableVariableDef>(
   def: Def,
 ) => Effect.Effect<
-  VariableHandle<Def["nodeId"], ValueOfVariableDef<Def>, "read" | "readWrite">,
+  unknown,
   OpcuaAccessDeniedError | OpcuaConfigurationError | OpcuaServiceError
 >;
 
@@ -293,7 +292,7 @@ export const makeSubscription = (
   unsafeRaw: ClientSubscription,
   events: PubSub.PubSub<OpcuaSubscriptionEvent>,
   structureRuntime: OpcuaStructureRuntime,
-  handleVariable: HandleVariable,
+  validateVariable: ValidateVariable,
 ): OpcuaSubscription => {
   const finalizingMonitorGroups = new WeakSet<ClientMonitoredItemGroup>();
 
@@ -314,7 +313,7 @@ export const makeSubscription = (
         effective,
         options.validation,
         createOptions,
-        handleVariable,
+        validateVariable,
       );
 
       if (options.startup === "strict" && validation.failed.size > 0) {
@@ -435,7 +434,7 @@ const validateStartupItems = <Items>(
   items: ReadonlyArray<EffectiveMonitorItem<Items>>,
   validation: MonitorValidation,
   create: NormalizedCreateOptions,
-  handleVariable: HandleVariable,
+  validateVariable: ValidateVariable,
 ): Effect.Effect<ValidationResult<Items>, never> => {
   switch (validation) {
     case "none":
@@ -443,19 +442,19 @@ const validateStartupItems = <Items>(
     case "access":
       return validateAccess(subscription, items, create);
     case "strict":
-      return validateStrict(items, handleVariable);
+      return validateStrict(items, validateVariable);
   }
 };
 
 const validateStrict = <Items>(
   items: ReadonlyArray<EffectiveMonitorItem<Items>>,
-  handleVariable: HandleVariable,
+  validateVariable: ValidateVariable,
 ): Effect.Effect<ValidationResult<Items>, never> =>
   Effect.gen(function* () {
     const active: Array<EffectiveMonitorItem<Items>> = [];
     const failed = new Map<MonitorKey<Items>, MonitorStartupFailure>();
     for (const item of items) {
-      const result = yield* Effect.result(handleVariable(item.def));
+      const result = yield* Effect.result(validateVariable(item.def));
       if (Result.isFailure(result)) {
         failed.set(
           item.key,
@@ -463,10 +462,7 @@ const validateStrict = <Items>(
         );
         continue;
       }
-      active.push({
-        ...item,
-        rawNodeId: result.success.unsafeRaw.nodeId,
-      });
+      active.push(item);
     }
     return { active, failed };
   });

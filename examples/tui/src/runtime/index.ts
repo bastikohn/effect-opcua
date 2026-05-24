@@ -132,9 +132,7 @@ export const createTuiRuntime = async (
       ],
     }));
 
-  const run = <A, E>(
-    effect: Effect.Effect<A, E, OpcuaSession.OpcuaSession>,
-  ) =>
+  const run = <A, E>(effect: Effect.Effect<A, E, OpcuaSession.OpcuaSession>) =>
     runtime.runPromise(effect);
 
   const root: TuiTreeEntry = {
@@ -289,10 +287,7 @@ export const createTuiRuntime = async (
       const sample = await run(
         Effect.gen(function* () {
           const session = yield* OpcuaSession.OpcuaSession;
-          const handle = yield* session.makeHandle(
-            Opcua.variable({ nodeId: entry.nodeId }),
-          );
-          return yield* handle.read();
+          return yield* session.read(Opcua.variable({ nodeId: entry.nodeId }));
         }),
       );
       setState((current) => ({ ...current, selectedNode: { entry, sample } }));
@@ -408,14 +403,12 @@ export const createTuiRuntime = async (
       const { result, sample } = await run(
         Effect.gen(function* () {
           const session = yield* OpcuaSession.OpcuaSession;
-          const handle = yield* session.makeHandle(
-            Opcua.variable({
-              nodeId: entry.nodeId,
-              access: "readWrite",
-            }),
-          );
-          const result = yield* handle.write(value as OpcuaDynamicValue);
-          const sample = yield* handle.read();
+          const def = Opcua.variable({
+            nodeId: entry.nodeId,
+            access: "readWrite",
+          });
+          const result = yield* session.write(def, value as OpcuaDynamicValue);
+          const sample = yield* session.read(def);
           return { result, sample };
         }),
       );

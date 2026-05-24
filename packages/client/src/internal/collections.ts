@@ -19,4 +19,3 @@ export const keyedResults = <A extends { readonly key: string }, B>(
   }
   return out;
 };
-

@@ -14,7 +14,10 @@ import {
 import { Effect, Result } from "effect";
 
 import { runChunked, type BatchOptions } from "./internal/batch.js";
-import type { NodeIdString, VariableCapability } from "./internal/capabilities.js";
+import type {
+  NodeIdString,
+  VariableCapability,
+} from "./internal/capabilities.js";
 import {
   Codec,
   dynamic,
@@ -42,7 +45,10 @@ import {
 import type { OpcuaStructureRuntime } from "./internal/structure-runtime.js";
 
 export type { AnySchema, CodecType, OpcuaCodec };
-export type { NodeIdString, ExpandedNodeIdString } from "./internal/capabilities.js";
+export type {
+  NodeIdString,
+  ExpandedNodeIdString,
+} from "./internal/capabilities.js";
 export type { OpcuaDynamicValue } from "./internal/normalize.js";
 
 export type VariableAccess = "read" | "write" | "readWrite";
@@ -152,83 +158,14 @@ export type VariableMetadata = {
   };
 };
 
-type ReadPart<
-  Id extends string,
-  A,
-  Access extends VariableAccess,
-> = Access extends "read" | "readWrite"
-  ? {
-      readonly read: () => Effect.Effect<ReadResult<A, Id>, OpcuaServiceError>;
-    }
-  : Record<never, never>;
-
-type WritePart<
-  Id extends string,
-  A,
-  Access extends VariableAccess,
-> = Access extends "write" | "readWrite"
-  ? {
-      readonly write: (
-        value: A,
-      ) => Effect.Effect<WriteResult<Id>, OpcuaEncodeError | OpcuaServiceError>;
-    }
-  : Record<never, never>;
-
-export type VariableHandle<
-  Id extends string = string,
-  A = OpcuaDynamicValue,
-  Access extends VariableAccess = "read",
+export type PreparedWriteVariable<
+  Def extends WritableVariableDef = WritableVariableDef,
 > = {
-  readonly _tag: "VariableHandle";
-  readonly nodeId: Id;
-  readonly def: VariableDef<Id, A, Access>;
+  readonly def: Def;
   readonly metadata: VariableMetadata;
-  readonly unsafeRaw: {
-    readonly nodeId: NodeId;
-    readonly builtInDataType: DataType;
-  };
-} & ReadPart<Id, A, Access> &
-  WritePart<Id, A, Access>;
-
-export type WritableVariableHandle<
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  A = any,
-  Id extends string = string,
-> = VariableHandle<Id, A, "write"> | VariableHandle<Id, A, "readWrite">;
-
-export type ReadableVariableHandle<
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  A = any,
-  Id extends string = string,
-> = VariableHandle<Id, A, "read"> | VariableHandle<Id, A, "readWrite">;
-
-export type ValueOfVariableHandle<H> =
-  H extends VariableHandle<string, infer A, VariableAccess> ? A : never;
-
-export type NodeIdOfVariableHandle<H> =
-  H extends VariableHandle<infer Id, unknown, VariableAccess> ? Id : never;
-
-export type WriteEntry<H extends WritableVariableHandle> = {
-  readonly handle: H;
-  readonly value: ValueOfVariableHandle<H>;
+  readonly value: ValueOfVariableDef<Def>;
+  readonly rawNodeId: NodeId;
 };
-
-const variableHandleSession = Symbol("@effect-opcua/client/VariableSession");
-const variableHandleStructureRuntime = Symbol(
-  "@effect-opcua/client/VariableStructureRuntime",
-);
-
-export const getVariableHandleSession = (handle: unknown) =>
-  (handle as { readonly [variableHandleSession]?: ClientSession })[
-    variableHandleSession
-  ];
-
-export const getVariableHandleStructureRuntime = (handle: unknown) =>
-  (
-    handle as {
-      readonly [variableHandleStructureRuntime]?: OpcuaStructureRuntime;
-    }
-  )[variableHandleStructureRuntime];
 
 export const makeVariableDef = <
   const Id extends string,
@@ -259,40 +196,8 @@ export const readDataValue = (session: ClientSession, nodeId: NodeIdString) =>
         },
         0,
       ),
-    catch: (cause) =>
-      serviceError({ operation: "read", nodeId, cause }),
+    catch: (cause) => serviceError({ operation: "read", nodeId, cause }),
   });
-
-export const makeVariableHandle = <
-  const Id extends string,
-  A,
-  const Access extends VariableAccess,
->(
-  session: ClientSession,
-  def: VariableDef<Id, A, Access>,
-  metadata: VariableMetadata,
-  structureRuntime: OpcuaStructureRuntime,
-): VariableHandle<Id, A, Access> => {
-  const nodeId = coerceNodeId(def.nodeId);
-  const base = {
-    _tag: "VariableHandle" as const,
-    nodeId: def.nodeId,
-    def,
-    metadata,
-    unsafeRaw: { nodeId, builtInDataType: metadata.unsafeRaw.builtInDataType },
-    [variableHandleSession]: session,
-    [variableHandleStructureRuntime]: structureRuntime,
-  };
-  const handle: Record<PropertyKey, unknown> = { ...base };
-  if (hasAccessPart(def.access, "read")) {
-    handle.read = () => readVariable(session, def, structureRuntime);
-  }
-  if (hasAccessPart(def.access, "write")) {
-    handle.write = (value: A) =>
-      writeVariable(session, def, metadata, value, structureRuntime);
-  }
-  return handle as VariableHandle<Id, A, Access>;
-};
 
 export const readVariable = <const Id extends string, A>(
   session: ClientSession,
@@ -309,22 +214,6 @@ export const readVariable = <const Id extends string, A>(
     return yield* sampleFromDataValue(def, dataValue, structureRuntime);
   });
 
-export const readVariables = (
-  session: ClientSession,
-  handles: ReadonlyArray<ReadableVariableHandle>,
-  structureRuntime: OpcuaStructureRuntime,
-  options?: BatchOptions,
-) =>
-  readPreparedVariables(
-    session,
-    handles.map((handle) => ({
-      def: handle.def,
-      rawNodeId: handle.unsafeRaw.nodeId,
-    })),
-    structureRuntime,
-    options,
-  );
-
 export type PreparedReadVariable<
   Def extends ReadableVariableDef = ReadableVariableDef,
 > = {
@@ -339,9 +228,7 @@ export const readPreparedVariables = (
   options?: BatchOptions,
 ) =>
   Effect.gen(function* () {
-    if (
-      items.some((item) => Codec.requiresStructureRuntime(item.def.codec))
-    ) {
+    if (items.some((item) => Codec.requiresStructureRuntime(item.def.codec))) {
       yield* structureRuntime.ensureInitialized();
     }
     const dataValues = yield* runChunked(items, options, (chunk) =>
@@ -437,17 +324,15 @@ export const writeVariable = <const Id extends string, A>(
     return writeResult(def.nodeId, statusCode);
   });
 
-export const writeVariables = (
+export const writePreparedVariables = (
   session: ClientSession,
-  entries: ReadonlyArray<WriteEntry<WritableVariableHandle>>,
+  entries: ReadonlyArray<PreparedWriteVariable>,
   structureRuntime: OpcuaStructureRuntime,
   options?: BatchOptions,
 ) =>
   Effect.gen(function* () {
     if (
-      entries.some((entry) =>
-        Codec.requiresStructureRuntime(entry.handle.def.codec),
-      )
+      entries.some((entry) => Codec.requiresStructureRuntime(entry.def.codec))
     ) {
       yield* structureRuntime.ensureInitialized();
     }
@@ -476,7 +361,7 @@ export const writeVariables = (
       }),
     );
     return entries.map((entry, index) =>
-      writeResult(entry.handle.nodeId, statusCodes[index]!),
+      writeResult(entry.def.nodeId, statusCodes[index]!),
     );
   });
 
@@ -493,18 +378,18 @@ export const writeResult = <Id extends string>(
       };
 
 const encodeWriteValue = (
-  entry: WriteEntry<WritableVariableHandle>,
+  entry: PreparedWriteVariable,
   structureRuntime: OpcuaStructureRuntime,
 ): Effect.Effect<WriteValueOptions, OpcuaEncodeError | OpcuaServiceError> =>
   Effect.gen(function* () {
     const variant = yield* Codec.encode(
-      entry.handle.def.codec as OpcuaCodec<unknown>,
+      entry.def.codec as OpcuaCodec<unknown>,
       entry.value as unknown,
-      codecMetadata(entry.handle.metadata),
+      codecMetadata(entry.metadata),
       structureRuntime,
     );
     return {
-      nodeId: entry.handle.unsafeRaw.nodeId,
+      nodeId: entry.rawNodeId,
       attributeId: AttributeIds.Value,
       value: { value: variant },
     };
@@ -615,8 +500,3 @@ const sampleBase = <Id extends string>(
       }
     : undefined,
 });
-
-const hasAccessPart = (
-  access: VariableAccess,
-  capability: VariableCapability,
-) => access === "readWrite" || access === capability;

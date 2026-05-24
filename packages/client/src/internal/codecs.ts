@@ -13,10 +13,7 @@ import {
   type OpcuaDynamicValue,
   type OpcuaDynamicValueMetadata,
 } from "./normalize.js";
-import {
-  encodeError,
-  type OpcuaConfigurationError,
-} from "../OpcuaError.js";
+import { encodeError, type OpcuaConfigurationError } from "../OpcuaError.js";
 import {
   validateStructureMetadata,
   type OpcuaStructureRuntime,

@@ -22,29 +22,26 @@ const ScanSettingsQueue = Opcua.structureArray(
 );
 
 describe("values", () => {
-  it("reads dynamic and schema-backed variables through handles", async () => {
+  it("reads dynamic and schema-backed variables through definitions", async () => {
     const result = await runLive(
       Effect.gen(function* () {
         const session = yield* OpcuaSession.OpcuaSession;
-        const dynamic = yield* session.makeHandle(
-          Opcua.variable({ nodeId: "ns=1;s=MyMachine.Temperature" }),
-        );
-        const number = yield* session.makeHandle(
-          Opcua.variable({
-            nodeId: "ns=1;s=MyMachine.Temperature",
-            codec: Opcua.schema(Schema.Number),
-          }),
-        );
-        const mismatch = yield* session.makeHandle(
-          Opcua.variable({
-            nodeId: "ns=1;s=MyMachine.Temperature",
-            codec: Opcua.schema(Schema.String),
-          }),
-        );
         return {
-          dynamic: yield* dynamic.read(),
-          number: yield* number.read(),
-          mismatch: yield* mismatch.read(),
+          dynamic: yield* session.read(
+            Opcua.variable({ nodeId: "ns=1;s=MyMachine.Temperature" }),
+          ),
+          number: yield* session.read(
+            Opcua.variable({
+              nodeId: "ns=1;s=MyMachine.Temperature",
+              codec: Opcua.schema(Schema.Number),
+            }),
+          ),
+          mismatch: yield* session.read(
+            Opcua.variable({
+              nodeId: "ns=1;s=MyMachine.Temperature",
+              codec: Opcua.schema(Schema.String),
+            }),
+          ),
         };
       }),
     );
@@ -65,41 +62,31 @@ describe("values", () => {
     });
   });
 
-  it("creates access-shaped variable handles", async () => {
+  it("reads and writes access-shaped variable definitions", async () => {
     const result = await runLive(
       Effect.gen(function* () {
         const session = yield* OpcuaSession.OpcuaSession;
-        const readOnly = yield* session.makeHandle(
-          Opcua.variable({ nodeId: "ns=1;s=MyMachine.Temperature" }),
-        );
-        const writable = yield* session.makeHandle(
-          Opcua.variable({
-            nodeId: "ns=1;s=MyMachine.SpeedSetpoint",
-            codec: Opcua.schema(Schema.Number),
-            access: "readWrite",
-          }),
-        );
-        const writeOnly = yield* session.makeHandle(
-          Opcua.variable({
-            nodeId: "ns=1;s=MyMachine.SpeedSetpoint",
-            codec: Opcua.schema(Schema.Number),
-            access: "write",
-          }),
-        );
+        const readOnly = Opcua.variable({
+          nodeId: "ns=1;s=MyMachine.Temperature",
+        });
+        const writable = Opcua.variable({
+          nodeId: "ns=1;s=MyMachine.SpeedSetpoint",
+          codec: Opcua.schema(Schema.Number),
+          access: "readWrite",
+        });
+        const writeOnly = Opcua.variable({
+          nodeId: "ns=1;s=MyMachine.SpeedSetpoint",
+          codec: Opcua.schema(Schema.Number),
+          access: "write",
+        });
         return {
-          hasWrite: "write" in readOnly,
-          hasRead: "read" in writable,
-          writeOnlyHasRead: "read" in writeOnly,
-          sample: yield* readOnly.read(),
-          write: yield* writable.write(1234),
-          writeOnly: yield* writeOnly.write(1235),
+          sample: yield* session.read(readOnly),
+          write: yield* session.write(writable, 1234),
+          writeOnly: yield* session.write(writeOnly, 1235),
         };
       }),
     );
 
-    expect(result.hasWrite).toBe(false);
-    expect(result.hasRead).toBe(true);
-    expect(result.writeOnlyHasRead).toBe(false);
     expect(result.sample).toMatchObject({ _tag: "Value" });
     expect(result.write).toMatchObject({ _tag: "Written" });
     expect(result.writeOnly).toMatchObject({ _tag: "Written" });
@@ -109,13 +96,13 @@ describe("values", () => {
     const result = await runLive(
       Effect.gen(function* () {
         const session = yield* OpcuaSession.OpcuaSession;
-        const setpoint = yield* session.makeHandle(
+        return yield* session.write(
           Opcua.variable({
             nodeId: "ns=1;s=MyMachine.SpeedSetpoint",
             access: "readWrite",
           }),
+          1400,
         );
-        return yield* setpoint.write(1400);
       }),
     );
 
@@ -125,7 +112,7 @@ describe("values", () => {
     });
   });
 
-  it("keeps handle batch helpers thin and ordered", async () => {
+  it("keeps keyed batch helpers thin and ordered", async () => {
     const result = await runLive(
       Effect.gen(function* () {
         return yield* OpcuaSession.writeMany({
@@ -153,16 +140,17 @@ describe("values", () => {
     });
   });
 
-  it("enforces read/write access during handle creation", async () => {
+  it("enforces read/write access before direct writes", async () => {
     await expect(
       runLive(
         Effect.gen(function* () {
           const session = yield* OpcuaSession.OpcuaSession;
-          return yield* session.makeHandle(
+          return yield* session.write(
             Opcua.variable({
               nodeId: "ns=1;s=MyMachine.ReadOnlyNumber",
               access: "readWrite",
             }),
+            1,
           );
         }),
       ),
@@ -176,20 +164,18 @@ describe("values", () => {
     const result = await runLive(
       Effect.gen(function* () {
         const session = yield* OpcuaSession.OpcuaSession;
-        const handle = yield* session.makeHandle(
-          Opcua.variable({
-            nodeId: "ns=1;s=MyMachine.ScanSettings",
-            codec: ScanSettings,
-            access: "readWrite",
-            includeRaw: true,
-          }),
-        );
-        const written = yield* handle.write({
+        const def = Opcua.variable({
+          nodeId: "ns=1;s=MyMachine.ScanSettings",
+          codec: ScanSettings,
+          access: "readWrite",
+          includeRaw: true,
+        });
+        const written = yield* session.write(def, {
           duration: 1500,
           cycles: 7,
           dataAvailable: true,
         });
-        const sample = yield* handle.read();
+        const sample = yield* session.read(def);
         return { written, sample };
       }),
     );
@@ -212,15 +198,13 @@ describe("values", () => {
     const result = await runLive(
       Effect.gen(function* () {
         const session = yield* OpcuaSession.OpcuaSession;
-        const queue = yield* session.makeHandle(
-          Opcua.variable({
-            nodeId: "ns=1;s=MyMachine.ScanSettingsQueue",
-            codec: ScanSettingsQueue,
-            access: "readWrite",
-          }),
-        );
-        const written = yield* queue.write(values);
-        const sample = yield* queue.read();
+        const queue = Opcua.variable({
+          nodeId: "ns=1;s=MyMachine.ScanSettingsQueue",
+          codec: ScanSettingsQueue,
+          access: "readWrite",
+        });
+        const written = yield* session.write(queue, values);
+        const sample = yield* session.read(queue);
         return { written, sample };
       }),
     );
@@ -229,12 +213,12 @@ describe("values", () => {
     expect(result.sample).toMatchObject({ _tag: "Value", value: values });
   });
 
-  it("rejects structure metadata mismatches at handle creation", async () => {
+  it("rejects structure metadata mismatches before reads", async () => {
     await expect(
       runLive(
         Effect.gen(function* () {
           const session = yield* OpcuaSession.OpcuaSession;
-          return yield* session.makeHandle(
+          return yield* session.read(
             Opcua.variable({
               nodeId: "ns=1;s=MyMachine.Temperature",
               codec: ScanSettings,

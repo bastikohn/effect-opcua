@@ -62,23 +62,22 @@ import {
 import { makeStructureRuntime } from "./internal/structure-runtime.js";
 import type { NodeIdString } from "./internal/capabilities.js";
 import {
-  makeMethodHandle,
+  callResolvedMethod,
   type AnyMethodDef,
   type InputOfMethodDef,
   type MethodCallOptions,
   type MethodCallResult,
-  type MethodDef,
-  type MethodHandle,
   type OutputOfMethodDef,
+  resolveMethod,
 } from "./OpcuaMethod.js";
 import {
-  makeVariableHandle,
-  type AnyVariableDef,
+  readVariable,
+  writeVariable,
+  type NodeIdOfVariableDef,
   type ReadableVariableDef,
   type ReadResult,
   type VariableAccess,
   type VariableDef,
-  type VariableHandle,
   type ValueOfVariableDef,
   type WritableVariableDef,
   type WriteResult,
@@ -91,29 +90,6 @@ import {
 } from "./internal/session-operations.js";
 
 export type { OpcuaBrowseReference } from "./internal/browse.js";
-
-export type HandleDef = AnyVariableDef | AnyMethodDef;
-
-export type HandleOf<Def> =
-  Def extends VariableDef<infer Id, infer A, infer Access>
-    ? VariableHandle<Id, A, Access>
-    : Def extends MethodDef<
-          infer ObjectId,
-          infer MethodId,
-          infer Input,
-          infer Output
-        >
-      ? MethodHandle<
-          InputOfMethodDef<MethodDef<ObjectId, MethodId, Input, Output>>,
-          OutputOfMethodDef<MethodDef<ObjectId, MethodId, Input, Output>>,
-          ObjectId,
-          MethodId
-        >
-      : never;
-
-export type HandlesOf<Defs extends ReadonlyArray<unknown>> = {
-  readonly [Index in keyof Defs]: HandleOf<Defs[Index]>;
-};
 
 export type ReadManyOptions = {
   readonly validation?: "strict" | "none";
@@ -212,33 +188,33 @@ export type CallManyResult<Items> = {
     unknown,
     ...ReadonlyArray<unknown>,
   ]
-    ? MethodCallResult<
-        OutputOfMethodDef<Def>,
-        Def["objectId"],
-        Def["methodId"]
-      >
+    ? MethodCallResult<OutputOfMethodDef<Def>, Def["objectId"], Def["methodId"]>
     : never;
 };
 
-type HandleError = OpcuaError;
-
 export type OpcuaSession = {
-  readonly makeHandle: {
-    <const Id extends string, A, const Access extends VariableAccess>(
-      def: VariableDef<Id, A, Access>,
-    ): Effect.Effect<VariableHandle<Id, A, Access>, HandleError>;
-    <const Spec extends AnyMethodDef>(
-      def: Spec,
-    ): Effect.Effect<
-      MethodHandle<
-        InputOfMethodDef<Spec>,
-        OutputOfMethodDef<Spec>,
-        Spec["objectId"],
-        Spec["methodId"]
-      >,
-      HandleError
-    >;
-  };
+  readonly read: <const Def extends ReadableVariableDef>(
+    def: Def,
+  ) => Effect.Effect<
+    ReadResult<ValueOfVariableDef<Def>, NodeIdOfVariableDef<Def>>,
+    OpcuaError
+  >;
+  readonly write: <const Def extends WritableVariableDef>(
+    def: Def,
+    value: ValueOfVariableDef<Def>,
+  ) => Effect.Effect<WriteResult<NodeIdOfVariableDef<Def>>, OpcuaError>;
+  readonly call: <const Spec extends AnyMethodDef>(
+    def: Spec,
+    input: InputOfMethodDef<Spec>,
+    options?: MethodCallOptions,
+  ) => Effect.Effect<
+    MethodCallResult<
+      OutputOfMethodDef<Spec>,
+      Spec["objectId"],
+      Spec["methodId"]
+    >,
+    OpcuaError
+  >;
   readonly readMany: <const Items extends Record<string, ReadableVariableDef>>(
     items: Items,
     options?: ReadManyOptions,
@@ -271,11 +247,7 @@ export type OpcuaSession = {
     readonly maxNotificationsPerPublish?: number;
     readonly publishingEnabled?: boolean;
     readonly priority?: number;
-  }) => Effect.Effect<
-    OpcuaSubscription,
-    OpcuaError,
-    Scope.Scope
-  >;
+  }) => Effect.Effect<OpcuaSubscription, OpcuaError, Scope.Scope>;
   readonly events: Stream.Stream<OpcuaSessionEvent>;
   readonly unsafeRaw: ClientSession;
 };
@@ -310,39 +282,28 @@ export const OpcuaSession = Object.assign(
 
 export const layer = OpcuaSession.layer;
 
-export function makeHandle<
-  const Id extends string,
-  A,
-  const Access extends VariableAccess,
->(
-  def: VariableDef<Id, A, Access>,
-): Effect.Effect<VariableHandle<Id, A, Access>, OpcuaError, OpcuaSession>;
-export function makeHandle<const Spec extends AnyMethodDef>(
+export const read = <const Def extends ReadableVariableDef>(def: Def) =>
+  Effect.flatMap(OpcuaSession, (session) => session.read(def));
+
+export const write = <const Def extends WritableVariableDef>(
+  def: Def,
+  value: ValueOfVariableDef<Def>,
+) => Effect.flatMap(OpcuaSession, (session) => session.write(def, value));
+
+export const call = <const Spec extends AnyMethodDef>(
   def: Spec,
-): Effect.Effect<
-  MethodHandle<
-    InputOfMethodDef<Spec>,
-    OutputOfMethodDef<Spec>,
-    Spec["objectId"],
-    Spec["methodId"]
-  >,
-  OpcuaError,
-  OpcuaSession
->;
-export function makeHandle(
-  def: HandleDef,
-): Effect.Effect<HandleOf<HandleDef>, OpcuaError, OpcuaSession> {
-  return Effect.flatMap(OpcuaSession, (session) =>
-    session.makeHandle(def as never),
-  ) as Effect.Effect<HandleOf<HandleDef>, OpcuaError, OpcuaSession>;
-}
+  input: InputOfMethodDef<Spec>,
+  options?: MethodCallOptions,
+) =>
+  Effect.flatMap(OpcuaSession, (session) => session.call(def, input, options));
 
 export const readMany = <
   const Items extends Record<string, ReadableVariableDef>,
 >(
   items: Items,
   options?: ReadManyOptions,
-) => Effect.flatMap(OpcuaSession, (session) => session.readMany(items, options));
+) =>
+  Effect.flatMap(OpcuaSession, (session) => session.readMany(items, options));
 
 export const writeMany = <const Items extends AnyWriteManyRecord>(
   items: Items & WriteManyInput<Items>,
@@ -353,7 +314,8 @@ export const writeMany = <const Items extends AnyWriteManyRecord>(
 export const callMany = <const Items extends AnyCallManyRecord>(
   items: Items & CallManyInput<Items>,
   options?: CallManyOptions,
-) => Effect.flatMap(OpcuaSession, (session) => session.callMany(items, options));
+) =>
+  Effect.flatMap(OpcuaSession, (session) => session.callMany(items, options));
 
 export const makeSubscription = (
   options: Parameters<OpcuaSession["makeSubscription"]>[0],
@@ -395,25 +357,41 @@ export const makeSession = (
         }),
     );
 
-    const makeHandle: OpcuaSession["makeHandle"] = ((def: HandleDef) =>
+    const read: OpcuaSession["read"] = (def) =>
       Effect.gen(function* () {
-        if (def._tag === "VariableDef") {
-          const variableMetadata = yield* metadata.variable(def);
-          return makeVariableHandle(
-            unsafeRaw,
-            def,
-            variableMetadata,
-            structureRuntime,
-          );
-        }
-        const methodMetadata = yield* metadata.method(def);
-        return yield* makeMethodHandle(
+        yield* metadata.variable(def);
+        const result = yield* readVariable(unsafeRaw, def, structureRuntime);
+        return result as ReadResult<
+          ValueOfVariableDef<typeof def>,
+          NodeIdOfVariableDef<typeof def>
+        >;
+      });
+
+    const write: OpcuaSession["write"] = (def, value) =>
+      Effect.gen(function* () {
+        const variableMetadata = yield* metadata.variable(def);
+        const result = yield* writeVariable(
           unsafeRaw,
           def,
-          methodMetadata,
+          variableMetadata,
+          value,
           structureRuntime,
         );
-      })) as OpcuaSession["makeHandle"];
+        return result as WriteResult<NodeIdOfVariableDef<typeof def>>;
+      });
+
+    const call: OpcuaSession["call"] = (def, input, options) =>
+      Effect.gen(function* () {
+        const methodMetadata = yield* metadata.method(def);
+        const method = yield* resolveMethod(def, methodMetadata);
+        return yield* callResolvedMethod(
+          unsafeRaw,
+          method,
+          input,
+          structureRuntime,
+          options,
+        );
+      });
 
     const readMany: OpcuaSession["readMany"] = (items, options) =>
       readManyWithState(state, items, options);
@@ -462,7 +440,7 @@ export const makeSession = (
           rawSubscription,
           subscriptionEvents,
           structureRuntime,
-          (def) => makeHandle(def) as never,
+          (def) => metadata.variable(def),
         );
       });
 
@@ -598,7 +576,9 @@ export const makeSession = (
       });
 
     return {
-      makeHandle,
+      read,
+      write,
+      call,
       readMany,
       writeMany,
       callMany,

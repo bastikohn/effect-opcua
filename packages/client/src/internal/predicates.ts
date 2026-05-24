@@ -20,4 +20,3 @@ export const nonNegativeInteger = (value: unknown): value is number =>
   Number.isInteger(value) &&
   Number.isFinite(value) &&
   value >= 0;
-

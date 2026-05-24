@@ -150,9 +150,12 @@ export const validateMonitorOptions = <Items>(
       options.validation !== "strict"
     ) {
       return Effect.fail(
-        makeMonitorConfigurationErrorForOperation("monitor.options.validation", {
-          cause: 'validation must be "none", "access", or "strict"',
-        }),
+        makeMonitorConfigurationErrorForOperation(
+          "monitor.options.validation",
+          {
+            cause: 'validation must be "none", "access", or "strict"',
+          },
+        ),
       );
     }
     const bufferError = bufferPolicyError(options.clientBuffer);
@@ -171,26 +174,35 @@ export const validateMonitorOptions = <Items>(
     if (overrides !== undefined) {
       if (!isPlainRecord(overrides)) {
         return Effect.fail(
-          makeMonitorConfigurationErrorForOperation("monitor.options.overrides", {
-            cause: "overrides must be an object keyed by item name",
-          }),
+          makeMonitorConfigurationErrorForOperation(
+            "monitor.options.overrides",
+            {
+              cause: "overrides must be an object keyed by item name",
+            },
+          ),
         );
       }
       for (const [key, override] of Object.entries(overrides)) {
         if (!itemKeys.has(key as keyof Items & string)) {
           return Effect.fail(
-            makeMonitorConfigurationErrorForOperation("monitor.options.overrides", {
-              key,
-              cause: "override key does not exist in monitor items",
-            }),
+            makeMonitorConfigurationErrorForOperation(
+              "monitor.options.overrides",
+              {
+                key,
+                cause: "override key does not exist in monitor items",
+              },
+            ),
           );
         }
         if (!isPlainRecord(override)) {
           return Effect.fail(
-            makeMonitorConfigurationErrorForOperation("monitor.options.overrides", {
-              key,
-              cause: "override must be an object",
-            }),
+            makeMonitorConfigurationErrorForOperation(
+              "monitor.options.overrides",
+              {
+                key,
+                cause: "override must be an object",
+              },
+            ),
           );
         }
         const unknown = Object.keys(override).filter(
@@ -198,10 +210,13 @@ export const validateMonitorOptions = <Items>(
         );
         if (unknown.length > 0) {
           return Effect.fail(
-            makeMonitorConfigurationErrorForOperation("monitor.options.overrides", {
-              key,
-              cause: `unsupported override option: ${unknown.join(", ")}`,
-            }),
+            makeMonitorConfigurationErrorForOperation(
+              "monitor.options.overrides",
+              {
+                key,
+                cause: `unsupported override option: ${unknown.join(", ")}`,
+              },
+            ),
           );
         }
       }
@@ -323,11 +338,14 @@ const effectiveOptionsError = (
     );
   }
   if (!positiveInteger(options.queueSize)) {
-    return makeMonitorConfigurationErrorForOperation("monitor.options.queueSize", {
-      key,
-      nodeId,
-      cause: "queueSize must be a positive integer",
-    });
+    return makeMonitorConfigurationErrorForOperation(
+      "monitor.options.queueSize",
+      {
+        key,
+        nodeId,
+        cause: "queueSize must be a positive integer",
+      },
+    );
   }
   if (typeof options.discardOldest !== "boolean") {
     return makeMonitorConfigurationErrorForOperation(

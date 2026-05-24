@@ -4,34 +4,32 @@ import { expect, it } from "vitest";
 import * as Opcua from "../src/Opcua.js";
 import * as OpcuaClient from "../src/OpcuaClient.js";
 import * as OpcuaSession from "../src/OpcuaSession.js";
-import type { MethodHandle } from "../src/OpcuaMethod.js";
-import type {
-  VariableHandle,
-  WritableVariableHandle,
-} from "../src/OpcuaVariable.js";
 
-const expectVariableHandleTypes = (
-  session: OpcuaSession.OpcuaSession,
-  writable: WritableVariableHandle<number>,
-  readOnly: VariableHandle<string, number, "read">,
-) => {
-  writable.write(123);
+const expectVariableDefinitionTypes = (session: OpcuaSession.OpcuaSession) => {
+  const writable = Opcua.variable({
+    nodeId: "ns=1;s=Number",
+    codec: Opcua.schema(Schema.Number),
+    access: "readWrite",
+  });
+  const readOnly = Opcua.variable({
+    nodeId: "ns=1;s=ReadOnly",
+    codec: Opcua.schema(Schema.Number),
+  });
 
-  // @ts-expect-error value must match the handle codec type
-  writable.write("wrong");
+  session.read(readOnly);
+  session.write(writable, 123);
 
-  // @ts-expect-error read-only handles do not expose write
-  readOnly.write(123);
+  // @ts-expect-error value must match the definition codec type
+  session.write(writable, "wrong");
 
-  session.makeHandle(
-    Opcua.variable({
-      nodeId: "ns=1;s=Number",
-      codec: Opcua.schema(Schema.Number),
-    }),
-  );
+  // @ts-expect-error read-only definitions are not writable
+  session.write(readOnly, 123);
+
+  OpcuaSession.read(readOnly);
+  OpcuaSession.write(writable, 123);
 };
 
-void expectVariableHandleTypes;
+void expectVariableDefinitionTypes;
 
 const expectKeyedBatchTypes = () => {
   const Temperature = Opcua.variable({
@@ -61,8 +59,10 @@ const expectKeyedBatchTypes = () => {
       speedSetpoint: [SpeedSetpoint, 123],
     } as const);
 
-    // @ts-expect-error write values must match the definition codec type
-    yield* OpcuaSession.writeMany({ speedSetpoint: [SpeedSetpoint, "wrong"] } as const);
+    yield* OpcuaSession.writeMany({
+      // @ts-expect-error write values must match the definition codec type
+      speedSetpoint: [SpeedSetpoint, "wrong"],
+    } as const);
 
     yield* OpcuaSession.writeMany({
       // @ts-expect-error read-only definitions are not writable
@@ -86,20 +86,15 @@ const expectMethodTypes = (session: OpcuaSession.OpcuaSession) => {
     },
   });
 
-  session.makeHandle(start);
+  session.call(start, { StartSpeed: 1, Force: true });
+
+  // @ts-expect-error input values must match the method definition
+  session.call(start, { StartSpeed: "wrong", Force: true });
 };
 
 void expectMethodTypes;
 
-const expectCallManyTypes = (
-  handle: MethodHandle<
-    { readonly Value: number },
-    { readonly Accepted: boolean },
-    "ns=1;s=Object",
-    "ns=1;s=Method"
-  >,
-) => {
-  void handle;
+const expectCallManyTypes = () => {
   const Reset = Opcua.method({
     objectId: "ns=1;s=Object",
     methodId: "ns=1;s=Reset",
@@ -133,10 +128,7 @@ const expectCallManyTypes = (
 
 void expectCallManyTypes;
 
-const expectMonitorTypes = (
-  session: OpcuaSession.OpcuaSession,
-  readOnly: VariableHandle<string, number, "read">,
-) => {
+const expectMonitorTypes = (session: OpcuaSession.OpcuaSession) => {
   const Temperature = Opcua.variable({
     nodeId: "ns=1;s=Temperature",
     codec: Opcua.schema(Schema.Number),
@@ -186,9 +178,6 @@ const expectMonitorTypes = (
         }),
       ),
     );
-
-    // @ts-expect-error handles are not accepted as monitor inputs
-    yield* subscription.monitor({ temperature: readOnly }, options);
 
     yield* subscription.monitor({ temperature: Temperature } as const, {
       ...options,

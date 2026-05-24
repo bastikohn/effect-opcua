@@ -46,5 +46,4 @@ const normalizeBatchOptions = (options: BatchOptions | undefined) => ({
 const positiveIntegerOrDefault = (
   value: number | undefined,
   fallback: number,
-) =>
-  positiveInteger(value) ? Math.floor(value) : fallback;
+) => (positiveInteger(value) ? Math.floor(value) : fallback);

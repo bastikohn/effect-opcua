@@ -6,7 +6,7 @@ import * as OpcuaError from "../src/OpcuaError.js";
 import { StatusCodes } from "../src/node-opcua.js";
 
 describe("exports", () => {
-  it("keeps the main API centered on definitions and handles", () => {
+  it("keeps the main API centered on definitions and direct operations", () => {
     expect(typeof Opcua.variable).toBe("function");
     expect(typeof Opcua.method).toBe("function");
     expect(typeof Opcua.arg).toBe("function");
