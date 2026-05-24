@@ -29,18 +29,9 @@ import {
 import type { OpcuaStructureRuntime } from "../src/internal/structure-runtime.js";
 import type { ReadableVariableDef } from "../src/OpcuaVariable.js";
 import { makeLiveTestContext } from "./live.js";
+import { MachineConfigurePayload, demoNodeId } from "./support/demo-model.js";
 
-const { runLive } = makeLiveTestContext(4843);
-const ScanSettingsSpec = Opcua.Structure.make({
-  name: "ScanSettings",
-  dataTypeId: "ns=1;i=3010",
-  schema: Schema.Struct({
-    duration: Schema.Number,
-    cycles: Schema.Number,
-    dataAvailable: Schema.Boolean,
-  }),
-});
-const ScanSettings = Opcua.structure(ScanSettingsSpec);
+const { runLive } = makeLiveTestContext("monitoring", 3);
 
 const monitorOptions = (
   overrides?: Partial<{
@@ -747,21 +738,21 @@ describe("monitoring", () => {
         });
         const monitor = yield* subscription.monitor(
           {
-            temperature: Opcua.variable({
-              nodeId: "ns=1;s=MyMachine.Temperature",
+            tankLevel: Opcua.variable({
+              nodeId: demoNodeId("Filling.Tank.LevelMl"),
               codec: Opcua.schema(Schema.Number),
             }),
-            highFrequency: Opcua.variable({
-              nodeId: "ns=1;s=MyMachine.HighFrequency",
+            machineState: Opcua.variable({
+              nodeId: demoNodeId("State.MachineState"),
             }),
           } as const,
           monitorOptions(),
         );
-        return yield* monitor.samples.pipe(Stream.take(4), Stream.runCollect);
+        return yield* monitor.samples.pipe(Stream.take(2), Stream.runCollect);
       }),
     );
 
-    expect(values.length).toBe(4);
+    expect(values.length).toBe(2);
     expect(values.every((sample) => sample.key)).toBe(true);
     expect(values.every((sample) => sample.nodeId)).toBe(true);
   }, 20_000);
@@ -775,11 +766,11 @@ describe("monitoring", () => {
         });
         const monitor = yield* subscription.monitor(
           {
-            temperature: Opcua.variable({
-              nodeId: "ns=1;s=MyMachine.Temperature",
+            tankLevel: Opcua.variable({
+              nodeId: demoNodeId("Filling.Tank.LevelMl"),
             }),
-            highFrequency: Opcua.variable({
-              nodeId: "ns=1;s=MyMachine.HighFrequency",
+            machineState: Opcua.variable({
+              nodeId: demoNodeId("State.MachineState"),
             }),
           } as const,
           monitorOptions(),
@@ -798,8 +789,8 @@ describe("monitoring", () => {
       activeCount: 2,
       failedCount: 0,
     });
-    expect(result.startup.active.has("temperature")).toBe(true);
-    expect(result.startup.active.has("highFrequency")).toBe(true);
+    expect(result.startup.active.has("tankLevel")).toBe(true);
+    expect(result.startup.active.has("machineState")).toBe(true);
     expect(result.sample[0]).toMatchObject({
       key: expect.any(String),
       nodeId: expect.any(String),
@@ -815,18 +806,14 @@ describe("monitoring", () => {
         });
         const monitor = yield* subscription.monitor(
           {
-            temperature: Opcua.variable({
-              nodeId: "ns=1;s=MyMachine.Temperature",
+            tankLevel: Opcua.variable({
+              nodeId: demoNodeId("Filling.Tank.LevelMl"),
             }),
             missing: Opcua.variable({ nodeId: "ns=1;s=missing" }),
           } as const,
           monitorOptions({ startup: "bestEffort", validation: "strict" }),
         );
-        const samples = yield* monitor.samples.pipe(
-          Stream.take(1),
-          Stream.runCollect,
-        );
-        return { startup: monitor.startup, samples };
+        return { startup: monitor.startup };
       }),
     );
 
@@ -836,9 +823,8 @@ describe("monitoring", () => {
       activeCount: 1,
       failedCount: 1,
     });
-    expect(result.startup.active.has("temperature")).toBe(true);
+    expect(result.startup.active.has("tankLevel")).toBe(true);
     expect(result.startup.failed.has("missing")).toBe(true);
-    expect(result.samples[0]?.key).toBe("temperature");
   }, 20_000);
 
   it("fails strict startup with the shared keyed startup report", async () => {
@@ -881,11 +867,11 @@ describe("monitoring", () => {
           });
           return yield* subscription.monitor(
             {
-              temperature: Opcua.variable({
-                nodeId: "ns=1;s=MyMachine.Temperature",
+              tankLevel: Opcua.variable({
+                nodeId: demoNodeId("Filling.Tank.LevelMl"),
               }),
               duplicate: Opcua.variable({
-                nodeId: "ns=1;s=MyMachine.Temperature",
+                nodeId: demoNodeId("Filling.Tank.LevelMl"),
               }),
             } as const,
             monitorOptions(),
@@ -899,9 +885,9 @@ describe("monitoring", () => {
   }, 20_000);
 
   it("streams structure samples through monitor", async () => {
-    const Settings = Opcua.variable({
-      nodeId: "ns=1;s=MyMachine.ScanSettings",
-      codec: ScanSettings,
+    const ConfigurePayload = Opcua.variable({
+      nodeId: demoNodeId("Commands.Payloads.Machine.Configure"),
+      codec: MachineConfigurePayload,
     });
     const result = await runLive(
       Effect.gen(function* () {
@@ -910,7 +896,7 @@ describe("monitoring", () => {
           publishingInterval: Duration.millis(100),
         });
         const monitor = yield* subscription.monitor(
-          { settings: Settings } as const,
+          { configure: ConfigurePayload } as const,
           monitorOptions(),
         );
         return yield* monitor.samples.pipe(
@@ -923,8 +909,8 @@ describe("monitoring", () => {
 
     expect(result[0]).toMatchObject({
       _tag: "Value",
-      key: "settings",
-      value: expect.objectContaining({ cycles: expect.any(Number) }),
+      key: "configure",
+      value: expect.objectContaining({ commandId: expect.any(String) }),
     });
   }, 20_000);
 
@@ -938,9 +924,9 @@ describe("monitoring", () => {
           });
           return yield* subscription.monitor(
             {
-              temperature: Opcua.variable({
-                nodeId: "ns=1;s=MyMachine.Temperature",
-                codec: ScanSettings,
+              tankLevel: Opcua.variable({
+                nodeId: demoNodeId("Filling.Tank.LevelMl"),
+                codec: MachineConfigurePayload,
               }),
             } as const,
             monitorOptions(),

@@ -10,8 +10,9 @@ import {
   makeResultMask,
 } from "../src/node-opcua.js";
 import { makeLiveTestContext } from "./live.js";
+import { demoNodeId } from "./support/demo-model.js";
 
-const { runLive } = makeLiveTestContext(4841);
+const { runLive } = makeLiveTestContext("browse", 1);
 
 const isConfigurationReason = (error: unknown) =>
   isOpcuaError(error) && error.reason._tag === "Configuration";
@@ -34,21 +35,21 @@ describe("browse", () => {
     const references = result._tag === "Browsed" ? result.references : [];
     const machine = references.find(
       (reference: OpcuaBrowseReference) =>
-        reference.browseName?.name === "MyMachine",
+        reference.browseName?.name === "DemoFillingCell",
     );
     expect(machine).toMatchObject({
       nodeId: {
-        text: expect.stringContaining("MyMachine"),
+        text: expect.stringContaining("DemoFillingCell"),
         namespace: expect.any(Number),
         isLocal: true,
         isRemote: false,
       },
       nodeClass: "Object",
       browseName: {
-        name: "MyMachine",
+        name: "DemoFillingCell",
       },
       displayName: {
-        text: "MyMachine",
+        text: "DemoFillingCell",
       },
     });
     expect(machine?.unsafeRaw).toBeUndefined();
@@ -59,7 +60,7 @@ describe("browse", () => {
       Effect.gen(function* () {
         const session = yield* OpcuaSession.OpcuaSession;
         return yield* session.browse({
-          nodeId: "ns=1;s=MyMachine",
+          nodeId: "ns=1;s=DemoFillingCell",
           resultMask: makeResultMask("BrowseName"),
           includeRaw: true,
         });
@@ -74,12 +75,12 @@ describe("browse", () => {
     expect(result.references[0]?.browseName).toBeDefined();
   });
 
-  it("discovers method nodes through browseChildren", async () => {
+  it("discovers variable nodes through browseChildren", async () => {
     const result = await runLive(
       Effect.gen(function* () {
         const session = yield* OpcuaSession.OpcuaSession;
-        return yield* session.browseChildren("ns=1;s=MyMachine", {
-          nodeClassMask: makeNodeClassMask("Method"),
+        return yield* session.browseChildren(demoNodeId("State"), {
+          nodeClassMask: makeNodeClassMask("Variable"),
         });
       }),
     );
@@ -90,15 +91,17 @@ describe("browse", () => {
       result.references.map((reference) => reference.browseName?.name),
     ).toEqual(
       expect.arrayContaining([
-        "Start",
-        "Reset",
-        "Echo",
-        "RejectIfNegative",
-        "DisabledCommand",
+        "MachineState",
+        "OperatingMode",
+        "CyclePhase",
+        "Ready",
+        "ConfigurationValid",
       ]),
     );
     expect(
-      result.references.every((reference) => reference.nodeClass === "Method"),
+      result.references.every(
+        (reference) => reference.nodeClass === "Variable",
+      ),
     ).toBe(true);
   });
 

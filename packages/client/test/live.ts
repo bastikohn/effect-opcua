@@ -1,3 +1,5 @@
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterAll, beforeAll, vi } from "vitest";
 import { Effect, Layer, Scope } from "effect";
 
@@ -10,11 +12,17 @@ import * as OpcuaSession from "../src/OpcuaSession.js";
 
 vi.setConfig({ testTimeout: 30_000 });
 
-export const makeLiveTestContext = (port: number) => {
+export const makeLiveTestContext = (suite: string, offset: number) => {
   let demo: DemoOpcuaServer;
 
   beforeAll(async () => {
-    demo = await startDemoOpcuaServer({ port });
+    const poolId = Number(process.env.VITEST_POOL_ID ?? 0);
+    const port = 50_000 + offset * 100 + poolId;
+    const certificateRootFolder = join(
+      tmpdir(),
+      `effect-opcua-client-${suite}-${process.pid}-${port}`,
+    );
+    demo = await startDemoOpcuaServer({ port, certificateRootFolder });
   }, 30_000);
 
   afterAll(async () => {

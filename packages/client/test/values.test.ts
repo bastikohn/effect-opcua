@@ -1,12 +1,26 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
 
+import { GlobalCommandKind } from "../../../examples/demo-server/src/index.js";
 import * as Opcua from "../src/Opcua.js";
 import * as OpcuaSession from "../src/OpcuaSession.js";
-import { StatusCodes } from "../src/node-opcua.js";
+import { DataType, StatusCodes, VariantArrayType } from "../src/node-opcua.js";
 import { makeLiveTestContext } from "./live.js";
+import {
+  GlobalCommandSubmitRequest,
+  MachineConfigurePayload,
+  MoveAxisToPositionPayload,
+  defaultRunConfiguration,
+  demoNodeId,
+} from "./support/demo-model.js";
+import {
+  fakeExtensionObject,
+  makeFakeSession,
+  variantDataValue,
+} from "./support/fake-session.js";
 
-const { runLive } = makeLiveTestContext(4842);
+const { runLive } = makeLiveTestContext("values", 2);
+
 const ScanSettingsSpec = Opcua.Structure.make({
   name: "ScanSettings",
   dataTypeId: "ns=1;i=3010",
@@ -16,29 +30,27 @@ const ScanSettingsSpec = Opcua.Structure.make({
     dataAvailable: Schema.Boolean,
   }),
 });
-const ScanSettings = Opcua.structure(ScanSettingsSpec);
 const ScanSettingsQueue = Opcua.structureArray(
   Opcua.Structure.array(ScanSettingsSpec),
 );
 
 describe("values", () => {
   it("reads dynamic and schema-backed variables through definitions", async () => {
+    const tankLevel = demoNodeId("Filling.Tank.LevelMl");
     const result = await runLive(
       Effect.gen(function* () {
         const session = yield* OpcuaSession.OpcuaSession;
         return {
-          dynamic: yield* session.read(
-            Opcua.variable({ nodeId: "ns=1;s=MyMachine.Temperature" }),
-          ),
+          dynamic: yield* session.read(Opcua.variable({ nodeId: tankLevel })),
           number: yield* session.read(
             Opcua.variable({
-              nodeId: "ns=1;s=MyMachine.Temperature",
+              nodeId: tankLevel,
               codec: Opcua.schema(Schema.Number),
             }),
           ),
           mismatch: yield* session.read(
             Opcua.variable({
-              nodeId: "ns=1;s=MyMachine.Temperature",
+              nodeId: tankLevel,
               codec: Opcua.schema(Schema.String),
             }),
           ),
@@ -48,7 +60,7 @@ describe("values", () => {
 
     expect(result.dynamic).toMatchObject({
       _tag: "Value",
-      nodeId: "ns=1;s=MyMachine.Temperature",
+      nodeId: tankLevel,
       status: { isGood: true },
       variant: { dataType: "Double" },
     });
@@ -62,34 +74,62 @@ describe("values", () => {
     });
   });
 
-  it("reads and writes access-shaped variable definitions", async () => {
+  it("reads and writes demo command structures", async () => {
+    const commandId = "client-values-configure";
+    const configure = Opcua.variable({
+      nodeId: demoNodeId("Commands.Payloads.Machine.Configure"),
+      codec: MachineConfigurePayload,
+      access: "readWrite",
+      includeRaw: true,
+    });
+    const submit = Opcua.variable({
+      nodeId: demoNodeId("Commands.SubmitRequest"),
+      codec: GlobalCommandSubmitRequest,
+      access: "readWrite",
+    });
+
     const result = await runLive(
       Effect.gen(function* () {
         const session = yield* OpcuaSession.OpcuaSession;
-        const readOnly = Opcua.variable({
-          nodeId: "ns=1;s=MyMachine.Temperature",
+        const writtenPayload = yield* session.write(configure, {
+          commandId,
+          configuration: defaultRunConfiguration,
         });
-        const writable = Opcua.variable({
-          nodeId: "ns=1;s=MyMachine.SpeedSetpoint",
-          codec: Opcua.schema(Schema.Number),
-          access: "readWrite",
+        const sample = yield* session.read(configure);
+        const submitted = yield* session.write(submit, {
+          commandId,
+          commandKind: GlobalCommandKind.Machine_Configure,
+          clientId: "client-values",
         });
-        const writeOnly = Opcua.variable({
-          nodeId: "ns=1;s=MyMachine.SpeedSetpoint",
-          codec: Opcua.schema(Schema.Number),
-          access: "write",
-        });
-        return {
-          sample: yield* session.read(readOnly),
-          write: yield* session.write(writable, 1234),
-          writeOnly: yield* session.write(writeOnly, 1235),
-        };
+        const productName = yield* session.read(
+          Opcua.variable({
+            nodeId: demoNodeId("State.Configuration.ProductName"),
+            codec: Opcua.schema(Schema.String),
+          }),
+        );
+        return { writtenPayload, sample, submitted, productName };
       }),
     );
 
-    expect(result.sample).toMatchObject({ _tag: "Value" });
-    expect(result.write).toMatchObject({ _tag: "Written" });
-    expect(result.writeOnly).toMatchObject({ _tag: "Written" });
+    expect(result.writtenPayload).toMatchObject({ _tag: "Written" });
+    expect(result.sample).toMatchObject({
+      _tag: "Value",
+      value: {
+        commandId,
+        configuration: {
+          productName: defaultRunConfiguration.productName,
+          batchSize: defaultRunConfiguration.batchSize,
+        },
+      },
+    });
+    expect(
+      result.sample._tag === "Value" && result.sample.unsafeRaw?.variant,
+    ).toBeDefined();
+    expect(result.submitted).toMatchObject({ _tag: "Written" });
+    expect(result.productName).toMatchObject({
+      _tag: "Value",
+      value: defaultRunConfiguration.productName,
+    });
   });
 
   it("returns write statuses as data", async () => {
@@ -98,10 +138,11 @@ describe("values", () => {
         const session = yield* OpcuaSession.OpcuaSession;
         return yield* session.write(
           Opcua.variable({
-            nodeId: "ns=1;s=MyMachine.SpeedSetpoint",
+            nodeId: demoNodeId("Commands.SubmitRequest"),
+            codec: GlobalCommandSubmitRequest,
             access: "readWrite",
           }),
-          1400,
+          { commandId: "", commandKind: GlobalCommandKind.None, clientId: "" },
         );
       }),
     );
@@ -113,30 +154,43 @@ describe("values", () => {
   });
 
   it("keeps keyed batch helpers thin and ordered", async () => {
+    const configureNodeId = demoNodeId("Commands.Payloads.Machine.Configure");
+    const moveNodeId = demoNodeId(
+      "Commands.Payloads.Maintenance.MoveXAxisToPosition",
+    );
     const result = await runLive(
       Effect.gen(function* () {
         return yield* OpcuaSession.writeMany({
-          speed: [
+          configure: [
             Opcua.variable({
-              nodeId: "ns=1;s=MyMachine.SpeedSetpoint",
+              nodeId: configureNodeId,
+              codec: MachineConfigurePayload,
               access: "readWrite",
             }),
-            1001,
+            {
+              commandId: "batch-configure",
+              configuration: defaultRunConfiguration,
+            },
           ],
-          enabled: [
+          move: [
             Opcua.variable({
-              nodeId: "ns=1;s=MyMachine.Axis1.Enabled",
+              nodeId: moveNodeId,
+              codec: MoveAxisToPositionPayload,
               access: "readWrite",
             }),
-            false,
+            {
+              commandId: "batch-move",
+              targetPositionMm: 100,
+              velocityMmPerSecond: 25,
+            },
           ],
         } as const);
       }),
     );
 
     expect(result).toMatchObject({
-      speed: { _tag: "Written", nodeId: "ns=1;s=MyMachine.SpeedSetpoint" },
-      enabled: { _tag: "Written", nodeId: "ns=1;s=MyMachine.Axis1.Enabled" },
+      configure: { _tag: "Written", nodeId: configureNodeId },
+      move: { _tag: "Written", nodeId: moveNodeId },
     });
   });
 
@@ -147,7 +201,7 @@ describe("values", () => {
           const session = yield* OpcuaSession.OpcuaSession;
           return yield* session.write(
             Opcua.variable({
-              nodeId: "ns=1;s=MyMachine.ReadOnlyNumber",
+              nodeId: demoNodeId("Filling.Tank.LevelMl"),
               access: "readWrite",
             }),
             1,
@@ -160,53 +214,52 @@ describe("values", () => {
     });
   });
 
-  it("reads and writes scalar structure values", async () => {
-    const result = await runLive(
-      Effect.gen(function* () {
-        const session = yield* OpcuaSession.OpcuaSession;
-        const def = Opcua.variable({
-          nodeId: "ns=1;s=MyMachine.ScanSettings",
-          codec: ScanSettings,
-          access: "readWrite",
-          includeRaw: true,
-        });
-        const written = yield* session.write(def, {
-          duration: 1500,
-          cycles: 7,
-          dataAvailable: true,
-        });
-        const sample = yield* session.read(def);
-        return { written, sample };
-      }),
-    );
-
-    expect(result.written).toMatchObject({ _tag: "Written" });
-    expect(result.sample).toMatchObject({
-      _tag: "Value",
-      value: { duration: 1500, cycles: 7, dataAvailable: true },
-    });
-    expect(
-      result.sample._tag === "Value" && result.sample.unsafeRaw?.variant,
-    ).toBeDefined();
-  });
-
-  it("reads and writes structure arrays", async () => {
+  it("reads and writes structure arrays with a test-local session", async () => {
+    const queueNodeId = "ns=1;s=MyMachine.ScanSettingsQueue";
     const values = [
       { duration: 10, cycles: 1, dataAvailable: true },
       { duration: 20, cycles: 2, dataAvailable: false },
     ];
-    const result = await runLive(
-      Effect.gen(function* () {
-        const session = yield* OpcuaSession.OpcuaSession;
-        const queue = Opcua.variable({
-          nodeId: "ns=1;s=MyMachine.ScanSettingsQueue",
-          codec: ScanSettingsQueue,
-          access: "readWrite",
-        });
-        const written = yield* session.write(queue, values);
-        const sample = yield* session.read(queue);
-        return { written, sample };
-      }),
+    let current: ReadonlyArray<unknown> = values.map((value) =>
+      fakeExtensionObject("ns=1;i=3010", value),
+    );
+
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* makeFakeSession({
+            variableMetadata: {
+              [queueNodeId]: {
+                dataType: "ns=1;i=3010",
+                valueRank: 1,
+                accessLevel: 3,
+                userAccessLevel: 3,
+              },
+            },
+            dataTypeSuperTypes: { "ns=1;i=3010": "i=22" },
+            readValues: () => [
+              variantDataValue(
+                DataType.ExtensionObject,
+                [...current],
+                StatusCodes.Good,
+                VariantArrayType.Array,
+              ),
+            ],
+            onWrite: (nodes) => {
+              const value = nodes[0]?.value?.value?.value;
+              current = Array.isArray(value) ? value : [];
+            },
+          });
+          const queue = Opcua.variable({
+            nodeId: queueNodeId,
+            codec: ScanSettingsQueue,
+            access: "readWrite",
+          });
+          const written = yield* fake.session.write(queue, values);
+          const sample = yield* fake.session.read(queue);
+          return { written, sample };
+        }),
+      ),
     );
 
     expect(result.written).toMatchObject({ _tag: "Written" });
@@ -220,8 +273,8 @@ describe("values", () => {
           const session = yield* OpcuaSession.OpcuaSession;
           return yield* session.read(
             Opcua.variable({
-              nodeId: "ns=1;s=MyMachine.Temperature",
-              codec: ScanSettings,
+              nodeId: demoNodeId("Filling.Tank.LevelMl"),
+              codec: MachineConfigurePayload,
             }),
           );
         }),
