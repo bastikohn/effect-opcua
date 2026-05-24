@@ -11,16 +11,27 @@ Local-first workspace for an Effect v4 OPC-UA client wrapper around node-opcua.
 - `@effect-opcua/demo-server`
 - `@effect-opcua/tui`
 
-## Definitions And Handles
+## Definitions And Direct Operations
 
-Declare OPC-UA nodes as pure definitions, then ask the session for handles.
+Declare OPC-UA nodes as pure definitions. The session API takes those
+definitions directly.
 
 ```ts
-import * as Opcua from "@effect-opcua/client/Opcua";
-import * as OpcuaSession from "@effect-opcua/client/OpcuaSession";
+import { Effect, Schema } from "effect";
+import { Opcua, OpcuaSession } from "@effect-opcua/client";
 
 const Temperature = Opcua.variable({
   nodeId: "ns=2;s=Machine.Temperature",
+  codec: Opcua.schema(Schema.Number),
+});
+
+const Pressure = Opcua.variable({
+  nodeId: "ns=2;s=Machine.Pressure",
+  codec: Opcua.schema(Schema.Number),
+});
+
+const Speed = Opcua.variable({
+  nodeId: "ns=2;s=Machine.Speed",
   codec: Opcua.schema(Schema.Number),
 });
 
@@ -47,36 +58,79 @@ const Reset = Opcua.method({
   },
 });
 
-const temperature = yield * session.makeHandle(Temperature);
-const setpoint = yield * session.makeHandle(Setpoint);
-const reset = yield * session.makeHandle(Reset);
+const program = Effect.gen(function* () {
+  const session = yield* OpcuaSession.OpcuaSession;
 
-const current = yield * temperature.read();
-const written = yield * setpoint.write(42);
-const resetResult = yield * reset.call({ mode: "soft" });
+  const current = yield* session.read(Temperature);
+  const written = yield* session.write(Setpoint, 42);
+  const resetResult = yield* session.call(Reset, { mode: "soft" });
+
+  return { current, written, resetResult };
+});
 ```
 
-Keyed session APIs are the primary HMI surface. They accept stable definition
-dictionaries, issue OPC-UA batch service calls, and return results by key:
+Provide `OpcuaSession.layer()` with an `OpcuaClient.layer(...)` to connect the
+program to an endpoint:
 
 ```ts
-const snapshot = yield * OpcuaSession.readMany({
-  temperature: Temperature,
-  pressure: Pressure,
-} as const);
+import { Effect, Layer } from "effect";
+import { OpcuaClient, OpcuaSession } from "@effect-opcua/client";
 
-const written = yield * OpcuaSession.writeMany({
-  setpoint: [Setpoint, 42],
-} as const);
+const MainLayer = OpcuaSession.layer().pipe(
+  Layer.provideMerge(
+    OpcuaClient.layer({
+      endpointUrl: "opc.tcp://localhost:4840",
+      clientOptions: { endpointMustExist: false },
+    }),
+  ),
+);
+
+await Effect.runPromise(Effect.scoped(program).pipe(Effect.provide(MainLayer)));
 ```
 
-Keep dictionary objects stable in polling loops so local plan caches can be
-reused, but correctness does not depend on object identity. Handles remain
-prepared, session-bound snapshots for single-item operations:
+The module-level helpers are the same operations lifted into the Effect
+environment:
 
 ```ts
-const temperature = yield * session.makeHandle(Temperature);
-const current = yield * temperature.read();
+const helperProgram = Effect.gen(function* () {
+  const current = yield* OpcuaSession.read(Temperature);
+  const written = yield* OpcuaSession.write(Setpoint, 42);
+  const resetResult = yield* OpcuaSession.call(Reset, { mode: "soft" });
+
+  return { current, written, resetResult };
+});
+```
+
+Keyed batch APIs are the primary HMI surface. They are available on the session
+and as module-level helpers, accept definition dictionaries, issue OPC-UA batch
+service calls, and return results by key:
+
+```ts
+const batchProgram = Effect.gen(function* () {
+  const snapshot = yield* OpcuaSession.readMany(
+    {
+      temperature: Temperature,
+      pressure: Pressure,
+    } as const,
+    {
+      validation: "strict",
+      service: {
+        maxNodesPerRead: 250,
+        maxConcurrentRequests: 1,
+      },
+    },
+  );
+
+  const written = yield* OpcuaSession.writeMany({
+    setpoint: [Setpoint, 42],
+  } as const);
+
+  const called = yield* OpcuaSession.callMany({
+    reset: [Reset, { mode: "soft" }],
+  } as const);
+
+  return { snapshot, written, called };
+});
 ```
 
 ## Structures
@@ -102,22 +156,23 @@ const ScanSettingsQueue = Opcua.structureArray(
 ```
 
 ```ts
-const settings =
-  yield *
-  session.makeHandle(
-    Opcua.variable({
-      nodeId: "ns=1;s=MyMachine.ScanSettings",
-      codec: ScanSettings,
-      access: "readWrite",
-    }),
-  );
+const Settings = Opcua.variable({
+  nodeId: "ns=1;s=MyMachine.ScanSettings",
+  codec: ScanSettings,
+  access: "readWrite",
+});
 
-yield *
-  settings.write({
+const structureProgram = Effect.gen(function* () {
+  yield* OpcuaSession.write(Settings, {
     duration: 1000,
     cycles: 5,
     dataAvailable: true,
   });
+
+  const sample = yield* OpcuaSession.read(Settings);
+
+  return sample;
+});
 ```
 
 ## Monitoring
@@ -127,15 +182,17 @@ Inputs are named variable-definition dictionaries, startup behavior is explicit,
 and samples are keyed by item name.
 
 ```ts
-const subscription =
-  yield *
-  session.makeSubscription({
+import { Duration, Effect, Stream } from "effect";
+import { Opcua, OpcuaSession } from "@effect-opcua/client";
+
+const monitorProgram = Effect.gen(function* () {
+  const session = yield* OpcuaSession.OpcuaSession;
+
+  const subscription = yield* session.makeSubscription({
     publishingInterval: Duration.millis(100),
   });
 
-const monitor =
-  yield *
-  subscription.monitor(
+  const monitor = yield* subscription.monitor(
     {
       temperature: Temperature,
       pressure: Pressure,
@@ -154,23 +211,27 @@ const monitor =
     },
   );
 
-yield *
-  monitor.samples.pipe(
+  yield* monitor.samples.pipe(
     Stream.runForEach((sample) =>
       Effect.sync(() => {
         console.log(sample.key, sample.nodeId, sample._tag);
       }),
     ),
   );
+});
 ```
 
 Use `startup: "bestEffort"` when an HMI should come up with the tags the server
 accepted and inspect `monitor.startup.failed` for rejected items:
 
 ```ts
-const monitor =
-  yield *
-  subscription.monitor(
+const bestEffortMonitorProgram = Effect.gen(function* () {
+  const session = yield* OpcuaSession.OpcuaSession;
+  const subscription = yield* session.makeSubscription({
+    publishingInterval: Duration.millis(100),
+  });
+
+  const monitor = yield* subscription.monitor(
     {
       temperature: Temperature,
       pressure: Pressure,
@@ -198,6 +259,9 @@ const monitor =
       },
     },
   );
+
+  return monitor.startup;
+});
 ```
 
 Duplicate NodeIds inside one monitor are rejected locally with an `OpcuaError`
@@ -207,10 +271,36 @@ report per-tag problems. `validation: "access"` batches metadata reads using
 `create.maxItemsPerRequest`; `validation: "strict"` validates one item at a time
 and may be slow for large tag sets.
 
+## Browsing
+
+Browsing stays on the session service because it is not definition-based:
+
+```ts
+import { Effect } from "effect";
+import { OpcuaSession } from "@effect-opcua/client";
+import { makeNodeClassMask } from "@effect-opcua/client/node-opcua";
+
+const browseProgram = Effect.gen(function* () {
+  const session = yield* OpcuaSession.OpcuaSession;
+
+  const children = yield* session.browseChildren("ns=1;s=MyMachine", {
+    nodeClassMask: makeNodeClassMask("Variable"),
+  });
+
+  const page = yield* session.browse({
+    nodeId: "ns=1;s=MyMachine",
+    includeRaw: true,
+  });
+
+  return { children, page };
+});
+```
+
 ## Unsafe Access
 
-Raw node-opcua objects are exposed only through `unsafeRaw`, and node-opcua
-types/constants are available from the explicit subpath:
+Raw node-opcua objects are exposed only through `unsafeRaw` fields and
+`includeRaw` options. Node-opcua types/constants are available from the explicit
+subpath:
 
 ```ts
 import { DataType, StatusCodes } from "@effect-opcua/client/node-opcua";
