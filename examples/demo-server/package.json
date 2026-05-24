@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "node-opcua-address-space": "^2.170.0",
+    "node-opcua-certificate-manager": "^2.170.0",
     "node-opcua": "^2.170.0"
   }
 }
