@@ -1,11 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  Opcua,
-  OpcuaConfigurationError,
-  OpcuaMonitorCreateError,
-  OpcuaServiceError,
-} from "../src/index.js";
+import * as Root from "../src/index.js";
+import * as Opcua from "../src/Opcua.js";
+import * as OpcuaError from "../src/OpcuaError.js";
 import { StatusCodes } from "../src/node-opcua.js";
 
 describe("exports", () => {
@@ -15,9 +12,9 @@ describe("exports", () => {
     expect(typeof Opcua.arg).toBe("function");
     expect(Opcua.arg()).toMatchObject({ _tag: "MethodArg" });
     expect(typeof Opcua.schema).toBe("function");
-    expect(typeof OpcuaConfigurationError).toBe("function");
-    expect(typeof OpcuaMonitorCreateError).toBe("function");
-    expect(typeof OpcuaServiceError).toBe("function");
+    expect(typeof OpcuaError.OpcuaError).toBe("function");
+    expect(typeof OpcuaError.isOpcuaError).toBe("function");
+    expect(Root).toHaveProperty("OpcuaSession");
     expect(StatusCodes.Good.isGood()).toBe(true);
   });
 });

@@ -1,9 +1,13 @@
 import { OPCUAClient, type OPCUAClientOptions } from "node-opcua";
 import { Config, Context, Effect, Layer, PubSub, Stream } from "effect";
 
-import { EVENT_BUFFER_SIZE } from "./constants.js";
-import { OpcuaConnectError, OpcuaDisconnectError } from "./errors.js";
-import { EventBus, type OpcuaClientEvent, wireClientEvents } from "./events.js";
+import { EVENT_BUFFER_SIZE } from "./internal/constants.js";
+import { connectError, disconnectError } from "./OpcuaError.js";
+import {
+  EventBus,
+  type OpcuaClientEvent,
+  wireClientEvents,
+} from "./internal/events.js";
 
 export type OpcuaClient = {
   readonly events: Stream.Stream<OpcuaClientEvent>;
@@ -45,6 +49,9 @@ export const OpcuaClient = Object.assign(
   },
 );
 
+export const layer = OpcuaClient.layer;
+export const layerConfig = OpcuaClient.layerConfig;
+
 export const makeOpcuaClient = (options: OpcuaClientLayerOptions) =>
   Effect.gen(function* () {
     const events = yield* PubSub.sliding<OpcuaClientEvent>(EVENT_BUFFER_SIZE);
@@ -66,7 +73,7 @@ export const makeOpcuaClient = (options: OpcuaClientLayerOptions) =>
             endpointUrl: options.endpointUrl,
             cause,
           });
-          return new OpcuaConnectError({
+          return connectError({
             endpointUrl: options.endpointUrl,
             cause,
           });
@@ -82,7 +89,7 @@ export const makeOpcuaClient = (options: OpcuaClientLayerOptions) =>
             });
           },
           catch: (cause) =>
-            new OpcuaDisconnectError({
+            disconnectError({
               endpointUrl: options.endpointUrl,
               cause,
             }),
@@ -93,3 +100,5 @@ export const makeOpcuaClient = (options: OpcuaClientLayerOptions) =>
       unsafeRaw,
     };
   });
+
+export const make = makeOpcuaClient;

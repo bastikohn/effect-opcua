@@ -11,15 +11,13 @@ import {
   Stream,
 } from "effect";
 
+import * as Opcua from "../src/Opcua.js";
+import * as OpcuaSession from "../src/OpcuaSession.js";
 import {
-  Opcua,
-  OpcuaMonitorConfigurationError,
-  OpcuaMonitorCreateError,
-  OpcuaSession,
+  makeSubscription,
   type MonitorOptions,
-  type OpcuaSubscriptionEvent,
-} from "../src/index.js";
-import { makeSubscription } from "../src/monitoring.js";
+} from "../src/OpcuaSubscription.js";
+import type { OpcuaSubscriptionEvent } from "../src/internal/events.js";
 import {
   AccessLevelFlag,
   DataType,
@@ -28,8 +26,8 @@ import {
   Variant,
   type ClientSubscription,
 } from "../src/node-opcua.js";
-import type { OpcuaStructureRuntime } from "../src/structure-runtime.js";
-import type { ReadableVariableDef } from "../src/values.js";
+import type { OpcuaStructureRuntime } from "../src/internal/structure-runtime.js";
+import type { ReadableVariableDef } from "../src/OpcuaVariable.js";
 import { makeLiveTestContext } from "./live.js";
 
 const { runLive } = makeLiveTestContext(4843);
@@ -304,7 +302,7 @@ describe("monitoring", () => {
           }),
         ),
       ),
-    ).rejects.toBeInstanceOf(OpcuaMonitorConfigurationError);
+    ).rejects.toMatchObject({ _tag: "OpcuaError", reason: { _tag: "MonitorConfiguration" } });
   });
 
   it("rejects missing option objects and invalid deadbands", async () => {
@@ -320,7 +318,7 @@ describe("monitoring", () => {
           }),
         ),
       ),
-    ).rejects.toBeInstanceOf(OpcuaMonitorConfigurationError);
+    ).rejects.toMatchObject({ _tag: "OpcuaError", reason: { _tag: "MonitorConfiguration" } });
 
     for (const filter of [
       Opcua.MonitorFilter.statusValue(Opcua.MonitorDeadband.absolute(-1)),
@@ -339,7 +337,7 @@ describe("monitoring", () => {
             }),
           ),
         ),
-      ).rejects.toBeInstanceOf(OpcuaMonitorConfigurationError);
+      ).rejects.toMatchObject({ _tag: "OpcuaError", reason: { _tag: "MonitorConfiguration" } });
     }
   });
 
@@ -482,7 +480,7 @@ describe("monitoring", () => {
           }),
         ),
       ),
-    ).rejects.toBeInstanceOf(OpcuaMonitorCreateError);
+    ).rejects.toMatchObject({ _tag: "OpcuaError", reason: { _tag: "MonitorCreate" } });
 
     expect(fake.groups[0]?.terminated).toBe(true);
     expect(fake.groups[1]?.terminated).toBe(true);
@@ -729,8 +727,8 @@ describe("monitoring", () => {
   it("streams typed and dynamic monitored samples from a named item dictionary", async () => {
     const values = await runLive(
       Effect.gen(function* () {
-        const session = yield* OpcuaSession;
-        const subscription = yield* session.subscription({
+        const session = yield* OpcuaSession.OpcuaSession;
+        const subscription = yield* session.makeSubscription({
           publishingInterval: Duration.millis(100),
         });
         const monitor = yield* subscription.monitor(
@@ -757,8 +755,8 @@ describe("monitoring", () => {
   it("returns a keyed strict startup report for valid variables", async () => {
     const result = await runLive(
       Effect.gen(function* () {
-        const session = yield* OpcuaSession;
-        const subscription = yield* session.subscription({
+        const session = yield* OpcuaSession.OpcuaSession;
+        const subscription = yield* session.makeSubscription({
           publishingInterval: Duration.millis(100),
         });
         const monitor = yield* subscription.monitor(
@@ -797,8 +795,8 @@ describe("monitoring", () => {
   it("returns best-effort monitors with active and failed startup entries", async () => {
     const result = await runLive(
       Effect.gen(function* () {
-        const session = yield* OpcuaSession;
-        const subscription = yield* session.subscription({
+        const session = yield* OpcuaSession.OpcuaSession;
+        const subscription = yield* session.makeSubscription({
           publishingInterval: Duration.millis(100),
         });
         const monitor = yield* subscription.monitor(
@@ -833,8 +831,8 @@ describe("monitoring", () => {
     await expect(
       runLive(
         Effect.gen(function* () {
-          const session = yield* OpcuaSession;
-          const subscription = yield* session.subscription({
+          const session = yield* OpcuaSession.OpcuaSession;
+          const subscription = yield* session.makeSubscription({
             publishingInterval: Duration.millis(100),
           });
           return yield* subscription.monitor(
@@ -846,12 +844,15 @@ describe("monitoring", () => {
         }),
       ),
     ).rejects.toMatchObject({
-      _tag: "OpcuaMonitorCreateError",
-      startup: {
-        ok: false,
-        requested: 1,
-        activeCount: 0,
-        failedCount: 1,
+      _tag: "OpcuaError",
+      reason: {
+        _tag: "MonitorCreate",
+        startup: {
+          ok: false,
+          requested: 1,
+          activeCount: 0,
+          failedCount: 1,
+        },
       },
     });
   }, 20_000);
@@ -860,8 +861,8 @@ describe("monitoring", () => {
     await expect(
       runLive(
         Effect.gen(function* () {
-          const session = yield* OpcuaSession;
-          const subscription = yield* session.subscription({
+          const session = yield* OpcuaSession.OpcuaSession;
+          const subscription = yield* session.makeSubscription({
             publishingInterval: Duration.millis(100),
           });
           return yield* subscription.monitor(
@@ -877,7 +878,7 @@ describe("monitoring", () => {
           );
         }),
       ),
-    ).rejects.toBeInstanceOf(OpcuaMonitorConfigurationError);
+    ).rejects.toMatchObject({ _tag: "OpcuaError", reason: { _tag: "MonitorConfiguration" } });
   }, 20_000);
 
   it("streams structure samples through monitor", async () => {
@@ -887,8 +888,8 @@ describe("monitoring", () => {
     });
     const result = await runLive(
       Effect.gen(function* () {
-        const session = yield* OpcuaSession;
-        const subscription = yield* session.subscription({
+        const session = yield* OpcuaSession.OpcuaSession;
+        const subscription = yield* session.makeSubscription({
           publishingInterval: Duration.millis(100),
         });
         const monitor = yield* subscription.monitor(
@@ -914,8 +915,8 @@ describe("monitoring", () => {
     await expect(
       runLive(
         Effect.gen(function* () {
-          const session = yield* OpcuaSession;
-          const subscription = yield* session.subscription({
+          const session = yield* OpcuaSession.OpcuaSession;
+          const subscription = yield* session.makeSubscription({
             publishingInterval: Duration.millis(100),
           });
           return yield* subscription.monitor(
@@ -929,6 +930,6 @@ describe("monitoring", () => {
           );
         }),
       ),
-    ).rejects.toBeInstanceOf(OpcuaMonitorCreateError);
+    ).rejects.toMatchObject({ _tag: "OpcuaError", reason: { _tag: "MonitorCreate" } });
   }, 20_000);
 });

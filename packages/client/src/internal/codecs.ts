@@ -13,7 +13,11 @@ import {
   type OpcuaDynamicValue,
   type OpcuaDynamicValueMetadata,
 } from "./normalize.js";
-import { OpcuaConfigurationError, OpcuaEncodeError } from "./errors.js";
+import {
+  encodeError,
+  type OpcuaConfigurationError,
+  type OpcuaEncodeError,
+} from "../OpcuaError.js";
 import {
   validateStructureMetadata,
   type OpcuaStructureRuntime,
@@ -193,7 +197,7 @@ const encodeCodec = <A>(
           );
         } catch (error) {
           return Effect.fail(
-            new OpcuaEncodeError({ nodeId: metadata.nodeId, value, error }),
+            encodeError({ nodeId: metadata.nodeId, value, error }),
           );
         }
       });
@@ -205,7 +209,7 @@ const encodeCodec = <A>(
             encodeWithSchema(codec.schema, value),
           ),
         catch: (error) =>
-          new OpcuaEncodeError({ nodeId: metadata.nodeId, value, error }),
+          encodeError({ nodeId: metadata.nodeId, value, error }),
       });
     case "Structure":
       return structureRuntime.variantFromStructure(

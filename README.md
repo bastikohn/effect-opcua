@@ -16,6 +16,9 @@ Local-first workspace for an Effect v4 OPC-UA client wrapper around node-opcua.
 Declare OPC-UA nodes as pure definitions, then ask the session for handles.
 
 ```ts
+import * as Opcua from "@effect-opcua/client/Opcua";
+import * as OpcuaSession from "@effect-opcua/client/OpcuaSession";
+
 const Temperature = Opcua.variable({
   nodeId: "ns=2;s=Machine.Temperature",
   codec: Opcua.schema(Schema.Number),
@@ -44,22 +47,36 @@ const Reset = Opcua.method({
   },
 });
 
-const temperature = yield * session.handle(Temperature);
-const setpoint = yield * session.handle(Setpoint);
-const reset = yield * session.handle(Reset);
+const temperature = yield * session.makeHandle(Temperature);
+const setpoint = yield * session.makeHandle(Setpoint);
+const reset = yield * session.makeHandle(Reset);
 
 const current = yield * temperature.read();
 const written = yield * setpoint.write(42);
 const resetResult = yield * reset.call({ mode: "soft" });
 ```
 
-Batch helpers issue true OPC-UA batch service calls when possible and preserve tuple order:
+Keyed session APIs are the primary HMI surface. They accept stable definition
+dictionaries, issue OPC-UA batch service calls, and return results by key:
 
 ```ts
-const [temperature, pressure] =
-  yield * session.handleAll([Temperature, Pressure] as const);
+const snapshot = yield * OpcuaSession.readMany({
+  temperature: Temperature,
+  pressure: Pressure,
+} as const);
 
-const samples = yield * Opcua.readAll([temperature, pressure] as const);
+const written = yield * OpcuaSession.writeMany({
+  setpoint: [Setpoint, 42],
+} as const);
+```
+
+Keep dictionary objects stable in polling loops so local plan caches can be
+reused, but correctness does not depend on object identity. Handles remain
+prepared, session-bound snapshots for single-item operations:
+
+```ts
+const temperature = yield * session.makeHandle(Temperature);
+const current = yield * temperature.read();
 ```
 
 ## Structures
@@ -87,7 +104,7 @@ const ScanSettingsQueue = Opcua.structureArray(
 ```ts
 const settings =
   yield *
-  session.handle(
+  session.makeHandle(
     Opcua.variable({
       nodeId: "ns=1;s=MyMachine.ScanSettings",
       codec: ScanSettings,
@@ -112,7 +129,7 @@ and samples are keyed by item name.
 ```ts
 const subscription =
   yield *
-  session.subscription({
+  session.makeSubscription({
     publishingInterval: Duration.millis(100),
   });
 
@@ -183,10 +200,10 @@ const monitor =
   );
 ```
 
-Duplicate NodeIds inside one monitor are rejected locally with
-`OpcuaMonitorConfigurationError`. `validation: "none"` skips metadata pre-reads
-and lets server create results plus runtime decode events report per-tag
-problems. `validation: "access"` batches metadata reads using
+Duplicate NodeIds inside one monitor are rejected locally with an `OpcuaError`
+whose `reason._tag` is `"MonitorConfiguration"`. `validation: "none"` skips
+metadata pre-reads and lets server create results plus runtime decode events
+report per-tag problems. `validation: "access"` batches metadata reads using
 `create.maxItemsPerRequest`; `validation: "strict"` validates one item at a time
 and may be slow for large tag sets.
 

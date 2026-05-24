@@ -20,7 +20,12 @@
       "types": "./dist/node-opcua.d.mts",
       "default": "./dist/node-opcua.mjs"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./internal/*": null,
+    "./*": {
+      "types": "./dist/*.d.mts",
+      "default": "./dist/*.mjs"
+    }
   },
   "main": "./dist/index.mjs",
   "module": "./dist/index.mjs",

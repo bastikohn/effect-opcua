@@ -1,14 +1,14 @@
-import {
-  Opcua,
-  OpcuaClient,
-  OpcuaSession,
-  type NodeIdString,
-  type MonitorSample,
-  type OpcuaBrowseReference,
-  type OpcuaDynamicValue,
-  type ReadResult,
-  type WriteResult,
-} from "@effect-opcua/client";
+import * as Opcua from "@effect-opcua/client/Opcua";
+import * as OpcuaClient from "@effect-opcua/client/OpcuaClient";
+import * as OpcuaSession from "@effect-opcua/client/OpcuaSession";
+import type {
+  NodeIdString,
+  OpcuaDynamicValue,
+  ReadResult,
+  WriteResult,
+} from "@effect-opcua/client/OpcuaVariable";
+import type { MonitorSample } from "@effect-opcua/client/OpcuaSubscription";
+import type { OpcuaBrowseReference } from "@effect-opcua/client/OpcuaSession";
 import {
   Cause,
   Duration,
@@ -132,7 +132,9 @@ export const createTuiRuntime = async (
       ],
     }));
 
-  const run = <A, E>(effect: Effect.Effect<A, E, OpcuaSession>) =>
+  const run = <A, E>(
+    effect: Effect.Effect<A, E, OpcuaSession.OpcuaSession>,
+  ) =>
     runtime.runPromise(effect);
 
   const root: TuiTreeEntry = {
@@ -178,7 +180,7 @@ export const createTuiRuntime = async (
     }));
     const result = await run(
       Effect.gen(function* () {
-        const session = yield* OpcuaSession;
+        const session = yield* OpcuaSession.OpcuaSession;
         return yield* session.browseChildren(entry.nodeId);
       }),
     );
@@ -286,8 +288,8 @@ export const createTuiRuntime = async (
     try {
       const sample = await run(
         Effect.gen(function* () {
-          const session = yield* OpcuaSession;
-          const handle = yield* session.handle(
+          const session = yield* OpcuaSession.OpcuaSession;
+          const handle = yield* session.makeHandle(
             Opcua.variable({ nodeId: entry.nodeId }),
           );
           return yield* handle.read();
@@ -319,8 +321,8 @@ export const createTuiRuntime = async (
     monitorFiber = runtime.runFork(
       Effect.scoped(
         Effect.gen(function* () {
-          const session = yield* OpcuaSession;
-          const subscription = yield* session.subscription({
+          const session = yield* OpcuaSession.OpcuaSession;
+          const subscription = yield* session.makeSubscription({
             publishingInterval: Duration.millis(250),
           });
           const monitor = yield* subscription.monitor(items, {
@@ -405,8 +407,8 @@ export const createTuiRuntime = async (
       }
       const { result, sample } = await run(
         Effect.gen(function* () {
-          const session = yield* OpcuaSession;
-          const handle = yield* session.handle(
+          const session = yield* OpcuaSession.OpcuaSession;
+          const handle = yield* session.makeHandle(
             Opcua.variable({
               nodeId: entry.nodeId,
               access: "readWrite",

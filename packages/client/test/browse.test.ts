@@ -1,11 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 
-import {
-  OpcuaConfigurationError,
-  OpcuaSession,
-  type OpcuaBrowseReference,
-} from "../src/index.js";
+import * as OpcuaSession from "../src/OpcuaSession.js";
+import { isOpcuaError } from "../src/OpcuaError.js";
+import type { OpcuaBrowseReference } from "../src/internal/browse.js";
 import {
   BrowseDirection,
   makeNodeClassMask,
@@ -14,6 +12,9 @@ import {
 import { makeLiveTestContext } from "./live.js";
 
 const { runLive } = makeLiveTestContext(4841);
+
+const isConfigurationReason = (error: unknown) =>
+  isOpcuaError(error) && error.reason._tag === "Configuration";
 
 describe("browse", () => {
   it("moves node-opcua helpers to the node-opcua subpath", () => {
@@ -24,7 +25,7 @@ describe("browse", () => {
   it("browses normalized child references from ObjectsFolder", async () => {
     const result = await runLive(
       Effect.gen(function* () {
-        const session = yield* OpcuaSession;
+        const session = yield* OpcuaSession.OpcuaSession;
         return yield* session.browseChildren("i=85");
       }),
     );
@@ -56,7 +57,7 @@ describe("browse", () => {
   it("keeps lower-level browse raw fields opt-in", async () => {
     const result = await runLive(
       Effect.gen(function* () {
-        const session = yield* OpcuaSession;
+        const session = yield* OpcuaSession.OpcuaSession;
         return yield* session.browse({
           nodeId: "ns=1;s=MyMachine",
           resultMask: makeResultMask("BrowseName"),
@@ -76,7 +77,7 @@ describe("browse", () => {
   it("discovers method nodes through browseChildren", async () => {
     const result = await runLive(
       Effect.gen(function* () {
-        const session = yield* OpcuaSession;
+        const session = yield* OpcuaSession.OpcuaSession;
         return yield* session.browseChildren("ns=1;s=MyMachine", {
           nodeClassMask: makeNodeClassMask("Method"),
         });
@@ -105,15 +106,15 @@ describe("browse", () => {
     await expect(
       runLive(
         Effect.gen(function* () {
-          const session = yield* OpcuaSession;
+          const session = yield* OpcuaSession.OpcuaSession;
           return yield* session.browse({ nodeId: " " });
         }),
       ),
-    ).rejects.toBeInstanceOf(OpcuaConfigurationError);
+    ).rejects.toSatisfy(isConfigurationReason);
 
     const missing = await runLive(
       Effect.gen(function* () {
-        const session = yield* OpcuaSession;
+        const session = yield* OpcuaSession.OpcuaSession;
         return yield* session.browse({ nodeId: "ns=1;s=missing" });
       }),
     );

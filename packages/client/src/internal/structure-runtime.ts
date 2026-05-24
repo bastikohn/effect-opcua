@@ -13,10 +13,13 @@ import { Effect } from "effect";
 import type { NodeIdString } from "./capabilities.js";
 import { encodeWithSchema, decodeWithSchema } from "./codecs.js";
 import {
-  OpcuaConfigurationError,
-  OpcuaEncodeError,
-  OpcuaServiceError,
-} from "./errors.js";
+  configurationError,
+  encodeError,
+  serviceError,
+  type OpcuaConfigurationError,
+  type OpcuaEncodeError,
+  type OpcuaServiceError,
+} from "../OpcuaError.js";
 import {
   isOpcuaStructureArrayCodec,
   type AnyStructureSpec,
@@ -74,7 +77,7 @@ export const makeStructureRuntime = (
       yield* ensureInitialized();
       const pojo = yield* Effect.try({
         try: () => encodeWithSchema(codec.schema, value),
-        catch: (error) => new OpcuaEncodeError({ nodeId, value, error }),
+        catch: (error) => encodeError({ nodeId, value, error }),
       });
       return yield* Effect.tryPromise({
         try: () =>
@@ -83,7 +86,7 @@ export const makeStructureRuntime = (
             pojoRecord(pojo),
           ),
         catch: (cause) =>
-          new OpcuaEncodeError({
+          encodeError({
             nodeId,
             value,
             error: cause,
@@ -160,7 +163,7 @@ const makeInitializeOnce = (session: ClientSession) =>
       Effect.tryPromise({
         try: () => session.extractNamespaceDataType(),
         catch: (cause) =>
-          new OpcuaServiceError({
+          serviceError({
             operation: "structure.extractNamespaceDataType",
             cause,
           }),
@@ -182,7 +185,7 @@ const arrayValue = <A>(
   Array.isArray(value)
     ? Effect.succeed(value)
     : Effect.fail(
-        new OpcuaEncodeError({
+        encodeError({
           nodeId,
           value,
           error: "Structure array value must be an array",
@@ -240,7 +243,7 @@ export const validateStructureMetadata = (
     ? structure.item
     : structure;
   if (metadata.raw.builtInDataType !== DataType.ExtensionObject) {
-    return new OpcuaConfigurationError({
+    return configurationError({
       operation,
       nodeId,
       cause: `Expected built-in DataType.ExtensionObject for ${codec.name}`,
@@ -248,14 +251,14 @@ export const validateStructureMetadata = (
   }
   const expectedDataType = coerceNodeId(codec.dataTypeId);
   if (!sameNodeId(metadata.raw.declaredDataType, expectedDataType)) {
-    return new OpcuaConfigurationError({
+    return configurationError({
       operation,
       nodeId,
       cause: `Expected exact declared DataType ${expectedDataType.toString()} for ${codec.name}, got ${metadata.raw.declaredDataType.toString()}`,
     });
   }
   if (metadata.valueRank > 1) {
-    return new OpcuaConfigurationError({
+    return configurationError({
       operation,
       nodeId,
       cause: "Structure matrices are not supported",
@@ -263,14 +266,14 @@ export const validateStructureMetadata = (
   }
   if (isOpcuaStructureArrayCodec(structure)) {
     if (!isOneDimArrayCompatibleRank(metadata.valueRank)) {
-      return new OpcuaConfigurationError({
+      return configurationError({
         operation,
         nodeId,
         cause: "Expected one-dimensional structure array metadata",
       });
     }
   } else if (!isScalarCompatibleRank(metadata.valueRank)) {
-    return new OpcuaConfigurationError({
+    return configurationError({
       operation,
       nodeId,
       cause: "Expected scalar structure metadata",

@@ -15,10 +15,15 @@ import {
 } from "node-opcua";
 import { Duration, Effect, PubSub, Queue, Result, Scope, Stream } from "effect";
 
-import { Codec } from "./codecs.js";
-import type { NodeIdString } from "./capabilities.js";
-import { EventBus, type OpcuaSubscriptionEvent } from "./events.js";
+import { Codec } from "./internal/codecs.js";
+import type { NodeIdString } from "./internal/capabilities.js";
+import { EventBus, type OpcuaSubscriptionEvent } from "./internal/events.js";
 import {
+  decodeError,
+  monitorConfigurationError as makeMonitorConfigurationError,
+  monitorCreateError,
+  monitorRuntimeError,
+  monitorStartupError,
   OpcuaAccessDeniedError,
   OpcuaConfigurationError,
   OpcuaDecodeError,
@@ -27,19 +32,19 @@ import {
   OpcuaMonitorRuntimeError,
   OpcuaMonitorStartupError,
   OpcuaServiceError,
-} from "./errors.js";
+} from "./OpcuaError.js";
 import {
   isGood,
   normalizeStatusCode,
   type OpcuaStatusInfo,
-} from "./normalize.js";
-import type { OpcuaStructureRuntime } from "./structure-runtime.js";
+} from "./internal/normalize.js";
+import type { OpcuaStructureRuntime } from "./internal/structure-runtime.js";
 import {
   accessDeniedError,
   type ReadableVariableDef,
   type ValueOfVariableDef,
   type VariableHandle,
-} from "./values.js";
+} from "./OpcuaVariable.js";
 
 export type BufferPolicy =
   | { readonly _tag: "Sliding"; readonly capacity: number }
@@ -341,7 +346,7 @@ export const makeSubscription = (
           validation.failed,
         );
         return yield* Effect.fail(
-          new OpcuaMonitorCreateError<Items>({
+          monitorCreateError<Items>({
             subscriptionId: unsafeRaw.subscriptionId,
             startup: report,
             cause: Array.from(validation.failed.values()),
@@ -406,7 +411,7 @@ export const makeSubscription = (
           finalizingMonitorGroups,
         );
         return yield* Effect.fail(
-          new OpcuaMonitorCreateError<Items>({
+          monitorCreateError<Items>({
             subscriptionId: unsafeRaw.subscriptionId,
             startup: report,
             cause: Array.from(failed.values()),
@@ -456,7 +461,7 @@ const normalizeMonitorItems = <Items extends MonitorItemDictionary>(
   Effect.suspend(() => {
     if (!isPlainRecord(items) || Array.isArray(items)) {
       return Effect.fail(
-        monitorConfigurationError("monitor.items", {
+        makeMonitorConfigurationErrorForOperation("monitor.items", {
           cause: "items must be a named item dictionary",
         }),
       );
@@ -464,7 +469,7 @@ const normalizeMonitorItems = <Items extends MonitorItemDictionary>(
     const entries = Object.entries(items);
     if (entries.length === 0) {
       return Effect.fail(
-        monitorConfigurationError("monitor.items", {
+        makeMonitorConfigurationErrorForOperation("monitor.items", {
           cause: "items dictionary must not be empty",
         }),
       );
@@ -475,7 +480,7 @@ const normalizeMonitorItems = <Items extends MonitorItemDictionary>(
     for (const [key, value] of entries) {
       if (!isReadableVariableDef(value)) {
         return Effect.fail(
-          monitorConfigurationError("monitor.items", {
+          makeMonitorConfigurationErrorForOperation("monitor.items", {
             key,
             cause: "monitor inputs must be readable variable definitions",
           }),
@@ -486,7 +491,7 @@ const normalizeMonitorItems = <Items extends MonitorItemDictionary>(
         rawNodeId = coerceNodeId(value.nodeId);
       } catch (cause) {
         return Effect.fail(
-          monitorConfigurationError("monitor.items", {
+          makeMonitorConfigurationErrorForOperation("monitor.items", {
             key,
             nodeId: value.nodeId,
             cause,
@@ -497,7 +502,7 @@ const normalizeMonitorItems = <Items extends MonitorItemDictionary>(
       const duplicate = seenNodeIds.get(nodeId);
       if (duplicate) {
         return Effect.fail(
-          monitorConfigurationError("monitor.items", {
+          makeMonitorConfigurationErrorForOperation("monitor.items", {
             key,
             nodeId,
             cause: `duplicate NodeId also used by ${duplicate}`,
@@ -522,14 +527,14 @@ const validateMonitorOptions = <Items>(
   Effect.suspend(() => {
     if (!isPlainRecord(options)) {
       return Effect.fail(
-        monitorConfigurationError("monitor.options", {
+        makeMonitorConfigurationErrorForOperation("monitor.options", {
           cause: "options must be an object",
         }),
       );
     }
     if (options.startup !== "strict" && options.startup !== "bestEffort") {
       return Effect.fail(
-        monitorConfigurationError("monitor.options.startup", {
+        makeMonitorConfigurationErrorForOperation("monitor.options.startup", {
           cause: 'startup must be "strict" or "bestEffort"',
         }),
       );
@@ -540,7 +545,7 @@ const validateMonitorOptions = <Items>(
       options.validation !== "strict"
     ) {
       return Effect.fail(
-        monitorConfigurationError("monitor.options.validation", {
+        makeMonitorConfigurationErrorForOperation("monitor.options.validation", {
           cause: 'validation must be "none", "access", or "strict"',
         }),
       );
@@ -561,7 +566,7 @@ const validateMonitorOptions = <Items>(
     if (overrides !== undefined) {
       if (!isPlainRecord(overrides) || Array.isArray(overrides)) {
         return Effect.fail(
-          monitorConfigurationError("monitor.options.overrides", {
+          makeMonitorConfigurationErrorForOperation("monitor.options.overrides", {
             cause: "overrides must be an object keyed by item name",
           }),
         );
@@ -569,7 +574,7 @@ const validateMonitorOptions = <Items>(
       for (const [key, override] of Object.entries(overrides)) {
         if (!itemKeys.has(key as MonitorKey<Items>)) {
           return Effect.fail(
-            monitorConfigurationError("monitor.options.overrides", {
+            makeMonitorConfigurationErrorForOperation("monitor.options.overrides", {
               key,
               cause: "override key does not exist in monitor items",
             }),
@@ -577,7 +582,7 @@ const validateMonitorOptions = <Items>(
         }
         if (!isPlainRecord(override)) {
           return Effect.fail(
-            monitorConfigurationError("monitor.options.overrides", {
+            makeMonitorConfigurationErrorForOperation("monitor.options.overrides", {
               key,
               cause: "override must be an object",
             }),
@@ -588,7 +593,7 @@ const validateMonitorOptions = <Items>(
         );
         if (unknown.length > 0) {
           return Effect.fail(
-            monitorConfigurationError("monitor.options.overrides", {
+            makeMonitorConfigurationErrorForOperation("monitor.options.overrides", {
               key,
               cause: `unsupported override option: ${unknown.join(", ")}`,
             }),
@@ -604,14 +609,14 @@ const validateMonitorOptions = <Items>(
       defaultCreate.maxConcurrentRequests;
     if (!positiveInteger(maxItemsPerRequest)) {
       return Effect.fail(
-        monitorConfigurationError("monitor.options.create", {
+        makeMonitorConfigurationErrorForOperation("monitor.options.create", {
           cause: "maxItemsPerRequest must be a positive integer",
         }),
       );
     }
     if (!positiveInteger(maxConcurrentRequests)) {
       return Effect.fail(
-        monitorConfigurationError("monitor.options.create", {
+        makeMonitorConfigurationErrorForOperation("monitor.options.create", {
           cause: "maxConcurrentRequests must be a positive integer",
         }),
       );
@@ -956,7 +961,7 @@ const wireMonitorGroup = <Items>(
   const nodeIds = entries.flatMap((entry) => (entry ? [entry.nodeId] : []));
   const failRuntime = (cause: unknown) => {
     if (finalizingMonitorGroups.has(group)) return;
-    const error = new OpcuaMonitorRuntimeError({
+    const error = monitorRuntimeError({
       subscriptionId: subscription.subscriptionId,
       nodeIds,
       cause,
@@ -1029,7 +1034,7 @@ const monitorSampleFromDataValue = <Items>(
       return {
         _tag: "DecodeError",
         ...base,
-        error: new OpcuaDecodeError({
+        error: decodeError({
           nodeId: entry.nodeId,
           cause: decoded.failure,
         }),
@@ -1133,7 +1138,7 @@ const startupFailure = <Items>(
   key: item.key,
   nodeId: item.nodeId,
   requested: item.requested,
-  error: new OpcuaMonitorStartupError({
+  error: monitorStartupError({
     phase,
     key: item.key,
     nodeId: item.nodeId,
@@ -1310,7 +1315,7 @@ const effectiveOptionsError = (
   nodeId?: NodeIdString,
 ) => {
   if (!Duration.isDuration(options.samplingInterval)) {
-    return monitorConfigurationError("monitor.options.samplingInterval", {
+    return makeMonitorConfigurationErrorForOperation("monitor.options.samplingInterval", {
       key,
       nodeId,
       cause: "samplingInterval must be a Duration",
@@ -1318,35 +1323,35 @@ const effectiveOptionsError = (
   }
   const samplingInterval = durationMillis(options.samplingInterval);
   if (!Number.isFinite(samplingInterval) || samplingInterval < 0) {
-    return monitorConfigurationError("monitor.options.samplingInterval", {
+    return makeMonitorConfigurationErrorForOperation("monitor.options.samplingInterval", {
       key,
       nodeId,
       cause: "samplingInterval must be finite and non-negative",
     });
   }
   if (!positiveInteger(options.queueSize)) {
-    return monitorConfigurationError("monitor.options.queueSize", {
+    return makeMonitorConfigurationErrorForOperation("monitor.options.queueSize", {
       key,
       nodeId,
       cause: "queueSize must be a positive integer",
     });
   }
   if (typeof options.discardOldest !== "boolean") {
-    return monitorConfigurationError("monitor.options.discardOldest", {
+    return makeMonitorConfigurationErrorForOperation("monitor.options.discardOldest", {
       key,
       nodeId,
       cause: "discardOldest must be a boolean",
     });
   }
   if (!isMonitorFilter(options.filter)) {
-    return monitorConfigurationError("monitor.options.filter", {
+    return makeMonitorConfigurationErrorForOperation("monitor.options.filter", {
       key,
       nodeId,
       cause: "filter must be a MonitorFilter",
     });
   }
   if (!isMonitorTimestamps(options.timestamps)) {
-    return monitorConfigurationError("monitor.options.timestamps", {
+    return makeMonitorConfigurationErrorForOperation("monitor.options.timestamps", {
       key,
       nodeId,
       cause: 'timestamps must be "none", "source", "server", or "both"',
@@ -1362,7 +1367,7 @@ const bufferPolicyError = (policy: BufferPolicy) => {
     !Number.isInteger(policy.capacity) ||
     policy.capacity < 1
   ) {
-    return monitorConfigurationError("monitor.options.clientBuffer", {
+    return makeMonitorConfigurationErrorForOperation("monitor.options.clientBuffer", {
       cause: "clientBuffer capacity must be a positive integer",
     });
   }
@@ -1382,7 +1387,7 @@ const positiveInteger = (value: number) => Number.isInteger(value) && value > 0;
 const dateTimestamp = (timestamp: Date | null | undefined) =>
   timestamp instanceof Date ? timestamp : undefined;
 
-const monitorConfigurationError = (
+const makeMonitorConfigurationErrorForOperation = (
   operation: string,
   options?: {
     readonly key?: string;
@@ -1390,7 +1395,7 @@ const monitorConfigurationError = (
     readonly cause?: unknown;
   },
 ) =>
-  new OpcuaMonitorConfigurationError({
+  makeMonitorConfigurationError({
     operation,
     key: options?.key,
     nodeId: options?.nodeId,
@@ -1407,6 +1412,8 @@ const allowedOverrideKeys = new Set([
 
 const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+export const make = makeSubscription;
 
 const isReadableVariableDef = (
   value: unknown,

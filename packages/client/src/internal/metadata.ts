@@ -15,18 +15,23 @@ import { Effect } from "effect";
 import type { NodeIdString } from "./capabilities.js";
 import { Codec } from "./codecs.js";
 import {
+  configurationError,
+  isConfigurationError,
+  methodNotExecutableError,
+  serviceError,
   OpcuaAccessDeniedError,
   OpcuaConfigurationError,
   OpcuaMethodNotExecutableError,
   OpcuaServiceError,
-} from "./errors.js";
+} from "../OpcuaError.js";
 import {
   methodArgumentMetadataFromRaw,
   readBooleanAttribute,
   resolveMethodMapping,
   type AnyMethodDef,
+  type MethodArg,
   type MethodMetadata,
-} from "./methods.js";
+} from "../OpcuaMethod.js";
 import { isGood } from "./normalize.js";
 import type { OpcuaStructureRuntime } from "./structure-runtime.js";
 import {
@@ -36,7 +41,7 @@ import {
   variableMetadataFromRaw,
   type AnyVariableDef,
   type VariableMetadata,
-} from "./values.js";
+} from "../OpcuaVariable.js";
 
 export type MetadataService = {
   readonly variable: (
@@ -141,7 +146,7 @@ export const makeMetadataService = (
       const base = yield* rawMethodMetadata(def);
       if (!base.executable || base.userExecutable === false) {
         return yield* Effect.fail(
-          new OpcuaMethodNotExecutableError({
+          methodNotExecutableError({
             objectId: def.objectId,
             methodId: def.methodId,
             executable: base.executable,
@@ -150,10 +155,10 @@ export const makeMetadataService = (
         );
       }
       if (
-        Object.values(def.input ?? {}).some((arg) =>
+        (Object.values(def.input ?? {}) as ReadonlyArray<MethodArg<unknown>>).some((arg) =>
           Codec.requiresStructureRuntime(arg.codec),
         ) ||
-        Object.values(def.output ?? {}).some((arg) =>
+        (Object.values(def.output ?? {}) as ReadonlyArray<MethodArg<unknown>>).some((arg) =>
           Codec.requiresStructureRuntime(arg.codec),
         )
       ) {
@@ -209,7 +214,7 @@ const discoverVariableMetadata = (
     ] = yield* Effect.tryPromise({
       try: () => session.read(nodes, 0),
       catch: (cause) =>
-        new OpcuaServiceError({
+        serviceError({
           operation: "metadata.variable",
           nodeId,
           cause,
@@ -221,7 +226,7 @@ const discoverVariableMetadata = (
       !(dataTypeValue.value?.value instanceof NodeId)
     ) {
       return yield* Effect.fail(
-        new OpcuaConfigurationError({
+        configurationError({
           operation: "metadata.variable",
           nodeId,
           cause: "DataType is unreadable",
@@ -234,7 +239,7 @@ const discoverVariableMetadata = (
       typeof valueRankValue.value?.value !== "number"
     ) {
       return yield* Effect.fail(
-        new OpcuaConfigurationError({
+        configurationError({
           operation: "metadata.variable",
           nodeId,
           cause: "ValueRank is unreadable",
@@ -247,7 +252,7 @@ const discoverVariableMetadata = (
       typeof accessLevelValue.value?.value !== "number"
     ) {
       return yield* Effect.fail(
-        new OpcuaConfigurationError({
+        configurationError({
           operation: "metadata.variable",
           nodeId,
           cause: "AccessLevel is unreadable",
@@ -292,7 +297,7 @@ const discoverMethodBaseMetadata = (
     const argumentDefinition = yield* Effect.tryPromise({
       try: () => session.getArgumentDefinition(methodId),
       catch: (cause) =>
-        new OpcuaServiceError({
+        serviceError({
           operation: "metadata.method.getArgumentDefinition",
           nodeId: def.methodId,
           cause,
@@ -339,7 +344,7 @@ const readExecutableAttributes = (
           0,
         ),
       catch: (cause) =>
-        new OpcuaServiceError({
+        serviceError({
           operation: "metadata.method.executable",
           nodeId: def.methodId,
           cause,
@@ -357,10 +362,10 @@ const readExecutableAttributes = (
       def.methodId,
       false,
     );
-    if (executable instanceof OpcuaConfigurationError) {
+    if (isConfigurationError(executable)) {
       return yield* Effect.fail(executable);
     }
-    if (userExecutable instanceof OpcuaConfigurationError) {
+    if (isConfigurationError(userExecutable)) {
       return yield* Effect.fail(userExecutable);
     }
     return [executable as boolean, userExecutable] as const;
@@ -385,11 +390,11 @@ const normalizeArguments = (
     }),
   ).pipe(
     Effect.mapError((error) =>
-      error instanceof OpcuaConfigurationError
-        ? new OpcuaConfigurationError({
+      isConfigurationError(error)
+        ? configurationError({
             operation: "metadata.method.argument",
             nodeId: methodNodeId,
-            cause: error.cause,
+            cause: error.reason.cause,
           })
         : error,
     ),
@@ -409,7 +414,7 @@ const resolveBuiltInDataType = (
       const key = current.toString();
       if (visited.has(key)) {
         return yield* Effect.fail(
-          new OpcuaConfigurationError({
+          configurationError({
             operation: "metadata.builtInDataType",
             nodeId: dataTypeNodeId.toString(),
             cause: `DataType hierarchy contains a cycle at ${key}`,
@@ -421,7 +426,7 @@ const resolveBuiltInDataType = (
       const superType = yield* browseDataTypeSuperType(session, current);
       if (!superType) {
         return yield* Effect.fail(
-          new OpcuaConfigurationError({
+          configurationError({
             operation: "metadata.builtInDataType",
             nodeId: dataTypeNodeId.toString(),
             cause: `Could not resolve built-in DataType for ${dataTypeNodeId.toString()}`,
@@ -473,7 +478,7 @@ const browseDataTypeSuperType = (
       return nodeId ? coerceNodeId(nodeId) : undefined;
     },
     catch: (cause) =>
-      new OpcuaServiceError({
+      serviceError({
         operation: "metadata.browseDataTypeSuperType",
         nodeId: dataTypeNodeId.toString(),
         cause,
@@ -484,5 +489,5 @@ const coerceNodeIdOrFail = (operation: string, nodeId: unknown) =>
   Effect.try({
     try: () => coerceNodeId(nodeId),
     catch: (cause) =>
-      new OpcuaConfigurationError({ operation, nodeId: String(nodeId), cause }),
+      configurationError({ operation, nodeId: String(nodeId), cause }),
   });

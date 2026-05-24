@@ -1,17 +1,17 @@
 import { Config, Duration, Effect, Schema, Stream } from "effect";
 import { expect, it } from "vitest";
 
-import {
-  Opcua,
-  OpcuaClient,
-  type MethodHandle,
-  type OpcuaSession,
-  type VariableHandle,
-  type WritableVariableHandle,
-} from "../src/index.js";
+import * as Opcua from "../src/Opcua.js";
+import * as OpcuaClient from "../src/OpcuaClient.js";
+import * as OpcuaSession from "../src/OpcuaSession.js";
+import type { MethodHandle } from "../src/OpcuaMethod.js";
+import type {
+  VariableHandle,
+  WritableVariableHandle,
+} from "../src/OpcuaVariable.js";
 
 const expectVariableHandleTypes = (
-  session: OpcuaSession,
+  session: OpcuaSession.OpcuaSession,
   writable: WritableVariableHandle<number>,
   readOnly: VariableHandle<string, number, "read">,
 ) => {
@@ -23,7 +23,7 @@ const expectVariableHandleTypes = (
   // @ts-expect-error read-only handles do not expose write
   readOnly.write(123);
 
-  session.handle(
+  session.makeHandle(
     Opcua.variable({
       nodeId: "ns=1;s=Number",
       codec: Opcua.schema(Schema.Number),
@@ -33,27 +33,47 @@ const expectVariableHandleTypes = (
 
 void expectVariableHandleTypes;
 
-const expectBatchTypes = (
-  numberHandle: WritableVariableHandle<number>,
-  booleanHandle: WritableVariableHandle<boolean>,
-) => {
-  Opcua.writeAll([
-    { handle: numberHandle, value: 123 },
-    { handle: booleanHandle, value: false },
-  ] as const);
+const expectKeyedBatchTypes = () => {
+  const Temperature = Opcua.variable({
+    nodeId: "ns=1;s=Temperature",
+    codec: Opcua.schema(Schema.Number),
+  });
+  const SpeedSetpoint = Opcua.variable({
+    nodeId: "ns=1;s=SpeedSetpoint",
+    codec: Opcua.schema(Schema.Number),
+    access: "readWrite",
+  });
+  const ReadOnly = Opcua.variable({
+    nodeId: "ns=1;s=ReadOnly",
+    codec: Opcua.schema(Schema.Number),
+  });
 
-  Opcua.writeAll([
-    {
-      handle: numberHandle,
-      // @ts-expect-error write values must match their handle type
-      value: "wrong",
-    },
-  ] as const);
+  Effect.gen(function* () {
+    const snapshot = yield* OpcuaSession.readMany({
+      temperature: Temperature,
+    } as const);
+    if (snapshot.temperature._tag === "Value") {
+      const value: number = snapshot.temperature.value;
+      void value;
+    }
+
+    yield* OpcuaSession.writeMany({
+      speedSetpoint: [SpeedSetpoint, 123],
+    } as const);
+
+    // @ts-expect-error write values must match the definition codec type
+    yield* OpcuaSession.writeMany({ speedSetpoint: [SpeedSetpoint, "wrong"] } as const);
+
+    yield* OpcuaSession.writeMany({
+      // @ts-expect-error read-only definitions are not writable
+      readOnly: [ReadOnly, 1],
+    } as const);
+  });
 };
 
-void expectBatchTypes;
+void expectKeyedBatchTypes;
 
-const expectMethodTypes = (session: OpcuaSession) => {
+const expectMethodTypes = (session: OpcuaSession.OpcuaSession) => {
   const start = Opcua.method({
     objectId: "ns=1;s=MyMachine",
     methodId: "ns=1;s=MyMachine.Start",
@@ -66,12 +86,12 @@ const expectMethodTypes = (session: OpcuaSession) => {
     },
   });
 
-  session.handle(start);
+  session.makeHandle(start);
 };
 
 void expectMethodTypes;
 
-const expectCallAllTypes = (
+const expectCallManyTypes = (
   handle: MethodHandle<
     { readonly Value: number },
     { readonly Accepted: boolean },
@@ -79,21 +99,42 @@ const expectCallAllTypes = (
     "ns=1;s=Method"
   >,
 ) => {
-  Opcua.callAll([{ handle, input: { Value: 1 } }] as const);
+  void handle;
+  const Reset = Opcua.method({
+    objectId: "ns=1;s=Object",
+    methodId: "ns=1;s=Reset",
+  });
+  const Echo = Opcua.method({
+    objectId: "ns=1;s=Object",
+    methodId: "ns=1;s=Echo",
+    input: { Value: Opcua.arg({ codec: Opcua.schema(Schema.Number) }) },
+    output: { Accepted: Opcua.arg({ codec: Opcua.schema(Schema.Boolean) }) },
+  });
 
-  Opcua.callAll([
-    {
-      handle,
-      // @ts-expect-error input values must match their method handle type
-      input: { Value: "wrong" },
-    },
-  ] as const);
+  OpcuaSession.callMany({ reset: [Reset, {}] } as const);
+
+  OpcuaSession.callMany({
+    // @ts-expect-error no-input methods require explicit {}
+    reset: [Reset],
+  } as const);
+
+  OpcuaSession.callMany({
+    echo: [Echo, { Value: 1 }],
+  } as const);
+
+  OpcuaSession.callMany({
+    echo: [
+      Echo,
+      // @ts-expect-error input values must match the method definition
+      { Value: "wrong" },
+    ],
+  } as const);
 };
 
-void expectCallAllTypes;
+void expectCallManyTypes;
 
 const expectMonitorTypes = (
-  session: OpcuaSession,
+  session: OpcuaSession.OpcuaSession,
   readOnly: VariableHandle<string, number, "read">,
 ) => {
   const Temperature = Opcua.variable({
@@ -116,7 +157,7 @@ const expectMonitorTypes = (
   };
 
   Effect.gen(function* () {
-    const subscription = yield* session.subscription({
+    const subscription = yield* session.makeSubscription({
       publishingInterval: Duration.millis(100),
     });
     const monitor = yield* subscription.monitor(
@@ -181,16 +222,6 @@ const expectMonitorTypes = (
         discardOldest: true,
         filter: Opcua.MonitorFilter.statusValue(),
         timestamps: "source" as const,
-        clientBuffer: Opcua.BufferPolicy.latest(),
-      },
-    );
-
-    yield* subscription.monitor(
-      { temperature: Temperature } as const,
-      // @ts-expect-error server-load options are required
-      {
-        startup: "strict" as const,
-        validation: "strict" as const,
         clientBuffer: Opcua.BufferPolicy.latest(),
       },
     );

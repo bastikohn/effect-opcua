@@ -12,16 +12,21 @@ import {
 } from "node-opcua";
 import { Effect, Result } from "effect";
 
-import { runChunked, type BatchOptions } from "./batch.js";
-import type { NodeIdString } from "./capabilities.js";
-import { Codec, dynamic, type CodecType, type OpcuaCodec } from "./codecs.js";
+import { runChunked, type BatchOptions } from "./internal/batch.js";
+import type { NodeIdString } from "./internal/capabilities.js";
+import { Codec, dynamic, type CodecType, type OpcuaCodec } from "./internal/codecs.js";
 import {
+  configurationError,
+  isConfigurationError,
+  methodInputError,
+  methodNotExecutableError,
+  serviceError,
   OpcuaAccessDeniedError,
   OpcuaConfigurationError,
   OpcuaMethodInputError,
   OpcuaMethodNotExecutableError,
   OpcuaServiceError,
-} from "./errors.js";
+} from "./OpcuaError.js";
 import {
   isGood,
   normalizeLocalizedText,
@@ -31,8 +36,8 @@ import {
   type OpcuaLocalizedTextInfo,
   type OpcuaNodeIdInfo,
   type OpcuaStatusInfo,
-} from "./normalize.js";
-import type { OpcuaStructureRuntime } from "./structure-runtime.js";
+} from "./internal/normalize.js";
+import type { OpcuaStructureRuntime } from "./internal/structure-runtime.js";
 
 export type MethodArgSelector =
   | { readonly _tag: "Name"; readonly name: string }
@@ -64,8 +69,8 @@ export type MethodDef<
 export type AnyMethodDef = MethodDef<
   string,
   string,
-  MethodArgRecord | undefined,
-  MethodArgRecord | undefined
+  any,
+  any
 >;
 
 export type ArgType<Arg> = Arg extends MethodArg<infer A> ? A : never;
@@ -75,16 +80,16 @@ export type InputOfMethodDef<Spec> = Spec extends {
 }
   ? Input extends MethodArgRecord
     ? { readonly [Key in keyof Input]: ArgType<Input[Key]> }
-    : Record<string, OpcuaDynamicValue>
-  : Record<string, OpcuaDynamicValue>;
+    : {}
+  : {};
 
 export type OutputOfMethodDef<Spec> = Spec extends {
   readonly output?: infer Output;
 }
   ? Output extends MethodArgRecord
     ? { readonly [Key in keyof Output]: ArgType<Output[Key]> }
-    : Record<string, OpcuaDynamicValue>
-  : Record<string, OpcuaDynamicValue>;
+    : {}
+  : {};
 
 export type MethodMetadata = {
   readonly objectId: NodeIdString;
@@ -250,20 +255,23 @@ export const makeMethodArg = <
     readonly name?: string;
     readonly index?: number;
   } = {},
-): MethodArg<CodecType<C>> => ({
-  _tag: "MethodArg",
-  codec: (options.codec ?? dynamic()) as unknown as OpcuaCodec<CodecType<C>>,
-  selector:
-    options.name !== undefined
-      ? { _tag: "Name", name: options.name }
-      : options.index !== undefined
-        ? { _tag: "Index", index: options.index }
-        : undefined,
-  selectorError:
-    options.name !== undefined && options.index !== undefined
-      ? "name and index are mutually exclusive"
-      : undefined,
-});
+): MethodArg<CodecType<C>> => {
+  if (options.name !== undefined && options.index !== undefined) {
+    throw new TypeError("name and index are mutually exclusive");
+  }
+  return {
+    _tag: "MethodArg",
+    codec: (options.codec ?? dynamic()) as unknown as OpcuaCodec<CodecType<C>>,
+    selector:
+      options.name !== undefined
+        ? { _tag: "Name", name: options.name }
+        : options.index !== undefined
+          ? { _tag: "Index", index: options.index }
+          : undefined,
+  };
+};
+
+export const arg = makeMethodArg;
 
 export const makeMethodDef = <
   const ObjectId extends string,
@@ -285,6 +293,8 @@ export const makeMethodDef = <
   includeRaw: options.includeRaw,
 });
 
+export const make = makeMethodDef;
+
 export const makeMethodHandle = <const Spec extends AnyMethodDef>(
   session: ClientSession,
   spec: Spec,
@@ -302,7 +312,7 @@ export const makeMethodHandle = <const Spec extends AnyMethodDef>(
     );
     if (!metadata.executable || metadata.userExecutable === false) {
       return yield* Effect.fail(
-        new OpcuaMethodNotExecutableError({
+        methodNotExecutableError({
           objectId: spec.objectId,
           methodId: spec.methodId,
           executable: metadata.executable,
@@ -378,7 +388,7 @@ export const callHandle = <
     const result = yield* Effect.tryPromise({
       try: () => session.call(preflight.request),
       catch: (cause) =>
-        new OpcuaServiceError({
+        serviceError({
           operation: "call",
           nodeId: handle.methodId,
           cause,
@@ -412,14 +422,14 @@ export const callMethods = (
         const results = yield* Effect.tryPromise({
           try: () => session.call(chunk.map((preflight) => preflight.request)),
           catch: (cause) =>
-            new OpcuaServiceError({
+            serviceError({
               operation: "call",
               cause,
             }),
         });
         if (results.length !== chunk.length) {
           return yield* Effect.fail(
-            new OpcuaServiceError({
+            serviceError({
               operation: "call",
               cause: `Expected ${chunk.length} CallMethodResults, got ${results.length}`,
             }),
@@ -438,6 +448,45 @@ export const callMethods = (
     );
   });
 
+export const methodCallOptionsError = (
+  operation: string,
+  objectId: NodeIdString,
+  methodId: NodeIdString,
+  options: MethodCallOptions | undefined,
+) => {
+  if (options === undefined) return undefined;
+  if (!isPlainRecord(options)) {
+    return configurationError({
+      operation,
+      objectId,
+      methodId,
+      cause: "options must be an object",
+    });
+  }
+  const unknown = Object.keys(options).filter((key) => key !== "includeRaw");
+  if (unknown.length > 0) {
+    return configurationError({
+      operation,
+      objectId,
+      methodId,
+      cause: `unsupported option: ${unknown.join(", ")}`,
+    });
+  }
+  if (
+    "includeRaw" in options &&
+    options.includeRaw !== undefined &&
+    typeof options.includeRaw !== "boolean"
+  ) {
+    return configurationError({
+      operation,
+      objectId,
+      methodId,
+      cause: "includeRaw must be a boolean",
+    });
+  }
+  return undefined;
+};
+
 export const resolveMethodMapping = (
   operation: string,
   nodeId: NodeIdString,
@@ -450,14 +499,10 @@ export const resolveMethodMapping = (
   Effect.gen(function* () {
     const mapping = fields
       ? explicitMapping(operation, nodeId, arguments_, fields)
-      : defaultMapping(arguments_);
-    if (mapping instanceof OpcuaConfigurationError) {
+      : emptyMapping(operation, nodeId, arguments_);
+    if (isConfigurationError(mapping)) {
       return yield* Effect.fail(
-        new OpcuaConfigurationError({
-          operation,
-          nodeId,
-          cause: mapping.cause,
-        }),
+        configurationError({ operation, nodeId, cause: mapping.reason.cause }),
       );
     }
     for (const entry of mapping) {
@@ -468,7 +513,7 @@ export const resolveMethodMapping = (
       ).pipe(
         Effect.mapError(
           (cause) =>
-            new OpcuaConfigurationError({
+            configurationError({
               operation,
               nodeId,
               cause: {
@@ -517,7 +562,7 @@ export const readBooleanAttribute = (
     return dataValue.value.value as boolean;
   }
   if (!required) return undefined;
-  return new OpcuaConfigurationError({
+  return configurationError({
     operation,
     nodeId,
     cause: "method boolean attribute is unreadable",
@@ -534,8 +579,18 @@ export const preflightMethodCall = <
   input: Input,
   structureRuntime: OpcuaStructureRuntime,
   options?: MethodCallOptions,
-): Effect.Effect<MethodPreflight, OpcuaMethodInputError | OpcuaServiceError> =>
+): Effect.Effect<
+  MethodPreflight,
+  OpcuaConfigurationError | OpcuaMethodInputError | OpcuaServiceError
+> =>
   Effect.gen(function* () {
+    const optionsError = methodCallOptionsError(
+      "method.call.options",
+      handle.objectId,
+      handle.methodId,
+      options,
+    );
+    if (optionsError) return yield* Effect.fail(optionsError);
     if (
       handle.metadata.inputMapping.some((mapping) =>
         Codec.requiresStructureRuntime(mapping.arg.codec),
@@ -549,7 +604,7 @@ export const preflightMethodCall = <
     const inputRecord = objectRecord(input);
     if (!inputRecord) {
       return yield* Effect.fail(
-        new OpcuaMethodInputError({
+        methodInputError({
           objectId: handle.objectId,
           methodId: handle.methodId,
           input,
@@ -573,7 +628,7 @@ export const preflightMethodCall = <
       ).pipe(
         Effect.mapError(
           (error) =>
-            new OpcuaMethodInputError({
+            methodInputError({
               objectId: handle.objectId,
               methodId: handle.methodId,
               input,
@@ -649,27 +704,18 @@ export const methodResultFromRaw = <
     } as MethodCallResult<Output, ObjectId, MethodId>;
   }) as Effect.Effect<MethodCallResult<Output, ObjectId, MethodId>>;
 
-const defaultMapping = (arguments_: ReadonlyArray<MethodArgumentMetadata>) => {
-  const seenNames = new Set<string>();
-  const mapping: Array<MethodArgumentMapping> = [];
-  for (let index = 0; index < arguments_.length; index++) {
-    const argumentName = arguments_[index]!.name;
-    if (!argumentName || seenNames.has(argumentName)) {
-      return new OpcuaConfigurationError({
-        operation: "handle.method.argumentMap",
-        cause: "Argument names must be non-empty and unique",
+const emptyMapping = (
+  operation: string,
+  nodeId: NodeIdString,
+  arguments_: ReadonlyArray<MethodArgumentMetadata>,
+) =>
+  arguments_.length === 0
+    ? []
+    : configurationError({
+        operation,
+        nodeId,
+        cause: "Method arguments must be declared explicitly in v1",
       });
-    }
-    seenNames.add(argumentName);
-    mapping.push({
-      key: argumentName,
-      index,
-      argumentName,
-      arg: makeMethodArg(),
-    });
-  }
-  return mapping;
-};
 
 const explicitMapping = (
   _operation: string,
@@ -681,7 +727,7 @@ const explicitMapping = (
   const mapping: Array<MethodArgumentMapping> = [];
   for (const [key, arg] of Object.entries(fields)) {
     if (arg.selectorError) {
-      return new OpcuaConfigurationError({
+      return configurationError({
         operation: "handle.method.argumentMap",
         cause: `Argument field ${key}: ${arg.selectorError}`,
       });
@@ -697,19 +743,19 @@ const explicitMapping = (
             .filter((index): index is number => index !== undefined);
     const index = matches[0] ?? -1;
     if (!Number.isInteger(index) || index < 0 || index >= arguments_.length) {
-      return new OpcuaConfigurationError({
+      return configurationError({
         operation: "handle.method.argumentMap",
         cause: `Argument selector for ${key} did not resolve`,
       });
     }
     if (matches.length !== 1) {
-      return new OpcuaConfigurationError({
+      return configurationError({
         operation: "handle.method.argumentMap",
         cause: `Argument selector for ${key} did not resolve exactly once`,
       });
     }
     if (usedIndexes.has(index)) {
-      return new OpcuaConfigurationError({
+      return configurationError({
         operation: "handle.method.argumentMap",
         cause: "Two public keys target the same argument",
       });
@@ -723,7 +769,7 @@ const explicitMapping = (
     });
   }
   if (usedIndexes.size !== arguments_.length) {
-    return new OpcuaConfigurationError({
+    return configurationError({
       operation: "handle.method.argumentMap",
       cause: "Method arguments must cover every OPC UA argument",
     });
@@ -742,7 +788,7 @@ const validateInputKeys = (
   for (const key of expected) {
     if (!(key in inputRecord)) {
       const mapping = handle.metadata.inputMapping.find((m) => m.key === key);
-      return new OpcuaMethodInputError({
+      return methodInputError({
         objectId: handle.objectId,
         methodId: handle.methodId,
         input,
@@ -754,7 +800,7 @@ const validateInputKeys = (
   }
   for (const key of Object.keys(inputRecord)) {
     if (!expected.has(key)) {
-      return new OpcuaMethodInputError({
+      return methodInputError({
         objectId: handle.objectId,
         methodId: handle.methodId,
         input,
@@ -824,11 +870,17 @@ const objectRecord = (value: unknown): Record<string, unknown> | undefined =>
     ? (value as Record<string, unknown>)
     : undefined;
 
+const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null &&
+  typeof value === "object" &&
+  !Array.isArray(value) &&
+  Object.getPrototypeOf(value) === Object.prototype;
+
 const coerceNodeIdOrFail = (operation: string, nodeId: unknown) =>
   Effect.try({
     try: () => coerceNodeId(nodeId),
     catch: (cause) =>
-      new OpcuaConfigurationError({ operation, nodeId: String(nodeId), cause }),
+      configurationError({ operation, nodeId: String(nodeId), cause }),
   });
 
 const argumentCodecMetadata = (

@@ -5,7 +5,8 @@ import {
   startDemoOpcuaServer,
   type DemoOpcuaServer,
 } from "../../../examples/demo-server/src/index.js";
-import { OpcuaClient, OpcuaSession } from "../src/index.js";
+import * as OpcuaClient from "../src/OpcuaClient.js";
+import * as OpcuaSession from "../src/OpcuaSession.js";
 
 vi.setConfig({ testTimeout: 30_000 });
 
@@ -31,7 +32,7 @@ export const makeLiveTestContext = (port: number) => {
     );
 
   const runLive = <A, E>(
-    effect: Effect.Effect<A, E, OpcuaSession | Scope.Scope>,
+    effect: Effect.Effect<A, E, OpcuaSession.OpcuaSession | Scope.Scope>,
   ) =>
     Effect.runPromise(
       Effect.scoped(effect).pipe(

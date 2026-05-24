@@ -7,7 +7,10 @@ import {
   type ReferenceDescription,
 } from "node-opcua";
 
-import { OpcuaConfigurationError } from "./errors.js";
+import {
+  configurationError,
+  type OpcuaConfigurationError,
+} from "../OpcuaError.js";
 import {
   isGood,
   normalizeExpandedNodeId,
@@ -77,7 +80,7 @@ export type OpcuaBrowseChildrenOptions = {
 
 export const browseOptionsError = (input: OpcuaBrowseOptions) => {
   if (input.nodeId.trim() === "") {
-    return new OpcuaConfigurationError({
+    return configurationError({
       operation: "browse",
       nodeId: input.nodeId,
       cause: "nodeId must not be empty",
@@ -88,7 +91,7 @@ export const browseOptionsError = (input: OpcuaBrowseOptions) => {
     (!Number.isInteger(input.maxReferencesPerNode) ||
       input.maxReferencesPerNode < 0)
   ) {
-    return new OpcuaConfigurationError({
+    return configurationError({
       operation: "browse",
       nodeId: input.nodeId,
       cause: "maxReferencesPerNode must be a non-negative integer",
@@ -102,14 +105,14 @@ export const browseContinuationError = (
   continuation: OpcuaBrowseContinuation,
 ) => {
   if (continuation.nodeId.trim() === "") {
-    return new OpcuaConfigurationError({
+    return configurationError({
       operation,
       nodeId: continuation.nodeId,
       cause: "nodeId must not be empty",
     });
   }
   if (continuation.unsafeRaw.length === 0) {
-    return new OpcuaConfigurationError({
+    return configurationError({
       operation,
       nodeId: continuation.nodeId,
       cause: "continuation raw buffer must not be empty",

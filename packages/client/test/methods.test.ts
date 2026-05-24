@@ -1,13 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
 
-import {
-  Opcua,
-  OpcuaConfigurationError,
-  OpcuaMethodInputError,
-  OpcuaMethodNotExecutableError,
-  OpcuaSession,
-} from "../src/index.js";
+import * as Opcua from "../src/Opcua.js";
+import * as OpcuaSession from "../src/OpcuaSession.js";
 import { makeLiveTestContext } from "./live.js";
 
 const { runLive } = makeLiveTestContext(4844);
@@ -42,8 +37,8 @@ describe("methods", () => {
   it("discovers metadata and builds callable handles", async () => {
     const handle = await runLive(
       Effect.gen(function* () {
-        const session = yield* OpcuaSession;
-        return yield* session.handle(StartMethod);
+        const session = yield* OpcuaSession.OpcuaSession;
+        return yield* session.makeHandle(StartMethod);
       }),
     );
 
@@ -72,8 +67,8 @@ describe("methods", () => {
     await expect(
       runLive(
         Effect.gen(function* () {
-          const session = yield* OpcuaSession;
-          return yield* session.handle(
+          const session = yield* OpcuaSession.OpcuaSession;
+          return yield* session.makeHandle(
             Opcua.method({
               objectId: "ns=1;s=MyMachine",
               methodId: "ns=1;s=MyMachine.DisabledCommand",
@@ -81,14 +76,14 @@ describe("methods", () => {
           );
         }),
       ),
-    ).rejects.toBeInstanceOf(OpcuaMethodNotExecutableError);
+    ).rejects.toMatchObject({ _tag: "OpcuaError", reason: { _tag: "MethodNotExecutable" } });
   });
 
   it("maps arguments by public key, OPC UA name, and OPC UA index", async () => {
     const result = await runLive(
       Effect.gen(function* () {
-        const session = yield* OpcuaSession;
-        const handle = yield* session.handle(
+        const session = yield* OpcuaSession.OpcuaSession;
+        const handle = yield* session.makeHandle(
           Opcua.method({
             objectId: "ns=1;s=MyMachine",
             methodId: "ns=1;s=MyMachine.Start",
@@ -128,8 +123,8 @@ describe("methods", () => {
     await expect(
       runLive(
         Effect.gen(function* () {
-          const session = yield* OpcuaSession;
-          return yield* session.handle(
+          const session = yield* OpcuaSession.OpcuaSession;
+          return yield* session.makeHandle(
             Opcua.method({
               objectId: "ns=1;s=MyMachine",
               methodId: "ns=1;s=MyMachine.Start",
@@ -143,13 +138,13 @@ describe("methods", () => {
           );
         }),
       ),
-    ).rejects.toBeInstanceOf(OpcuaConfigurationError);
+    ).rejects.toMatchObject({ _tag: "OpcuaError", reason: { _tag: "Configuration" } });
 
     await expect(
       runLive(
         Effect.gen(function* () {
-          const session = yield* OpcuaSession;
-          return yield* session.handle(
+          const session = yield* OpcuaSession.OpcuaSession;
+          return yield* session.makeHandle(
             Opcua.method({
               objectId: "ns=1;s=MyMachine",
               methodId: "ns=1;s=MyMachine.UnnamedArguments",
@@ -157,40 +152,23 @@ describe("methods", () => {
           );
         }),
       ),
-    ).rejects.toBeInstanceOf(OpcuaConfigurationError);
+    ).rejects.toMatchObject({ _tag: "OpcuaError", reason: { _tag: "Configuration" } });
   });
 
   it("rejects invalid and duplicate OPC UA argument selectors", async () => {
-    await expect(
-      runLive(
-        Effect.gen(function* () {
-          const session = yield* OpcuaSession;
-          return yield* session.handle(
-            Opcua.method({
-              objectId: "ns=1;s=MyMachine",
-              methodId: "ns=1;s=MyMachine.Start",
-              input: {
-                speed: Opcua.arg({
-                  name: "StartSpeed",
-                  index: 0,
-                  codec: Opcua.schema(Schema.Number),
-                }),
-                force: Opcua.arg({
-                  name: "Force",
-                  codec: Opcua.schema(Schema.Boolean),
-                }),
-              },
-            }),
-          );
-        }),
-      ),
-    ).rejects.toBeInstanceOf(OpcuaConfigurationError);
+    expect(() =>
+      Opcua.arg({
+        name: "StartSpeed",
+        index: 0,
+        codec: Opcua.schema(Schema.Number),
+      }),
+    ).toThrow("name and index are mutually exclusive");
 
     await expect(
       runLive(
         Effect.gen(function* () {
-          const session = yield* OpcuaSession;
-          return yield* session.handle(
+          const session = yield* OpcuaSession.OpcuaSession;
+          return yield* session.makeHandle(
             Opcua.method({
               objectId: "ns=1;s=MyMachine",
               methodId: "ns=1;s=MyMachine.Start",
@@ -208,24 +186,29 @@ describe("methods", () => {
           );
         }),
       ),
-    ).rejects.toBeInstanceOf(OpcuaConfigurationError);
+    ).rejects.toMatchObject({ _tag: "OpcuaError", reason: { _tag: "Configuration" } });
   });
 
   it("calls methods with named inputs, zero inputs, and dynamic values", async () => {
     const result = await runLive(
       Effect.gen(function* () {
-        const session = yield* OpcuaSession;
-        const start = yield* session.handle(StartMethod);
-        const reset = yield* session.handle(
+        const session = yield* OpcuaSession.OpcuaSession;
+        const start = yield* session.makeHandle(StartMethod);
+        const reset = yield* session.makeHandle(
           Opcua.method({
             objectId: "ns=1;s=MyMachine",
             methodId: "ns=1;s=MyMachine.Reset",
+            output: {
+              Accepted: Opcua.arg({ codec: Opcua.schema(Schema.Boolean) }),
+            },
           }),
         );
-        const echo = yield* session.handle(
+        const echo = yield* session.makeHandle(
           Opcua.method({
             objectId: "ns=1;s=MyMachine",
             methodId: "ns=1;s=MyMachine.Echo",
+            input: { Value: Opcua.arg() },
+            output: { Value: Opcua.arg() },
           }),
         );
         const started = yield* start.call({ StartSpeed: 120, Force: false });
@@ -252,8 +235,8 @@ describe("methods", () => {
   it("fails missing and unknown input keys before calling the server", async () => {
     const failures = await runLive(
       Effect.gen(function* () {
-        const session = yield* OpcuaSession;
-        const handle = yield* session.handle(StartMethod);
+        const session = yield* OpcuaSession.OpcuaSession;
+        const handle = yield* session.makeHandle(StartMethod);
         let calls = 0;
         const original = session.unsafeRaw.call.bind(session.unsafeRaw);
         (session.unsafeRaw as { call: typeof session.unsafeRaw.call }).call = ((
@@ -274,22 +257,30 @@ describe("methods", () => {
     );
 
     expect(failures.calls).toBe(0);
-    expect(failures.missing).toBeInstanceOf(OpcuaMethodInputError);
-    expect(failures.missing).toMatchObject({ phase: "MissingInputKey" });
-    expect(failures.unknown).toMatchObject({ phase: "UnknownInputKey" });
+    expect(failures.missing).toMatchObject({
+      _tag: "OpcuaError",
+      reason: { _tag: "MethodInput", phase: "MissingInputKey" },
+    });
+    expect(failures.unknown).toMatchObject({
+      reason: { phase: "UnknownInputKey" },
+    });
   });
 
   it("returns method statuses and schema decode failures as data", async () => {
     const result = await runLive(
       Effect.gen(function* () {
-        const session = yield* OpcuaSession;
-        const reject = yield* session.handle(
+        const session = yield* OpcuaSession.OpcuaSession;
+        const reject = yield* session.makeHandle(
           Opcua.method({
             objectId: "ns=1;s=MyMachine",
             methodId: "ns=1;s=MyMachine.RejectIfNegative",
+            input: { Value: Opcua.arg({ codec: Opcua.schema(Schema.Number) }) },
+            output: {
+              Accepted: Opcua.arg({ codec: Opcua.schema(Schema.Boolean) }),
+            },
           }),
         );
-        const echoNumber = yield* session.handle(
+        const echoNumber = yield* session.makeHandle(
           Opcua.method({
             objectId: "ns=1;s=MyMachine",
             methodId: "ns=1;s=MyMachine.Echo",
@@ -316,11 +307,13 @@ describe("methods", () => {
   it("supports includeRaw defaults and per-call overrides", async () => {
     const result = await runLive(
       Effect.gen(function* () {
-        const session = yield* OpcuaSession;
-        const handle = yield* session.handle(
+        const session = yield* OpcuaSession.OpcuaSession;
+        const handle = yield* session.makeHandle(
           Opcua.method({
             objectId: "ns=1;s=MyMachine",
             methodId: "ns=1;s=MyMachine.Echo",
+            input: { Value: Opcua.arg() },
+            output: { Value: Opcua.arg() },
             includeRaw: true,
           }),
         );
@@ -338,32 +331,30 @@ describe("methods", () => {
     expect(result.withoutRaw.unsafeRaw).toBeUndefined();
   });
 
-  it("calls all method handles in input order", async () => {
+  it("calls keyed method definitions in key order", async () => {
+    const Echo = Opcua.method({
+      objectId: "ns=1;s=MyMachine",
+      methodId: "ns=1;s=MyMachine.Echo",
+      input: { Value: Opcua.arg({ codec: Opcua.schema(Schema.String) }) },
+      output: { Value: Opcua.arg({ codec: Opcua.schema(Schema.String) }) },
+    });
     const result = await runLive(
       Effect.gen(function* () {
-        const session = yield* OpcuaSession;
-        const echo = yield* session.handle(
-          Opcua.method({
-            objectId: "ns=1;s=MyMachine",
-            methodId: "ns=1;s=MyMachine.Echo",
-          }),
-        );
-        return yield* Opcua.callAll([
-          {
-            handle: echo,
-            input: { Value: "a" },
-            options: { includeRaw: true },
-          },
-          { handle: echo, input: { Value: "b" } },
-        ] as const);
+        return yield* OpcuaSession.callMany({
+          first: [Echo, { Value: "a" }, { includeRaw: true }],
+          second: [Echo, { Value: "b" }],
+        } as const);
       }),
     );
 
-    expect(result.map((entry) => entry._tag)).toEqual(["Called", "Called"]);
-    expect(result[0]).toMatchObject({ output: { Value: "a" } });
-    expect(result[1]).toMatchObject({ output: { Value: "b" } });
-    expect(result[0].unsafeRaw).toBeDefined();
-    expect(result[1].unsafeRaw).toBeUndefined();
+    expect(Object.values(result).map((entry) => entry._tag)).toEqual([
+      "Called",
+      "Called",
+    ]);
+    expect(result.first).toMatchObject({ output: { Value: "a" } });
+    expect(result.second).toMatchObject({ output: { Value: "b" } });
+    expect(result.first.unsafeRaw).toBeDefined();
+    expect(result.second.unsafeRaw).toBeUndefined();
   });
 
   it("encodes and decodes structure method arguments through the shared codec", async () => {
@@ -374,8 +365,8 @@ describe("methods", () => {
     ];
     const result = await runLive(
       Effect.gen(function* () {
-        const session = yield* OpcuaSession;
-        const echoScan = yield* session.handle(
+        const session = yield* OpcuaSession.OpcuaSession;
+        const echoScan = yield* session.makeHandle(
           Opcua.method({
             objectId: "ns=1;s=MyMachine",
             methodId: "ns=1;s=MyMachine.EchoScan",

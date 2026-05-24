@@ -1,5 +1,6 @@
+import { EventEmitter } from "node:events";
 import { describe, expect, it } from "vitest";
-import { Effect, Schema } from "effect";
+import { Effect, PubSub, Schema } from "effect";
 import type {
   Argument,
   CallMethodRequestLike,
@@ -11,385 +12,303 @@ import type {
   WriteValueOptions,
 } from "node-opcua";
 
-import { Opcua, OpcuaMethodInputError } from "../src/index.js";
+import * as Opcua from "../src/Opcua.js";
+import { isOpcuaError } from "../src/OpcuaError.js";
+import { makeSession } from "../src/OpcuaSession.js";
+import type { OpcuaSessionEvent } from "../src/internal/events.js";
 import {
-  makeMethodHandle,
-  methodArgumentMetadataFromRaw,
-  type MethodArg,
-  type MethodHandle,
-  type MethodMetadata,
-} from "../src/methods.js";
-import {
-  coerceNodeId,
+  AttributeIds,
   DataType,
   StatusCodes,
   Variant,
+  coerceNodeId,
 } from "../src/node-opcua.js";
-import type { OpcuaStructureRuntime } from "../src/structure-runtime.js";
-import {
-  makeVariableHandle,
-  variableMetadataFromRaw,
-  type WritableVariableHandle,
-} from "../src/values.js";
 
-const fakeStructureRuntime = {
-  ensureInitialized: () => Effect.void,
-  invalidate: Effect.void,
-  encodeStructure: () => Effect.die("unused"),
-  encodeStructureArray: () => Effect.die("unused"),
-  decodeStructure: () => {
-    throw new Error("unused");
-  },
-  decodeStructureArray: () => {
-    throw new Error("unused");
-  },
-  variantFromStructure: () => Effect.die("unused"),
-} as unknown as OpcuaStructureRuntime;
+describe("keyed batch APIs", () => {
+  it("returns empty dictionaries without server calls", async () => {
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* makeFakeSession();
+          return {
+            read: yield* fake.session.readMany({}),
+            write: yield* fake.session.writeMany({}),
+            call: yield* fake.session.callMany({}),
+            calls: fake.calls,
+          };
+        }),
+      ),
+    );
 
-describe("batch helpers", () => {
-  it("batches readAll into one read service call and preserves order", async () => {
-    const valuesByNodeId = new Map([
-      ["ns=1;s=Batch.Read.A", 1],
-      ["ns=1;s=Batch.Read.B", 2],
-      ["ns=1;s=Batch.Read.C", 3],
-    ]);
-    const { session, readCalls } = makeFakeVariableSession({
-      read: (nodesToRead) =>
-        nodesToRead.map((node) =>
-          numberDataValue(valuesByNodeId.get(node.nodeId?.toString() ?? "")),
-        ),
-    });
-    const a = makeNumberHandle(session, "ns=1;s=Batch.Read.A");
-    const b = makeNumberHandle(session, "ns=1;s=Batch.Read.B");
-    const c = makeNumberHandle(session, "ns=1;s=Batch.Read.C");
-
-    const result = await Effect.runPromise(Opcua.readAll([c, a, b] as const));
-
-    expect(readCalls).toHaveLength(1);
-    expect(readCalls[0]).toHaveLength(3);
-    expect(result.map((entry) => entry._tag)).toEqual([
-      "Value",
-      "Value",
-      "Value",
-    ]);
-    expect(
-      result.map((entry) => entry._tag === "Value" && entry.value),
-    ).toEqual([3, 1, 2]);
+    expect(result).toMatchObject({ read: {}, write: {}, call: {} });
+    expect(result.calls.valueReads).toHaveLength(0);
+    expect(result.calls.writes).toHaveLength(0);
+    expect(result.calls.calls).toHaveLength(0);
   });
 
-  it("chunks readAll requests", async () => {
-    const { session, readCalls } = makeFakeVariableSession();
-    const handles = Array.from({ length: 251 }, (_, index) =>
-      makeNumberHandle(session, `ns=1;s=Batch.Chunk.${index}`),
-    );
+  it("reads keyed definitions without validation and preserves key mapping", async () => {
+    const Temperature = Opcua.variable({
+      nodeId: "ns=1;s=Batch.Read.A",
+      codec: Opcua.schema(Schema.Number),
+    });
+    const Pressure = Opcua.variable({
+      nodeId: "ns=1;s=Batch.Read.B",
+      codec: Opcua.schema(Schema.Number),
+    });
 
     const result = await Effect.runPromise(
-      Opcua.readAll(handles, { maxItemsPerRequest: 250 }),
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* makeFakeSession({
+            readValues: (nodes) =>
+              nodes.map((node) =>
+                numberDataValue(
+                  node.nodeId?.toString() === "ns=1;s=Batch.Read.A" ? 1 : 2,
+                ),
+              ),
+          });
+          const values = yield* fake.session.readMany(
+            { pressure: Pressure, temperature: Temperature } as const,
+            {
+              validation: "none",
+              service: { maxNodesPerRead: 1, maxConcurrentRequests: 2 },
+            },
+          );
+          return { values, calls: fake.calls };
+        }),
+      ),
     );
 
-    expect(result).toHaveLength(251);
-    expect(readCalls.map((call) => call.length)).toEqual([250, 1]);
+    expect(result.calls.metadataReads).toHaveLength(0);
+    expect(result.calls.valueReads.map((call) => call.length)).toEqual([1, 1]);
+    expect(result.values.temperature).toMatchObject({ _tag: "Value", value: 1 });
+    expect(result.values.pressure).toMatchObject({ _tag: "Value", value: 2 });
   });
 
-  it("keeps readAll decode errors and non-good statuses as data", async () => {
-    const { session, readCalls } = makeFakeVariableSession({
-      read: () => [
-        numberDataValue(1),
-        numberDataValue("not-a-number"),
-        numberDataValue(3, StatusCodes.BadNodeIdUnknown),
-      ],
+  it("caches strict read validation until session_restored", async () => {
+    const Temperature = Opcua.variable({
+      nodeId: "ns=1;s=Batch.Strict",
+      codec: Opcua.schema(Schema.Number),
     });
-    const a = makeNumberHandle(session, "ns=1;s=Batch.Mixed.A");
-    const b = makeNumberHandle(session, "ns=1;s=Batch.Mixed.B");
-    const c = makeNumberHandle(session, "ns=1;s=Batch.Mixed.C");
-
-    const result = await Effect.runPromise(Opcua.readAll([a, b, c] as const));
-
-    expect(readCalls).toHaveLength(1);
-    expect(result.map((entry) => entry._tag)).toEqual([
-      "Value",
-      "DecodeError",
-      "NonGoodStatus",
-    ]);
-  });
-
-  it("batches writeAll into one write service call and returns mixed statuses", async () => {
-    const { session, writeCalls } = makeFakeVariableSession({
-      write: () => [StatusCodes.Good, StatusCodes.BadNodeIdUnknown],
-    });
-    const a = makeNumberHandle(session, "ns=1;s=Batch.Write.A");
-    const b = makeNumberHandle(session, "ns=1;s=Batch.Write.B");
 
     const result = await Effect.runPromise(
-      Opcua.writeAll([
-        { handle: a, value: 11 },
-        { handle: b, value: 12 },
-      ] as const),
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* makeFakeSession();
+          yield* fake.session.readMany({ temperature: Temperature } as const);
+          yield* fake.session.readMany({ temperature: Temperature } as const);
+          fake.raw.emit("session_restored");
+          yield* fake.session.readMany({ temperature: Temperature } as const);
+          return fake.calls;
+        }),
+      ),
     );
 
-    expect(writeCalls).toHaveLength(1);
-    expect(writeCalls[0]).toHaveLength(2);
-    expect(writeCalls[0]?.map((write) => write.value?.value?.value)).toEqual([
-      11, 12,
-    ]);
-    expect(result.map((entry) => entry._tag)).toEqual([
-      "Written",
-      "NonGoodStatus",
-    ]);
+    expect(result.metadataReads).toHaveLength(2);
+    expect(result.valueReads).toHaveLength(3);
   });
 
-  it("encodes all writeAll entries before any service call", async () => {
-    const { session, writeCalls } = makeFakeVariableSession();
-    const a = makeNumberHandle(session, "ns=1;s=Batch.Preflight.A");
-    const b = makeNumberHandle(session, "ns=1;s=Batch.Preflight.B");
-    const entries = [
-      { handle: a, value: 1 },
-      { handle: b, value: "not-a-number" },
-    ] as unknown as ReadonlyArray<{
-      readonly handle: WritableVariableHandle<number>;
-      readonly value: number;
-    }>;
+  it("rejects duplicate NodeIds for read and write", async () => {
+    const A = Opcua.variable({ nodeId: "ns=1;s=Duplicate" });
+    const B = Opcua.variable({ nodeId: "ns=1;s=Duplicate", access: "readWrite" });
 
     await expect(
       Effect.runPromise(
-        Opcua.writeAll(entries, {
-          maxItemsPerRequest: 1,
-        }),
-      ),
-    ).rejects.toMatchObject({ _tag: "OpcuaEncodeError" });
-    expect(writeCalls).toHaveLength(0);
-  });
-
-  it("batches callAll into one call service request and preserves order", async () => {
-    const { session, callRequests } = makeFakeMethodSession({
-      call: (methodsToCall) =>
-        methodsToCall.map((request) =>
-          methodResult(
-            (((request.inputArguments?.[0] as Variant | undefined)?.value ??
-              0) as number) + 10,
-          ),
+        Effect.scoped(
+          Effect.gen(function* () {
+            const fake = yield* makeFakeSession();
+            return yield* fake.session.readMany({ a: A, b: A } as const);
+          }),
         ),
-    });
-    const a = await makeNumberMethodHandle(session, "ns=1;s=Batch.Call.A");
-    const b = await makeNumberMethodHandle(session, "ns=1;s=Batch.Call.B");
-
-    const result = await Effect.runPromise(
-      Opcua.callAll([
-        { handle: b, input: { Value: 2 } },
-        { handle: a, input: { Value: 1 } },
-      ] as const),
-    );
-
-    expect(callRequests).toHaveLength(1);
-    expect(callRequests[0]).toHaveLength(2);
-    expect(result.map((entry) => entry._tag)).toEqual(["Called", "Called"]);
-    expect(
-      result.map((entry) => entry._tag === "Called" && entry.output),
-    ).toEqual([{ Value: 12 }, { Value: 11 }]);
-  });
-
-  it("keeps callAll non-good statuses and decode errors as data", async () => {
-    const { session, callRequests } = makeFakeMethodSession({
-      call: () => [
-        methodResult(1),
-        methodResult(2, StatusCodes.BadInvalidArgument),
-        methodResult("not-a-number"),
-      ],
-    });
-    const a = await makeNumberMethodHandle(session, "ns=1;s=Batch.Mixed.A");
-    const b = await makeNumberMethodHandle(session, "ns=1;s=Batch.Mixed.B");
-    const c = await makeNumberMethodHandle(session, "ns=1;s=Batch.Mixed.C");
-
-    const result = await Effect.runPromise(
-      Opcua.callAll([
-        { handle: a, input: { Value: 1 } },
-        { handle: b, input: { Value: 2 } },
-        { handle: c, input: { Value: 3 } },
-      ] as const),
-    );
-
-    expect(callRequests).toHaveLength(1);
-    expect(result.map((entry) => entry._tag)).toEqual([
-      "Called",
-      "NonGoodStatus",
-      "DecodeError",
-    ]);
-  });
-
-  it("preflights all callAll entries before any service call", async () => {
-    const { session, callRequests } = makeFakeMethodSession();
-    const handle = await makeNumberMethodHandle(
-      session,
-      "ns=1;s=Batch.Preflight",
-    );
-    const entries = [
-      { handle, input: { Value: 1 } },
-      { handle, input: { Wrong: 2 } },
-    ] as ReadonlyArray<{
-      readonly handle: MethodHandle<
-        { readonly Value: number },
-        { readonly Value: number }
-      >;
-      readonly input: { readonly Value: number };
-    }>;
+      ),
+    ).rejects.toSatisfy(isConfigurationError);
 
     await expect(
       Effect.runPromise(
-        Opcua.callAll(entries, {
-          maxItemsPerRequest: 1,
+        Effect.scoped(
+          Effect.gen(function* () {
+            const fake = yield* makeFakeSession();
+            return yield* fake.session.writeMany({ a: [B, 1], b: [B, 2] } as const);
+          }),
+        ),
+      ),
+    ).rejects.toSatisfy(isConfigurationError);
+  });
+
+  it("preflights all writes before any write service call", async () => {
+    const A = Opcua.variable({
+      nodeId: "ns=1;s=Batch.Write.A",
+      codec: Opcua.schema(Schema.Number),
+      access: "readWrite",
+    });
+    const B = Opcua.variable({
+      nodeId: "ns=1;s=Batch.Write.B",
+      codec: Opcua.schema(Schema.Number),
+      access: "readWrite",
+    });
+
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* makeFakeSession();
+          const error = yield* fake.session
+            .writeMany({ a: [A, 1], b: [B, "bad" as never] } as const)
+            .pipe(Effect.flip);
+          return { error, calls: fake.calls };
         }),
       ),
-    ).rejects.toBeInstanceOf(OpcuaMethodInputError);
-    expect(callRequests).toHaveLength(0);
+    );
+
+    expect(isOpcuaError(result.error)).toBe(true);
+    expect(isOpcuaError(result.error) && result.error.reason._tag).toBe("Encode");
+    expect(result.calls.writes).toHaveLength(0);
+  });
+
+  it("calls duplicate method definitions and maps results by key", async () => {
+    const Echo = Opcua.method({
+      objectId: "ns=1;s=Object",
+      methodId: "ns=1;s=Method",
+      input: { Value: Opcua.arg({ codec: Opcua.schema(Schema.Number) }) },
+      output: { Value: Opcua.arg({ codec: Opcua.schema(Schema.Number) }) },
+    });
+
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* makeFakeSession();
+          const calls = yield* fake.session.callMany(
+            {
+              first: [Echo, { Value: 1 }],
+              second: [Echo, { Value: 2 }, { includeRaw: true }],
+            } as const,
+            { service: { maxMethodsPerCall: 1, maxConcurrentRequests: 1 } },
+          );
+          return { calls, serviceCalls: fake.calls.calls };
+        }),
+      ),
+    );
+
+    expect(result.serviceCalls.map((call) => call.length)).toEqual([1, 1]);
+    expect(result.calls.first).toMatchObject({
+      _tag: "Called",
+      output: { Value: 1 },
+    });
+    expect(result.calls.second).toMatchObject({
+      _tag: "Called",
+      output: { Value: 2 },
+    });
+    expect(result.calls.second.unsafeRaw).toBeDefined();
   });
 });
 
-const makeFakeVariableSession = (
+const isConfigurationError = (error: unknown) =>
+  isOpcuaError(error) && error.reason._tag === "Configuration";
+
+const makeFakeSession = (
   options: {
-    readonly read?: (
+    readonly readValues?: (
       nodesToRead: ReadonlyArray<ReadValueIdOptions>,
     ) => ReadonlyArray<DataValue>;
-    readonly write?: (
-      nodesToWrite: ReadonlyArray<WriteValueOptions>,
-    ) => ReadonlyArray<StatusCode>;
   } = {},
-) => {
-  const readCalls: Array<ReadonlyArray<ReadValueIdOptions>> = [];
-  const writeCalls: Array<ReadonlyArray<WriteValueOptions>> = [];
-  const session = {
-    read: async (
-      nodesToRead: ReadValueIdOptions | Array<ReadValueIdOptions>,
-    ) => {
-      const batch = Array.isArray(nodesToRead) ? nodesToRead : [nodesToRead];
-      readCalls.push([...batch]);
-      return (
-        options.read?.(batch) ?? batch.map((_, index) => numberDataValue(index))
-      );
-    },
-    write: async (
-      nodesToWrite: WriteValueOptions | Array<WriteValueOptions>,
-    ) => {
-      const batch = Array.isArray(nodesToWrite) ? nodesToWrite : [nodesToWrite];
-      writeCalls.push([...batch]);
-      return options.write?.(batch) ?? batch.map(() => StatusCodes.Good);
-    },
-  } as unknown as ClientSession;
-  return { session, readCalls, writeCalls };
-};
+) =>
+  Effect.gen(function* () {
+    const events = yield* PubSub.sliding<OpcuaSessionEvent>(16);
+    const calls = {
+      valueReads: [] as Array<ReadonlyArray<ReadValueIdOptions>>,
+      metadataReads: [] as Array<ReadonlyArray<ReadValueIdOptions>>,
+      writes: [] as Array<ReadonlyArray<WriteValueOptions>>,
+      calls: [] as Array<ReadonlyArray<CallMethodRequestLike>>,
+    };
+    const raw = Object.assign(new EventEmitter(), {
+      read: async (
+        nodesToRead: ReadValueIdOptions | Array<ReadValueIdOptions>,
+      ) => {
+        const batch = Array.isArray(nodesToRead) ? nodesToRead : [nodesToRead];
+        if (batch.every((node) => node.attributeId === AttributeIds.Value)) {
+          calls.valueReads.push([...batch]);
+          return (
+            options.readValues?.(batch) ??
+            batch.map((_, index) => numberDataValue(index))
+          );
+        }
+        calls.metadataReads.push([...batch]);
+        return batch.map(metadataDataValue);
+      },
+      write: async (
+        nodesToWrite: WriteValueOptions | Array<WriteValueOptions>,
+      ) => {
+        const batch = Array.isArray(nodesToWrite) ? nodesToWrite : [nodesToWrite];
+        calls.writes.push([...batch]);
+        return batch.map(() => StatusCodes.Good);
+      },
+      call: async (
+        methodsToCall: CallMethodRequestLike | Array<CallMethodRequestLike>,
+      ) => {
+        const batch = Array.isArray(methodsToCall)
+          ? methodsToCall
+          : [methodsToCall];
+        calls.calls.push([...batch]);
+        return batch.map((request) =>
+          methodResult(
+            ((request.inputArguments?.[0] as Variant | undefined)?.value ??
+              0) as number,
+          ),
+        );
+      },
+      getArgumentDefinition: async () => ({
+        inputArguments: [numberArgument("Value")],
+        outputArguments: [numberArgument("Value")],
+      }),
+    }) as unknown as ClientSession & EventEmitter;
 
-const makeNumberHandle = (session: ClientSession, nodeId: string) =>
-  makeVariableHandle(
-    session,
-    Opcua.variable({
-      nodeId,
-      codec: Opcua.schema(Schema.Number),
-      access: "readWrite",
-    }),
-    variableMetadataFromRaw({
-      nodeId,
-      dataTypeNodeId: coerceNodeId("i=11"),
-      builtInDataType: DataType.Double,
-      valueRank: -1,
-      accessLevel: 3,
-    }),
-    fakeStructureRuntime,
-  );
+    const session = yield* makeSession(raw, events);
+    return { raw, session, calls };
+  });
+
+const metadataDataValue = (node: ReadValueIdOptions): DataValue => {
+  switch (node.attributeId) {
+    case AttributeIds.DataType:
+      return variantDataValue(DataType.NodeId, coerceNodeId("i=11"));
+    case AttributeIds.ValueRank:
+      return variantDataValue(DataType.Int32, -1);
+    case AttributeIds.ArrayDimensions:
+      return {
+        statusCode: StatusCodes.BadAttributeIdInvalid,
+      } as unknown as DataValue;
+    case AttributeIds.AccessLevel:
+    case AttributeIds.UserAccessLevel:
+      return variantDataValue(DataType.Byte, 3);
+    case AttributeIds.Executable:
+    case AttributeIds.UserExecutable:
+      return variantDataValue(DataType.Boolean, true);
+    default:
+      return numberDataValue(0);
+  }
+};
 
 const numberDataValue = (
   value: unknown,
   statusCode: StatusCode = StatusCodes.Good,
 ): DataValue =>
+  variantDataValue(DataType.Double, value, statusCode);
+
+const variantDataValue = (
+  dataType: DataType,
+  value: unknown,
+  statusCode: StatusCode = StatusCodes.Good,
+): DataValue =>
   ({
     statusCode,
-    value: new Variant({
-      dataType: DataType.Double,
-      value,
-    }),
+    value: new Variant({ dataType, value }),
   }) as DataValue;
 
-const makeFakeMethodSession = (
-  options: {
-    readonly call?: (
-      methodsToCall: ReadonlyArray<CallMethodRequestLike>,
-    ) => ReadonlyArray<CallMethodResult>;
-  } = {},
-) => {
-  const callRequests: Array<ReadonlyArray<CallMethodRequestLike>> = [];
-  const session = {
-    call: async (
-      methodsToCall: CallMethodRequestLike | Array<CallMethodRequestLike>,
-    ) => {
-      const batch = Array.isArray(methodsToCall)
-        ? methodsToCall
-        : [methodsToCall];
-      callRequests.push([...batch]);
-      return (
-        options.call?.(batch) ??
-        batch.map((request) =>
-          methodResult(
-            ((request.inputArguments?.[0] as Variant | undefined)?.value ??
-              0) as number,
-          ),
-        )
-      );
-    },
-  } as unknown as ClientSession;
-  return { session, callRequests };
-};
-
-const makeNumberMethodHandle = (session: ClientSession, methodId: string) => {
-  const input = {
-    Value: Opcua.arg({ codec: Opcua.schema(Schema.Number) }),
-  };
-  const output = {
-    Value: Opcua.arg({ codec: Opcua.schema(Schema.Number) }),
-  };
-  const def = Opcua.method({
-    objectId: "ns=1;s=Batch.MethodObject",
-    methodId,
-    input,
-    output,
-  });
-  return Effect.runPromise(
-    makeMethodHandle(
-      session,
-      def,
-      methodMetadata(input.Value, output.Value, methodId),
-      fakeStructureRuntime,
-    ),
-  );
-};
-
-const methodMetadata = (
-  inputArg: MethodArg<number>,
-  outputArg: MethodArg<number>,
-  methodId: string,
-): MethodMetadata => ({
-  objectId: "ns=1;s=Batch.MethodObject",
-  methodId,
-  executable: true,
-  userExecutable: true,
-  inputArguments: [numberArgument("Value")],
-  outputArguments: [numberArgument("Value")],
-  inputMapping: [
-    { key: "Value", index: 0, argumentName: "Value", arg: inputArg },
-  ],
-  outputMapping: [
-    { key: "Value", index: 0, argumentName: "Value", arg: outputArg },
-  ],
-});
-
-const numberArgument = (name: string) =>
-  methodArgumentMetadataFromRaw(
-    {
-      name,
-      dataType: coerceNodeId("i=11"),
-      valueRank: -1,
-      arrayDimensions: [],
-    } as unknown as Argument,
-    coerceNodeId("i=11"),
-    DataType.Double,
-  );
+const numberArgument = (name: string): Argument =>
+  ({
+    name,
+    dataType: coerceNodeId("i=11"),
+    valueRank: -1,
+    arrayDimensions: [],
+  }) as unknown as Argument;
 
 const methodResult = (
   value: unknown,
@@ -397,10 +316,5 @@ const methodResult = (
 ): CallMethodResult =>
   ({
     statusCode,
-    outputArguments: [
-      new Variant({
-        dataType: DataType.Double,
-        value,
-      }),
-    ],
+    outputArguments: [new Variant({ dataType: DataType.Double, value })],
   }) as CallMethodResult;
