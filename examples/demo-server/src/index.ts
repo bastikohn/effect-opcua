@@ -36,6 +36,7 @@ export type DemoOpcuaServerOptions = {
   readonly certificateRootFolder?: string;
   readonly scenario?: DemoSimulationScenario;
   readonly simulationSpeed?: number;
+  readonly commandStatusCapacity?: number;
 };
 
 type Namespace = ReturnType<AddressSpace["getOwnNamespace"]>;
@@ -102,29 +103,16 @@ export const GlobalCommandKind = {
   Maintenance_ClearClampFault: 323,
 } as const;
 
-export const CommandActiveState = {
+export const CommandState = {
   None: 0,
-  Received: 1,
+  Observed: 1,
   Accepted: 2,
   Executing: 3,
-} as const;
-
-export const CommandTerminalState = {
-  None: 0,
-  Completed: 1,
-  Rejected: 2,
-  Failed: 3,
-  Cancelled: 4,
-  Superseded: 5,
-} as const;
-
-export const CommandResultCategory = {
-  None: 0,
-  Ok: 1,
-  Rejected: 2,
-  Failed: 3,
-  Cancelled: 4,
-  Superseded: 5,
+  Completed: 4,
+  Rejected: 5,
+  Failed: 6,
+  Cancelled: 7,
+  Superseded: 8,
 } as const;
 
 export const MachineState = {
@@ -296,6 +284,8 @@ type PayloadTypeName =
 type StructureTypeName =
   | PayloadTypeName
   | "GlobalCommandSubmitRequest"
+  | "CommandStatusBuffer"
+  | "CommandStatusEntry"
   | "RunConfiguration";
 
 type CommandMetadata = {
@@ -325,27 +315,22 @@ type GlobalCommandSubmitRequest = {
 };
 
 type CommandStatus = {
-  statusRevision: number;
+  revision: number;
+  capacity: number;
+  entries: Array<CommandStatusEntry>;
+  nextSequence: number;
+};
 
-  observedCommandId: string;
-  observedCommandKind: number;
-  observedClientId: string;
+type CommandStatusEntry = {
+  sequence: number;
+  commandId: string;
+  commandKind: number;
+  clientId: string;
+  state: number;
+  statusCode: string;
+  statusMessage: string;
   observedAt: Date;
-
-  activeCommandId: string;
-  activeCommandKind: number;
-  activeClientId: string;
-  activeState: number;
-  activeSince: Date;
-
-  lastFinishedCommandId: string;
-  lastFinishedCommandKind: number;
-  lastFinishedClientId: string;
-  lastFinishedState: number;
-  lastResultCategory: number;
-  lastResultCode: string;
-  lastResultMessage: string;
-  lastFinishedAt: Date;
+  updatedAt: Date;
 };
 
 type AxisModel = {
@@ -451,6 +436,7 @@ type MachineModel = {
     totalRejectedCount: number;
   };
   diagnostics: DiagnosticsModel;
+  telemetryRevision: number;
   lastTickAt: number;
   simulationSpeed: number;
 };
@@ -474,8 +460,6 @@ type Availability = {
   readonly message: string;
 };
 
-const zeroDate = () => new Date(0);
-
 const defaultSubmitRequest = (): GlobalCommandSubmitRequest => ({
   commandId: "",
   commandKind: GlobalCommandKind.None,
@@ -492,25 +476,11 @@ const defaultRunConfiguration = (): RunConfiguration => ({
   zAxisSpeedMmPerSecond: 0,
 });
 
-const defaultCommandStatus = (): CommandStatus => ({
-  statusRevision: 0,
-  observedCommandId: "",
-  observedCommandKind: GlobalCommandKind.None,
-  observedClientId: "",
-  observedAt: zeroDate(),
-  activeCommandId: "",
-  activeCommandKind: GlobalCommandKind.None,
-  activeClientId: "",
-  activeState: CommandActiveState.None,
-  activeSince: zeroDate(),
-  lastFinishedCommandId: "",
-  lastFinishedCommandKind: GlobalCommandKind.None,
-  lastFinishedClientId: "",
-  lastFinishedState: CommandTerminalState.None,
-  lastResultCategory: CommandResultCategory.None,
-  lastResultCode: "",
-  lastResultMessage: "",
-  lastFinishedAt: zeroDate(),
+const defaultCommandStatus = (capacity = 8): CommandStatus => ({
+  revision: 0,
+  capacity,
+  entries: [],
+  nextSequence: 1,
 });
 
 const commandMetadataSpecs = [
@@ -914,9 +884,16 @@ const installDemoAddressSpace = async (
     "Diagnostics",
     "DemoFillingCell.Diagnostics",
   );
+  const telemetry = addObject(
+    namespace,
+    machine,
+    "Telemetry",
+    "DemoFillingCell.Telemetry",
+  );
 
   installStateBranch(namespace, state, dataTypes, model);
   installCommandsBranch(namespace, commands, dataTypes, model);
+  installTelemetryBranch(namespace, telemetry, model);
   installMotionBranch(namespace, motion, dataTypes, model);
   installFillingBranch(namespace, filling, dataTypes, model);
   installPartHandlingBranch(namespace, partHandling, dataTypes, model);
@@ -953,15 +930,7 @@ const createDemoDataTypes = async (
   };
 
   const globalCommandKind = addEnum("GlobalCommandKind", GlobalCommandKind);
-  const commandActiveState = addEnum("CommandActiveState", CommandActiveState);
-  const commandTerminalState = addEnum(
-    "CommandTerminalState",
-    CommandTerminalState,
-  );
-  const commandResultCategory = addEnum(
-    "CommandResultCategory",
-    CommandResultCategory,
-  );
+  const commandState = addEnum("CommandState", CommandState);
   const machineState = addEnum("MachineState", MachineState);
   const operatingMode = addEnum("OperatingMode", OperatingMode);
   const cyclePhase = addEnum("CyclePhase", CyclePhase);
@@ -985,10 +954,15 @@ const createDemoDataTypes = async (
   const stringType = coerceNodeId(DataTypeIds.String);
   const doubleType = coerceNodeId(DataTypeIds.Double);
   const uint32Type = coerceNodeId(DataTypeIds.UInt32);
+  const dateTimeType = coerceNodeId(DataTypeIds.DateTime);
 
   const createStructure = (
     browseName: StructureTypeName,
-    fields: ReadonlyArray<{ readonly name: string; readonly dataType: NodeId }>,
+    fields: ReadonlyArray<{
+      readonly name: string;
+      readonly dataType: NodeId;
+      readonly valueRank?: number;
+    }>,
   ) => {
     const dataType = namespace.createDataType({
       browseName,
@@ -998,7 +972,7 @@ const createDemoDataTypes = async (
       partialDefinition: fields.map((field) => ({
         name: field.name,
         dataType: field.dataType,
-        valueRank: -1,
+        valueRank: field.valueRank ?? -1,
       })),
     });
     namespace.addObject({
@@ -1024,6 +998,22 @@ const createDemoDataTypes = async (
     { name: "commandId", dataType: stringType },
     { name: "commandKind", dataType: globalCommandKind.nodeId },
     { name: "clientId", dataType: stringType },
+  ]);
+  const commandStatusEntry = createStructure("CommandStatusEntry", [
+    { name: "sequence", dataType: uint32Type },
+    { name: "commandId", dataType: stringType },
+    { name: "commandKind", dataType: globalCommandKind.nodeId },
+    { name: "clientId", dataType: stringType },
+    { name: "state", dataType: commandState.nodeId },
+    { name: "statusCode", dataType: stringType },
+    { name: "statusMessage", dataType: stringType },
+    { name: "observedAt", dataType: dateTimeType },
+    { name: "updatedAt", dataType: dateTimeType },
+  ]);
+  createStructure("CommandStatusBuffer", [
+    { name: "revision", dataType: uint32Type },
+    { name: "capacity", dataType: uint32Type },
+    { name: "entries", dataType: commandStatusEntry.nodeId, valueRank: 1 },
   ]);
   createStructure("MachineSetModePayload", [
     { name: "commandId", dataType: stringType },
@@ -1062,9 +1052,7 @@ const createDemoDataTypes = async (
     { name: "axisSelection", dataType: axisSelection.nodeId },
   ]);
 
-  void commandActiveState;
-  void commandTerminalState;
-  void commandResultCategory;
+  void commandState;
   void machineState;
   void cyclePhase;
   void axisState;
@@ -1112,6 +1100,10 @@ const createDemoDataTypes = async (
 const createInitialModel = (options: DemoOpcuaServerOptions): MachineModel => {
   const tankLevelMl = options.scenario === "LowTank" ? 900 : 10_000;
   const simulationSpeed = Math.max(0.1, options.simulationSpeed ?? 1);
+  const commandStatusCapacity = Math.max(
+    1,
+    Math.trunc(options.commandStatusCapacity ?? 8),
+  );
   const payloads: Partial<Record<RealCommandKindName, StructureRecord>> = {};
   for (const metadata of commandMetadata) {
     if (metadata.payloadTypeName) {
@@ -1126,7 +1118,7 @@ const createInitialModel = (options: DemoOpcuaServerOptions): MachineModel => {
     configurationValid: false,
     configuration: defaultRunConfiguration(),
     submitRequest: defaultSubmitRequest(),
-    status: defaultCommandStatus(),
+    status: defaultCommandStatus(commandStatusCapacity),
     payloads,
     motion: {
       xAxis: {
@@ -1230,9 +1222,24 @@ const createInitialModel = (options: DemoOpcuaServerOptions): MachineModel => {
         },
       },
     },
+    telemetryRevision: 0,
     lastTickAt: Date.now(),
     simulationSpeed,
   };
+};
+
+const installTelemetryBranch = (
+  namespace: Namespace,
+  parent: ParentNode,
+  model: MachineModel,
+) => {
+  addUInt64(
+    namespace,
+    parent,
+    "Revision",
+    "DemoFillingCell.Telemetry.Revision",
+    () => model.telemetryRevision,
+  );
 };
 
 const installStateBranch = (
@@ -1280,7 +1287,7 @@ const installStateBranch = (
     () =>
       model.machineState === MachineState.Running ||
       model.machineState === MachineState.Resetting ||
-      model.status.activeState !== CommandActiveState.None,
+      model.status.entries.some((entry) => !isTerminalCommandState(entry.state)),
   );
   addBoolean(
     namespace,
@@ -1429,9 +1436,9 @@ const installCommandsBranch = (
     (value) => {
       const submit = normalizeSubmitRequest(value);
       model.submitRequest = submit;
-      observeSubmit(model, submit);
+      const status = observeSubmit(model, submit);
       model.submitRequest = defaultSubmitRequest();
-      return StatusCodes.Good;
+      return status;
     },
   );
 
@@ -1446,144 +1453,15 @@ const installCommandStatusBranch = (
   dataTypes: DataTypeRegistry,
   model: MachineModel,
 ) => {
-  const status = addObject(
+  addReadOnlyExtensionObjectVariable(
     namespace,
     commands,
     "Status",
     "DemoFillingCell.Commands.Status",
-  );
-
-  addUInt64(
-    namespace,
-    status,
-    "StatusRevision",
-    "DemoFillingCell.Commands.Status.StatusRevision",
-    () => model.status.statusRevision,
-  );
-  addString(
-    namespace,
-    status,
-    "ObservedCommandId",
-    "DemoFillingCell.Commands.Status.ObservedCommandId",
-    () => model.status.observedCommandId,
-  );
-  addEnumVariable(
-    namespace,
-    status,
-    "ObservedCommandKind",
-    "DemoFillingCell.Commands.Status.ObservedCommandKind",
-    dataTypes.enumTypes.GlobalCommandKind!,
-    () => model.status.observedCommandKind,
-  );
-  addString(
-    namespace,
-    status,
-    "ObservedClientId",
-    "DemoFillingCell.Commands.Status.ObservedClientId",
-    () => model.status.observedClientId,
-  );
-  addDateTime(
-    namespace,
-    status,
-    "ObservedAt",
-    "DemoFillingCell.Commands.Status.ObservedAt",
-    () => model.status.observedAt,
-  );
-  addString(
-    namespace,
-    status,
-    "ActiveCommandId",
-    "DemoFillingCell.Commands.Status.ActiveCommandId",
-    () => model.status.activeCommandId,
-  );
-  addEnumVariable(
-    namespace,
-    status,
-    "ActiveCommandKind",
-    "DemoFillingCell.Commands.Status.ActiveCommandKind",
-    dataTypes.enumTypes.GlobalCommandKind!,
-    () => model.status.activeCommandKind,
-  );
-  addString(
-    namespace,
-    status,
-    "ActiveClientId",
-    "DemoFillingCell.Commands.Status.ActiveClientId",
-    () => model.status.activeClientId,
-  );
-  addEnumVariable(
-    namespace,
-    status,
-    "ActiveState",
-    "DemoFillingCell.Commands.Status.ActiveState",
-    dataTypes.enumTypes.CommandActiveState!,
-    () => model.status.activeState,
-  );
-  addDateTime(
-    namespace,
-    status,
-    "ActiveSince",
-    "DemoFillingCell.Commands.Status.ActiveSince",
-    () => model.status.activeSince,
-  );
-  addString(
-    namespace,
-    status,
-    "LastFinishedCommandId",
-    "DemoFillingCell.Commands.Status.LastFinishedCommandId",
-    () => model.status.lastFinishedCommandId,
-  );
-  addEnumVariable(
-    namespace,
-    status,
-    "LastFinishedCommandKind",
-    "DemoFillingCell.Commands.Status.LastFinishedCommandKind",
-    dataTypes.enumTypes.GlobalCommandKind!,
-    () => model.status.lastFinishedCommandKind,
-  );
-  addString(
-    namespace,
-    status,
-    "LastFinishedClientId",
-    "DemoFillingCell.Commands.Status.LastFinishedClientId",
-    () => model.status.lastFinishedClientId,
-  );
-  addEnumVariable(
-    namespace,
-    status,
-    "LastFinishedState",
-    "DemoFillingCell.Commands.Status.LastFinishedState",
-    dataTypes.enumTypes.CommandTerminalState!,
-    () => model.status.lastFinishedState,
-  );
-  addEnumVariable(
-    namespace,
-    status,
-    "LastResultCategory",
-    "DemoFillingCell.Commands.Status.LastResultCategory",
-    dataTypes.enumTypes.CommandResultCategory!,
-    () => model.status.lastResultCategory,
-  );
-  addString(
-    namespace,
-    status,
-    "LastResultCode",
-    "DemoFillingCell.Commands.Status.LastResultCode",
-    () => model.status.lastResultCode,
-  );
-  addString(
-    namespace,
-    status,
-    "LastResultMessage",
-    "DemoFillingCell.Commands.Status.LastResultMessage",
-    () => model.status.lastResultMessage,
-  );
-  addDateTime(
-    namespace,
-    status,
-    "LastFinishedAt",
-    "DemoFillingCell.Commands.Status.LastFinishedAt",
-    () => model.status.lastFinishedAt,
+    dataTypes.structureTypes.CommandStatusBuffer,
+    "CommandStatusBuffer",
+    dataTypes.makeExtensionObject,
+    () => commandStatusBufferRecord(model.status),
   );
 };
 
@@ -2890,93 +2768,124 @@ const addExtensionObjectVariable = (
     },
   });
 
+const addReadOnlyExtensionObjectVariable = (
+  namespace: Namespace,
+  parent: ParentNode,
+  browseName: string,
+  nodeIdPath: string,
+  dataType: UADataType,
+  typeName: StructureTypeName,
+  makeExtensionObject: DataTypeRegistry["makeExtensionObject"],
+  getValue: () => StructureRecord,
+) =>
+  namespace.addVariable({
+    browseName,
+    nodeId: `s=${nodeIdPath}`,
+    componentOf: parent as never,
+    dataType: dataType.nodeId,
+    accessLevel: "CurrentRead",
+    userAccessLevel: "CurrentRead",
+    minimumSamplingInterval: 100,
+    value: {
+      get: () =>
+        new Variant({
+          dataType: DataType.ExtensionObject,
+          value: makeExtensionObject(typeName, getValue()),
+        }),
+    },
+  });
+
 const observeSubmit = (
   model: MachineModel,
   submit: GlobalCommandSubmitRequest,
 ) => {
-  if (isDefaultSubmit(submit)) return;
-  if (
-    submit.commandId === "" &&
-    submit.commandKind !== GlobalCommandKind.None
-  ) {
-    return;
+  if (isDefaultSubmit(submit)) return StatusCodes.Good;
+  if (submit.commandId === "" || submit.commandKind === GlobalCommandKind.None) {
+    return StatusCodes.Good;
+  }
+  if (hasRetainedCommandId(model, submit.commandId)) {
+    return StatusCodes.BadInvalidArgument;
   }
 
-  setObserved(model, submit);
+  const entry = appendObservedCommand(model, submit);
+  if (!entry) return StatusCodes.Good;
 
   const metadata = metadataByKind.get(submit.commandKind);
-  if (submit.commandKind === GlobalCommandKind.None || metadata === undefined) {
-    finishCommand(model, submit, {
-      state: CommandTerminalState.Rejected,
-      category: CommandResultCategory.Rejected,
+  if (metadata === undefined) {
+    finishCommand(model, entry, {
+      state: CommandState.Rejected,
       code: "InvalidCommandKind",
       message: "The command kind is None or unsupported.",
     });
-    return;
+    return StatusCodes.Good;
   }
 
   if (metadata.payloadTypeName) {
     const payload = model.payloads[metadata.kindName];
     if (!payload) {
-      finishCommand(model, submit, {
-        state: CommandTerminalState.Rejected,
-        category: CommandResultCategory.Rejected,
+      finishCommand(model, entry, {
+        state: CommandState.Rejected,
         code: "PayloadRequired",
         message: "The command requires a staged payload.",
       });
-      return;
+      return StatusCodes.Good;
     }
 
     const payloadCommandId = stringValue(payload.commandId);
     if (payloadCommandId !== submit.commandId) {
-      finishCommand(model, submit, {
-        state: CommandTerminalState.Rejected,
-        category: CommandResultCategory.Rejected,
+      finishCommand(model, entry, {
+        state: CommandState.Rejected,
         code: "PayloadCommandIdMismatch",
         message:
           "The staged payload commandId does not match SubmitRequest.commandId.",
       });
-      return;
+      return StatusCodes.Good;
     }
 
     const validation = validatePayload(metadata.payloadTypeName, payload);
     if (!validation.available) {
-      finishCommand(model, submit, {
-        state: CommandTerminalState.Rejected,
-        category: CommandResultCategory.Rejected,
+      finishCommand(model, entry, {
+        state: CommandState.Rejected,
         code: validation.reasonCode,
         message: validation.message,
       });
-      return;
+      return StatusCodes.Good;
     }
 
-    executeCommand(model, metadata, submit, payload);
-    return;
+    executeCommand(model, metadata, entry, payload);
+    return StatusCodes.Good;
   }
 
-  executeCommand(model, metadata, submit, undefined);
+  executeCommand(model, metadata, entry, undefined);
+  return StatusCodes.Good;
 };
 
 const executeCommand = (
   model: MachineModel,
   metadata: CommandMetadata,
-  submit: GlobalCommandSubmitRequest,
+  entry: CommandStatusEntry,
   payload: StructureRecord | undefined,
 ) => {
   const availability = commandAvailability(model, metadata);
   if (!availability.available) {
-    finishCommand(model, submit, {
-      state: CommandTerminalState.Rejected,
-      category: CommandResultCategory.Rejected,
+    finishCommand(model, entry, {
+      state: CommandState.Rejected,
       code: availability.reasonCode,
       message: availability.message,
     });
     return;
   }
 
-  setActive(model, submit, CommandActiveState.Received);
-  setActive(model, submit, CommandActiveState.Accepted);
-  setActive(model, submit, CommandActiveState.Executing);
+  updateCommandStatusEntry(model, entry, {
+    state: CommandState.Accepted,
+    code: "Accepted",
+    message: "Command accepted.",
+  });
+  updateCommandStatusEntry(model, entry, {
+    state: CommandState.Executing,
+    code: "Executing",
+    message: "Command is executing.",
+  });
 
   const result =
     metadata.domain === "Machine"
@@ -2985,15 +2894,12 @@ const executeCommand = (
         ? executeManualCommand(model, metadata, payload)
         : executeMaintenanceCommand(model, metadata, payload);
 
-  clearActive(model);
-  finishCommand(model, submit, {
+  if (result.available) bumpTelemetryRevision(model);
+  finishCommand(model, entry, {
     state: result.available
-      ? CommandTerminalState.Completed
-      : CommandTerminalState.Rejected,
-    category: result.available
-      ? CommandResultCategory.Ok
-      : CommandResultCategory.Rejected,
-    code: result.available ? "Ok" : result.reasonCode,
+      ? CommandState.Completed
+      : CommandState.Rejected,
+    code: result.available ? "Completed" : result.reasonCode,
     message: result.available ? "Command completed." : result.message,
   });
 };
@@ -4010,76 +3916,103 @@ const resetBatchCounters = (model: MachineModel) => {
   model.production.batchStartedAt = null;
 };
 
-const setObserved = (
+const appendObservedCommand = (
   model: MachineModel,
   submit: GlobalCommandSubmitRequest,
 ) => {
-  model.status.observedCommandId = submit.commandId;
-  model.status.observedCommandKind = submit.commandKind;
-  model.status.observedClientId = submit.clientId;
-  model.status.observedAt = new Date();
+  if (model.status.entries.length >= model.status.capacity) {
+    const evictIndex = model.status.entries.findIndex((entry) =>
+      isTerminalCommandState(entry.state),
+    );
+    if (evictIndex === -1) return undefined;
+    model.status.entries.splice(evictIndex, 1);
+    bumpStatusRevision(model);
+  }
+
+  const now = new Date();
+  const entry: CommandStatusEntry = {
+    sequence: model.status.nextSequence,
+    commandId: submit.commandId,
+    commandKind: submit.commandKind,
+    clientId: submit.clientId,
+    state: CommandState.Observed,
+    statusCode: "Observed",
+    statusMessage: "Command request observed.",
+    observedAt: now,
+    updatedAt: now,
+  };
+  model.status.nextSequence += 1;
+  model.status.entries.push(entry);
   bumpStatusRevision(model);
+  return entry;
 };
 
-const setActive = (
+const updateCommandStatusEntry = (
   model: MachineModel,
-  submit: GlobalCommandSubmitRequest,
-  state: number,
-) => {
-  model.status.activeCommandId = submit.commandId;
-  model.status.activeCommandKind = submit.commandKind;
-  model.status.activeClientId = submit.clientId;
-  model.status.activeState = state;
-  model.status.activeSince = new Date();
-  bumpStatusRevision(model);
-};
-
-const clearActive = (model: MachineModel) => {
-  model.status.activeCommandId = "";
-  model.status.activeCommandKind = GlobalCommandKind.None;
-  model.status.activeClientId = "";
-  model.status.activeState = CommandActiveState.None;
-  model.status.activeSince = zeroDate();
-  bumpStatusRevision(model);
-};
-
-const finishCommand = (
-  model: MachineModel,
-  submit: GlobalCommandSubmitRequest,
-  result: {
+  entry: CommandStatusEntry,
+  update: {
     readonly state: number;
-    readonly category: number;
     readonly code: string;
     readonly message: string;
   },
 ) => {
-  model.status.lastFinishedCommandId = submit.commandId;
-  model.status.lastFinishedCommandKind = submit.commandKind;
-  model.status.lastFinishedClientId = submit.clientId;
-  model.status.lastFinishedState = result.state;
-  model.status.lastResultCategory = result.category;
-  model.status.lastResultCode = result.code;
-  model.status.lastResultMessage = result.message;
-  model.status.lastFinishedAt = new Date();
+  entry.state = update.state;
+  entry.statusCode = update.code;
+  entry.statusMessage = update.message;
+  entry.updatedAt = new Date();
   bumpStatusRevision(model);
 };
 
+const hasRetainedCommandId = (model: MachineModel, commandId: string) =>
+  model.status.entries.some((entry) => entry.commandId === commandId);
+
+const isTerminalCommandState = (state: number) =>
+  state === CommandState.Completed ||
+  state === CommandState.Rejected ||
+  state === CommandState.Failed ||
+  state === CommandState.Cancelled ||
+  state === CommandState.Superseded;
+
+const finishCommand = (
+  model: MachineModel,
+  entry: CommandStatusEntry,
+  result: {
+    readonly state: number;
+    readonly code: string;
+    readonly message: string;
+  },
+) => {
+  updateCommandStatusEntry(model, entry, {
+    state: result.state,
+    code: result.code,
+    message: result.message,
+  });
+};
+
 const bumpStatusRevision = (model: MachineModel) => {
-  model.status.statusRevision += 1;
+  model.status.revision += 1;
+};
+
+const bumpTelemetryRevision = (model: MachineModel) => {
+  model.telemetryRevision += 1;
 };
 
 const tickModel = (model: MachineModel, now: number) => {
   const elapsedMs = Math.max(0, now - model.lastTickAt) * model.simulationSpeed;
   model.lastTickAt = now;
+  let changed = false;
   if (model.machineState === MachineState.Running) {
     model.production.batchElapsedTimeMs += elapsedMs;
+    changed = elapsedMs > 0;
   }
   if (tankEmpty(model) && model.machineState === MachineState.Running) {
     model.diagnostics.faults.filling.tankEmpty = true;
     model.machineState = MachineState.Faulted;
     model.filling.pumpState = PumpState.Stopped;
     model.filling.nozzleValveState = NozzleValveState.Closed;
+    changed = true;
   }
+  if (changed) bumpTelemetryRevision(model);
 };
 
 const defaultPayload = (payloadTypeName: PayloadTypeName): StructureRecord => {
@@ -4261,6 +4194,24 @@ const structureValue = (value: unknown): unknown => {
 
 const cloneRecord = (value: StructureRecord): StructureRecord =>
   structureRecord(value);
+
+const commandStatusBufferRecord = (
+  status: CommandStatus,
+): StructureRecord => ({
+  revision: status.revision,
+  capacity: status.capacity,
+  entries: status.entries.map((entry) => ({
+    sequence: entry.sequence,
+    commandId: entry.commandId,
+    commandKind: entry.commandKind,
+    clientId: entry.clientId,
+    state: entry.state,
+    statusCode: entry.statusCode,
+    statusMessage: entry.statusMessage,
+    observedAt: entry.observedAt,
+    updatedAt: entry.updatedAt,
+  })),
+});
 
 const stringValue = (value: unknown) =>
   typeof value === "string"

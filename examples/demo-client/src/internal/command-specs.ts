@@ -1,0 +1,424 @@
+import type { Duration } from "effect";
+import type { Opcua } from "@effect-opcua/client";
+
+import type { DemoMachineCommand } from "../contract/commands.js";
+import * as Enums from "../generated/enums.js";
+import * as Variables from "../generated/variables.js";
+
+export type WritablePayloadVariable<A = unknown> = Opcua.VariableDef<
+  string,
+  A,
+  "write" | "readWrite"
+>;
+
+export type CommandSpec<
+  Tag extends DemoMachineCommand["_tag"] = DemoMachineCommand["_tag"],
+  Input extends DemoMachineCommand = Extract<DemoMachineCommand, { _tag: Tag }>,
+> = {
+  readonly tag: Tag;
+  readonly kind: Enums.GlobalCommandKindValue;
+  readonly domain: "machine" | "manual" | "maintenance";
+  readonly payloadVariable?: WritablePayloadVariable<unknown>;
+  readonly buildPayload?: (
+    input: Input,
+    ctx: { readonly commandId: string },
+  ) => unknown;
+  readonly timeouts?: {
+    readonly observedTimeout?: Duration.Input;
+    readonly timeout?: Duration.Input;
+  };
+};
+
+export const commandSpecs = {
+  MachineSetMode: spec("MachineSetMode", {
+    kind: Enums.GlobalCommandKind.Machine_SetMode,
+    domain: "machine",
+    payloadVariable: Variables.MachineSetModePayload,
+    buildPayload: (input, ctx) => ({
+      commandId: ctx.commandId,
+      targetMode: Enums.OperatingMode[input.targetMode],
+    }),
+  }),
+  MachineConfigure: spec("MachineConfigure", {
+    kind: Enums.GlobalCommandKind.Machine_Configure,
+    domain: "machine",
+    payloadVariable: Variables.MachineConfigurePayload,
+    buildPayload: (input, ctx) => ({
+      commandId: ctx.commandId,
+      configuration: input.runConfiguration,
+    }),
+  }),
+  MachineHome: spec("MachineHome", {
+    kind: Enums.GlobalCommandKind.Machine_Home,
+    domain: "machine",
+  }),
+  MachineStart: spec("MachineStart", {
+    kind: Enums.GlobalCommandKind.Machine_Start,
+    domain: "machine",
+  }),
+  MachinePause: spec("MachinePause", {
+    kind: Enums.GlobalCommandKind.Machine_Pause,
+    domain: "machine",
+  }),
+  MachineResume: spec("MachineResume", {
+    kind: Enums.GlobalCommandKind.Machine_Resume,
+    domain: "machine",
+  }),
+  MachineAbort: spec("MachineAbort", {
+    kind: Enums.GlobalCommandKind.Machine_Abort,
+    domain: "machine",
+  }),
+  MachineReset: spec("MachineReset", {
+    kind: Enums.GlobalCommandKind.Machine_Reset,
+    domain: "machine",
+  }),
+  MachineClearCompleted: spec("MachineClearCompleted", {
+    kind: Enums.GlobalCommandKind.Machine_ClearCompleted,
+    domain: "machine",
+  }),
+  MachineAcknowledgeSafetyReset: spec("MachineAcknowledgeSafetyReset", {
+    kind: Enums.GlobalCommandKind.Machine_AcknowledgeSafetyReset,
+    domain: "machine",
+  }),
+  ManualHomeX: spec("ManualHomeX", {
+    kind: Enums.GlobalCommandKind.Manual_HomeX,
+    domain: "manual",
+  }),
+  ManualHomeZ: spec("ManualHomeZ", {
+    kind: Enums.GlobalCommandKind.Manual_HomeZ,
+    domain: "manual",
+  }),
+  ManualMoveXAxisToTarget: targetSpec(
+    "ManualMoveXAxisToTarget",
+    Enums.GlobalCommandKind.Manual_MoveXAxisToTarget,
+    "manual",
+    Variables.MoveXAxisToTargetPayload.Manual,
+    Enums.XAxisTarget,
+  ),
+  ManualMoveXAxisToPosition: positionSpec(
+    "ManualMoveXAxisToPosition",
+    Enums.GlobalCommandKind.Manual_MoveXAxisToPosition,
+    "manual",
+    Variables.MoveXAxisToPositionPayload.Manual,
+  ),
+  ManualMoveZAxisToTarget: targetSpec(
+    "ManualMoveZAxisToTarget",
+    Enums.GlobalCommandKind.Manual_MoveZAxisToTarget,
+    "manual",
+    Variables.MoveZAxisToTargetPayload.Manual,
+    Enums.ZAxisTarget,
+  ),
+  ManualMoveZAxisToPosition: positionSpec(
+    "ManualMoveZAxisToPosition",
+    Enums.GlobalCommandKind.Manual_MoveZAxisToPosition,
+    "manual",
+    Variables.MoveZAxisToPositionPayload.Manual,
+  ),
+  ManualJogXPositive: jogSpec(
+    "ManualJogXPositive",
+    Enums.GlobalCommandKind.Manual_JogXPositive,
+    "manual",
+    Variables.JogPayload.ManualXPositive,
+  ),
+  ManualJogXNegative: jogSpec(
+    "ManualJogXNegative",
+    Enums.GlobalCommandKind.Manual_JogXNegative,
+    "manual",
+    Variables.JogPayload.ManualXNegative,
+  ),
+  ManualJogZPositive: jogSpec(
+    "ManualJogZPositive",
+    Enums.GlobalCommandKind.Manual_JogZPositive,
+    "manual",
+    Variables.JogPayload.ManualZPositive,
+  ),
+  ManualJogZNegative: jogSpec(
+    "ManualJogZNegative",
+    Enums.GlobalCommandKind.Manual_JogZNegative,
+    "manual",
+    Variables.JogPayload.ManualZNegative,
+  ),
+  ManualOpenClamp: spec("ManualOpenClamp", {
+    kind: Enums.GlobalCommandKind.Manual_OpenClamp,
+    domain: "manual",
+  }),
+  ManualCloseClamp: spec("ManualCloseClamp", {
+    kind: Enums.GlobalCommandKind.Manual_CloseClamp,
+    domain: "manual",
+  }),
+  ManualPrimePump: spec("ManualPrimePump", {
+    kind: Enums.GlobalCommandKind.Manual_PrimePump,
+    domain: "manual",
+  }),
+  ManualStopPump: spec("ManualStopPump", {
+    kind: Enums.GlobalCommandKind.Manual_StopPump,
+    domain: "manual",
+  }),
+  ManualOpenNozzleValve: spec("ManualOpenNozzleValve", {
+    kind: Enums.GlobalCommandKind.Manual_OpenNozzleValve,
+    domain: "manual",
+  }),
+  ManualCloseNozzleValve: spec("ManualCloseNozzleValve", {
+    kind: Enums.GlobalCommandKind.Manual_CloseNozzleValve,
+    domain: "manual",
+  }),
+  ManualTriggerInspectionOnce: spec("ManualTriggerInspectionOnce", {
+    kind: Enums.GlobalCommandKind.Manual_TriggerInspectionOnce,
+    domain: "manual",
+  }),
+  ManualClearActuatorFault: spec("ManualClearActuatorFault", {
+    kind: Enums.GlobalCommandKind.Manual_ClearActuatorFault,
+    domain: "manual",
+    payloadVariable: Variables.ManualClearActuatorFaultPayload,
+    buildPayload: (input, ctx) => ({
+      commandId: ctx.commandId,
+      actuator: Enums.ActuatorId[input.actuator],
+    }),
+  }),
+  MaintenanceRefillTank: spec("MaintenanceRefillTank", {
+    kind: Enums.GlobalCommandKind.Maintenance_RefillTank,
+    domain: "maintenance",
+  }),
+  MaintenanceDrainTank: spec("MaintenanceDrainTank", {
+    kind: Enums.GlobalCommandKind.Maintenance_DrainTank,
+    domain: "maintenance",
+  }),
+  MaintenancePrimePump: spec("MaintenancePrimePump", {
+    kind: Enums.GlobalCommandKind.Maintenance_PrimePump,
+    domain: "maintenance",
+  }),
+  MaintenanceCleanNozzle: spec("MaintenanceCleanNozzle", {
+    kind: Enums.GlobalCommandKind.Maintenance_CleanNozzle,
+    domain: "maintenance",
+  }),
+  MaintenanceResetPumpFault: spec("MaintenanceResetPumpFault", {
+    kind: Enums.GlobalCommandKind.Maintenance_ResetPumpFault,
+    domain: "maintenance",
+  }),
+  MaintenanceResetValveFault: spec("MaintenanceResetValveFault", {
+    kind: Enums.GlobalCommandKind.Maintenance_ResetValveFault,
+    domain: "maintenance",
+  }),
+  MaintenanceCalibrateFillLevelSensor: spec(
+    "MaintenanceCalibrateFillLevelSensor",
+    {
+      kind: Enums.GlobalCommandKind.Maintenance_CalibrateFillLevelSensor,
+      domain: "maintenance",
+    },
+  ),
+  MaintenanceSimulateSensorCheck: spec("MaintenanceSimulateSensorCheck", {
+    kind: Enums.GlobalCommandKind.Maintenance_SimulateSensorCheck,
+    domain: "maintenance",
+  }),
+  MaintenanceResetInspectionFault: spec("MaintenanceResetInspectionFault", {
+    kind: Enums.GlobalCommandKind.Maintenance_ResetInspectionFault,
+    domain: "maintenance",
+  }),
+  MaintenanceMoveXAxisToTarget: targetSpec(
+    "MaintenanceMoveXAxisToTarget",
+    Enums.GlobalCommandKind.Maintenance_MoveXAxisToTarget,
+    "maintenance",
+    Variables.MoveXAxisToTargetPayload.Maintenance,
+    Enums.XAxisTarget,
+  ),
+  MaintenanceMoveXAxisToPosition: positionSpec(
+    "MaintenanceMoveXAxisToPosition",
+    Enums.GlobalCommandKind.Maintenance_MoveXAxisToPosition,
+    "maintenance",
+    Variables.MoveXAxisToPositionPayload.Maintenance,
+  ),
+  MaintenanceMoveZAxisToTarget: targetSpec(
+    "MaintenanceMoveZAxisToTarget",
+    Enums.GlobalCommandKind.Maintenance_MoveZAxisToTarget,
+    "maintenance",
+    Variables.MoveZAxisToTargetPayload.Maintenance,
+    Enums.ZAxisTarget,
+  ),
+  MaintenanceMoveZAxisToPosition: positionSpec(
+    "MaintenanceMoveZAxisToPosition",
+    Enums.GlobalCommandKind.Maintenance_MoveZAxisToPosition,
+    "maintenance",
+    Variables.MoveZAxisToPositionPayload.Maintenance,
+  ),
+  MaintenanceJogXPositive: jogSpec(
+    "MaintenanceJogXPositive",
+    Enums.GlobalCommandKind.Maintenance_JogXPositive,
+    "maintenance",
+    Variables.JogPayload.MaintenanceXPositive,
+  ),
+  MaintenanceJogXNegative: jogSpec(
+    "MaintenanceJogXNegative",
+    Enums.GlobalCommandKind.Maintenance_JogXNegative,
+    "maintenance",
+    Variables.JogPayload.MaintenanceXNegative,
+  ),
+  MaintenanceJogZPositive: jogSpec(
+    "MaintenanceJogZPositive",
+    Enums.GlobalCommandKind.Maintenance_JogZPositive,
+    "maintenance",
+    Variables.JogPayload.MaintenanceZPositive,
+  ),
+  MaintenanceJogZNegative: jogSpec(
+    "MaintenanceJogZNegative",
+    Enums.GlobalCommandKind.Maintenance_JogZNegative,
+    "maintenance",
+    Variables.JogPayload.MaintenanceZNegative,
+  ),
+  MaintenanceHomeAxes: axisSelectionSpec(
+    "MaintenanceHomeAxes",
+    Enums.GlobalCommandKind.Maintenance_HomeAxes,
+    Variables.AxisSelectionPayload.HomeAxes,
+  ),
+  MaintenanceEnableAxes: axisSelectionSpec(
+    "MaintenanceEnableAxes",
+    Enums.GlobalCommandKind.Maintenance_EnableAxes,
+    Variables.AxisSelectionPayload.EnableAxes,
+  ),
+  MaintenanceDisableAxes: axisSelectionSpec(
+    "MaintenanceDisableAxes",
+    Enums.GlobalCommandKind.Maintenance_DisableAxes,
+    Variables.AxisSelectionPayload.DisableAxes,
+  ),
+  MaintenanceClearAxisFault: axisSelectionSpec(
+    "MaintenanceClearAxisFault",
+    Enums.GlobalCommandKind.Maintenance_ClearAxisFault,
+    Variables.AxisSelectionPayload.ClearAxisFault,
+  ),
+  MaintenanceOpenClamp: spec("MaintenanceOpenClamp", {
+    kind: Enums.GlobalCommandKind.Maintenance_OpenClamp,
+    domain: "maintenance",
+  }),
+  MaintenanceCloseClamp: spec("MaintenanceCloseClamp", {
+    kind: Enums.GlobalCommandKind.Maintenance_CloseClamp,
+    domain: "maintenance",
+  }),
+  MaintenanceClearClampFault: spec("MaintenanceClearClampFault", {
+    kind: Enums.GlobalCommandKind.Maintenance_ClearClampFault,
+    domain: "maintenance",
+  }),
+} satisfies {
+  readonly [Tag in DemoMachineCommand["_tag"]]: CommandSpec<Tag>;
+};
+
+export const getCommandSpec = <Tag extends DemoMachineCommand["_tag"]>(
+  tag: Tag,
+) => commandSpecs[tag] as CommandSpec<Tag>;
+
+function spec<Tag extends DemoMachineCommand["_tag"]>(
+  tag: Tag,
+  value: Omit<CommandSpec<Tag>, "tag">,
+): CommandSpec<Tag> {
+  return { tag, ...value };
+}
+
+function targetSpec<
+  Tag extends
+    | "ManualMoveXAxisToTarget"
+    | "ManualMoveZAxisToTarget"
+    | "MaintenanceMoveXAxisToTarget"
+    | "MaintenanceMoveZAxisToTarget",
+>(
+  tag: Tag,
+  kind: Enums.GlobalCommandKindValue,
+  domain: "manual" | "maintenance",
+  payloadVariable: WritablePayloadVariable<unknown>,
+  targetEnum: Record<string, number>,
+) {
+  return spec(tag, {
+    kind,
+    domain,
+    payloadVariable,
+    buildPayload: (input, ctx) => ({
+      commandId: ctx.commandId,
+      target: targetEnum[(input as { readonly target: string }).target],
+      velocityMmPerSecond: (
+        input as { readonly velocityMmPerSecond: number }
+      ).velocityMmPerSecond,
+    }),
+  });
+}
+
+function positionSpec<
+  Tag extends
+    | "ManualMoveXAxisToPosition"
+    | "ManualMoveZAxisToPosition"
+    | "MaintenanceMoveXAxisToPosition"
+    | "MaintenanceMoveZAxisToPosition",
+>(
+  tag: Tag,
+  kind: Enums.GlobalCommandKindValue,
+  domain: "manual" | "maintenance",
+  payloadVariable: WritablePayloadVariable<unknown>,
+) {
+  return spec(tag, {
+    kind,
+    domain,
+    payloadVariable,
+    buildPayload: (input, ctx) => ({
+      commandId: ctx.commandId,
+      targetPositionMm: (
+        input as { readonly targetPositionMm: number }
+      ).targetPositionMm,
+      velocityMmPerSecond: (
+        input as { readonly velocityMmPerSecond: number }
+      ).velocityMmPerSecond,
+    }),
+  });
+}
+
+function jogSpec<
+  Tag extends
+    | "ManualJogXPositive"
+    | "ManualJogXNegative"
+    | "ManualJogZPositive"
+    | "ManualJogZNegative"
+    | "MaintenanceJogXPositive"
+    | "MaintenanceJogXNegative"
+    | "MaintenanceJogZPositive"
+    | "MaintenanceJogZNegative",
+>(
+  tag: Tag,
+  kind: Enums.GlobalCommandKindValue,
+  domain: "manual" | "maintenance",
+  payloadVariable: WritablePayloadVariable<unknown>,
+) {
+  return spec(tag, {
+    kind,
+    domain,
+    payloadVariable,
+    buildPayload: (input, ctx) => ({
+      commandId: ctx.commandId,
+      velocityMmPerSecond: (
+        input as { readonly velocityMmPerSecond: number }
+      ).velocityMmPerSecond,
+      maxDurationMs: (input as { readonly maxDurationMs: number })
+        .maxDurationMs,
+    }),
+  });
+}
+
+function axisSelectionSpec<
+  Tag extends
+    | "MaintenanceHomeAxes"
+    | "MaintenanceEnableAxes"
+    | "MaintenanceDisableAxes"
+    | "MaintenanceClearAxisFault",
+>(
+  tag: Tag,
+  kind: Enums.GlobalCommandKindValue,
+  payloadVariable: WritablePayloadVariable<unknown>,
+) {
+  return spec(tag, {
+    kind,
+    domain: "maintenance",
+    payloadVariable,
+    buildPayload: (input, ctx) => ({
+      commandId: ctx.commandId,
+      axisSelection:
+        Enums.AxisSelection[
+          (input as { readonly axisSelection: keyof typeof Enums.AxisSelection })
+            .axisSelection
+        ],
+    }),
+  });
+}

@@ -36,6 +36,15 @@ importers:
         specifier: ^4.0.0
         version: 4.1.6(@types/node@24.12.4)(vite@8.0.13(@types/node@24.12.4)(yaml@2.9.0))
 
+  examples/demo-client:
+    dependencies:
+      '@effect-opcua/client':
+        specifier: workspace:*
+        version: link:../../packages/client
+      effect:
+        specifier: 4.0.0-beta.66
+        version: 4.0.0-beta.66
+
   examples/demo-server:
     dependencies:
       node-opcua:

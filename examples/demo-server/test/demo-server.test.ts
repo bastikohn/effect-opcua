@@ -15,6 +15,7 @@ import { OPCUACertificateManager } from "node-opcua-certificate-manager";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import {
+  CommandState,
   GlobalCommandKind,
   startDemoOpcuaServer,
   type DemoOpcuaServer,
@@ -57,6 +58,7 @@ describe("DemoFillingCell demo server", () => {
     });
     await client.connect(demo.endpointUrl);
     session = await client.createSession();
+    await session.extractNamespaceDataType();
   }, 30_000);
 
   afterEach(async () => {
@@ -98,6 +100,7 @@ describe("DemoFillingCell demo server", () => {
         "OperatorFeedback",
         "Production",
         "Diagnostics",
+        "Telemetry",
       ]),
     );
 
@@ -141,44 +144,57 @@ describe("DemoFillingCell demo server", () => {
       "ns=1;s=DataTypes.MachineConfigurePayload",
     );
 
+    const statusDataType = await activeSession.read({
+      nodeId: nodeId("Commands.Status"),
+      attributeId: AttributeIds.DataType,
+    });
+    expect(statusDataType.statusCode).toBe(StatusCodes.Good);
+    expect(statusDataType.value.value.toString()).toBe(
+      "ns=1;s=DataTypes.CommandStatusBuffer",
+    );
+
+    expect(await readUInt64(activeSession, nodeId("Telemetry.Revision"))).toBe(
+      0,
+    );
     await expectSubmitRequestDefault(activeSession);
   });
 
-  test("rejects an invalid command kind and resets the submit mailbox immediately", async () => {
+  test("exposes structured command status and removes old scalar status nodes", async () => {
     const activeSession = expectSession(session);
-    const commandId = "invalid-command-kind";
+    const status = await readCommandStatus(activeSession);
+
+    expect(numberValue(status.revision)).toBe(0);
+    expect(numberValue(status.capacity)).toBe(8);
+    expect(status.entries).toEqual([]);
+
+    const oldScalar = await activeSession.readVariableValue(
+      nodeId("Commands.Status.LastResultCode"),
+    );
+    expect(oldScalar.statusCode).not.toBe(StatusCodes.Good);
+  });
+
+  test("rejects invalid payload handshakes through one terminal status entry", async () => {
+    const activeSession = expectSession(session);
+    const commandId = "payload-mismatch";
 
     await writeSubmit(activeSession, {
       commandId,
-      commandKind: GlobalCommandKind.None,
+      commandKind: GlobalCommandKind.Machine_Configure,
       clientId: "vitest",
     });
 
-    await expectReadValue(
-      activeSession,
-      nodeId("Commands.Status.ObservedCommandId"),
+    const status = await readCommandStatus(activeSession);
+    expect(numberValue(status.revision)).toBe(2);
+    expect(status.entries).toHaveLength(1);
+    expect(status.entries[0]).toMatchObject({
       commandId,
-    );
-    await expectReadValue(
-      activeSession,
-      nodeId("Commands.Status.LastFinishedCommandId"),
-      commandId,
-    );
-    await expectReadValue(
-      activeSession,
-      nodeId("Commands.Status.LastResultCode"),
-      "InvalidCommandKind",
-    );
-    await expectReadValue(
-      activeSession,
-      nodeId("Commands.Status.LastResultCategory"),
-      2,
-    );
-    await expectReadValue(
-      activeSession,
-      nodeId("Commands.Status.LastFinishedState"),
-      2,
-    );
+      commandKind: GlobalCommandKind.Machine_Configure,
+      clientId: "vitest",
+      state: CommandState.Rejected,
+      statusCode: "PayloadCommandIdMismatch",
+      statusMessage:
+        "The staged payload commandId does not match SubmitRequest.commandId.",
+    });
 
     await expectSubmitRequestDefault(activeSession);
   });
@@ -214,11 +230,15 @@ describe("DemoFillingCell demo server", () => {
       clientId: "vitest",
     });
 
-    await expectReadValue(
-      activeSession,
-      nodeId("Commands.Status.LastResultCode"),
-      "Ok",
-    );
+    let status = await readCommandStatus(activeSession);
+    expect(status.entries).toHaveLength(1);
+    expect(status.entries[0]).toMatchObject({
+      commandId,
+      state: CommandState.Completed,
+      statusCode: "Completed",
+      statusMessage: "Command completed.",
+    });
+    expect(numberValue(status.revision)).toBeGreaterThanOrEqual(4);
     await expectReadValue(
       activeSession,
       nodeId("State.ConfigurationValid"),
@@ -234,6 +254,11 @@ describe("DemoFillingCell demo server", () => {
       nodeId("State.Configuration.BatchSize"),
       3,
     );
+    const telemetryRevisionAfterConfigure = await readUInt64(
+      activeSession,
+      nodeId("Telemetry.Revision"),
+    );
+    expect(telemetryRevisionAfterConfigure).toBeGreaterThan(0);
 
     await writeSubmit(activeSession, {
       commandId: "home-basic-batch",
@@ -249,15 +274,123 @@ describe("DemoFillingCell demo server", () => {
       commandKind: GlobalCommandKind.Machine_Start,
       clientId: "vitest",
     });
-    await expectReadValue(
-      activeSession,
-      nodeId("Commands.Status.LastResultCode"),
-      "Ok",
-    );
+    status = await readCommandStatus(activeSession);
+    expect(status.entries.at(-1)).toMatchObject({
+      commandId: "start-basic-batch",
+      state: CommandState.Completed,
+      statusCode: "Completed",
+    });
     await expectReadValue(activeSession, nodeId("State.MachineState"), 4);
     await expectReadValue(activeSession, nodeId("State.CyclePhase"), 1);
     await expectReadValue(activeSession, nodeId("State.Busy"), true);
   });
+
+  test("publishes rejected entries for unavailable machine-state commands", async () => {
+    const activeSession = expectSession(session);
+    const commandId = "start-from-idle";
+
+    await writeSubmit(activeSession, {
+      commandId,
+      commandKind: GlobalCommandKind.Machine_Start,
+      clientId: "vitest",
+    });
+
+    const status = await readCommandStatus(activeSession);
+    expect(status.entries).toHaveLength(1);
+    expect(status.entries[0]).toMatchObject({
+      commandId,
+      state: CommandState.Rejected,
+      statusCode: "InvalidMachineState",
+      statusMessage: "Start is accepted only from Ready.",
+    });
+  });
+
+  test("keeps status entries ordered and evicts only terminal entries", async () => {
+    await restartDemoServer({ commandStatusCapacity: 2 });
+    const activeSession = expectSession(session);
+
+    for (const commandId of ["ordered-1", "ordered-2", "ordered-3"]) {
+      await writeSubmit(activeSession, {
+        commandId,
+        commandKind: GlobalCommandKind.Machine_Start,
+        clientId: "vitest",
+      });
+    }
+
+    const status = await readCommandStatus(activeSession);
+    expect(numberValue(status.capacity)).toBe(2);
+    expect(status.entries.map((entry) => entry.commandId)).toEqual([
+      "ordered-2",
+      "ordered-3",
+    ]);
+    expect(status.entries.map((entry) => numberValue(entry.sequence))).toEqual([
+      2, 3,
+    ]);
+    expect(status.entries.every((entry) => entry.state === CommandState.Rejected))
+      .toBe(true);
+  });
+
+  test("rejects duplicate retained command IDs defensively", async () => {
+    const activeSession = expectSession(session);
+    const commandId = "duplicate-command-id";
+
+    await writeSubmit(activeSession, {
+      commandId,
+      commandKind: GlobalCommandKind.Machine_Start,
+      clientId: "vitest",
+    });
+
+    const duplicateStatus = await writeSubmit(activeSession, {
+      commandId,
+      commandKind: GlobalCommandKind.Machine_Start,
+      clientId: "vitest",
+    });
+
+    expect(duplicateStatus).toBe(StatusCodes.BadInvalidArgument);
+    const status = await readCommandStatus(activeSession);
+    expect(status.entries.filter((entry) => entry.commandId === commandId))
+      .toHaveLength(1);
+  });
+
+  const restartDemoServer = async (
+    options: Parameters<typeof startDemoOpcuaServer>[0],
+  ) => {
+    if (session) {
+      await session.close();
+      session = undefined;
+    }
+    if (client) {
+      await client.disconnect();
+      client = undefined;
+    }
+    if (demo) {
+      await demo.stop();
+      demo = undefined;
+    }
+
+    const port = 49_900 + Number(process.env.VITEST_POOL_ID ?? 0);
+    const certificateRootFolder = join(
+      tmpdir(),
+      `effect-opcua-demo-server-test-${process.pid}-${port}`,
+    );
+    demo = await startDemoOpcuaServer({
+      port,
+      certificateRootFolder,
+      ...options,
+    });
+    client = OPCUAClient.create({
+      endpointMustExist: false,
+      clientCertificateManager: new OPCUACertificateManager({
+        rootFolder: certificateRootFolder,
+        name: "ClientPKI",
+        automaticallyAcceptUnknownCertificate: true,
+        disableFileWatchers: true,
+      }),
+    });
+    await client.connect(demo.endpointUrl);
+    session = await client.createSession();
+    await session.extractNamespaceDataType();
+  };
 });
 
 const expectSession = (session: ClientSession | undefined): ClientSession => {
@@ -266,11 +399,33 @@ const expectSession = (session: ClientSession | undefined): ClientSession => {
 };
 
 const readExtensionObject = async (session: ClientSession, nodeId: string) => {
-  const dataValue = await session.readVariableValue(nodeId);
+  const dataValue = await session.read(
+    { nodeId, attributeId: AttributeIds.Value },
+    0,
+  );
   expect(dataValue.statusCode).toBe(StatusCodes.Good);
   expect(dataValue.value.dataType).toBe(DataType.ExtensionObject);
   return dataValue.value.value as Record<string, unknown>;
 };
+
+const readCommandStatus = async (session: ClientSession) =>
+  stripStructure(
+    await readExtensionObject(session, nodeId("Commands.Status")),
+  ) as unknown as {
+    readonly revision: unknown;
+    readonly capacity: unknown;
+    readonly entries: ReadonlyArray<{
+      readonly sequence: unknown;
+      readonly commandId: string;
+      readonly commandKind: number;
+      readonly clientId: string;
+      readonly state: number;
+      readonly statusCode: string;
+      readonly statusMessage: string;
+      readonly observedAt: Date;
+      readonly updatedAt: Date;
+    }>;
+  };
 
 const writeSubmit = async (
   session: ClientSession,
@@ -284,7 +439,7 @@ const writeSubmit = async (
     dataTypeNodeId("GlobalCommandSubmitRequest"),
     value,
   );
-  await writeStructure(session, nodeId("Commands.SubmitRequest"), submit);
+  return writeStructure(session, nodeId("Commands.SubmitRequest"), submit);
 };
 
 const writeStructure = async (
@@ -299,7 +454,8 @@ const writeStructure = async (
       value: extensionObjectVariant(value),
     },
   });
-  expect(statusCode).toBe(StatusCodes.Good);
+  if (statusCode === StatusCodes.Good) return statusCode;
+  return statusCode;
 };
 
 const expectReadValue = async (
@@ -310,6 +466,12 @@ const expectReadValue = async (
   const dataValue = await session.readVariableValue(nodeId);
   expect(dataValue.statusCode).toBe(StatusCodes.Good);
   expect(dataValue.value.value).toEqual(expected);
+};
+
+const readUInt64 = async (session: ClientSession, nodeId: string) => {
+  const dataValue = await session.readVariableValue(nodeId);
+  expect(dataValue.statusCode).toBe(StatusCodes.Good);
+  return numberValue(dataValue.value.value);
 };
 
 const expectSubmitRequestDefault = async (session: ClientSession) => {
@@ -354,12 +516,31 @@ const browseNames = async (
   );
 };
 
-const stripStructure = (value: Record<string, unknown>) =>
-  Object.fromEntries(
-    Object.entries(value).filter(
-      ([key]) => !key.startsWith("_") && key !== "schema",
-    ),
+const stripStructure = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(stripStructure);
+  if (value instanceof Date || Buffer.isBuffer(value)) return value;
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => !key.startsWith("_") && key !== "schema")
+      .map(([key, item]) => [key, stripStructure(item)]),
   );
+};
+
+const numberValue = (value: unknown): number => {
+  if (typeof value === "number") return value;
+  if (
+    Array.isArray(value) &&
+    value.length === 2 &&
+    value.every((item) => typeof item === "number")
+  ) {
+    return value[0]! * 2 ** 32 + value[1]!;
+  }
+  if (value && typeof value === "object" && "value" in value) {
+    return numberValue((value as { readonly value: unknown }).value);
+  }
+  return Number(value);
+};
 
 const opaqueBuffer = (value: Record<string, unknown>) => {
   const buffer = value.buffer;
