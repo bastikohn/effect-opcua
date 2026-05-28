@@ -14,7 +14,7 @@
     "dev:tui": "pnpm --filter @effect-opcua/tui start",
     "test:integration": "pnpm --filter @effect-opcua/client test",
     "typecheck": "pnpm -r --filter='@effect-opcua/*' typecheck",
-    "test": "pnpm -r --filter='@effect-opcua/*' test",
+    "test": "pnpm -r --workspace-concurrency=1 --filter='@effect-opcua/*' test",
     "lint": "eslint . --max-warnings=0",
     "format": "prettier --check .",
     "fix": "prettier --write . && eslint --fix . --max-warnings=0",

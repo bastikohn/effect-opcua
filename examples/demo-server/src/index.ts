@@ -312,6 +312,14 @@ type GlobalCommandSubmitRequest = {
   commandId: string;
   commandKind: number;
   clientId: string;
+  targetMode: number;
+  configuration: RunConfiguration;
+  target: number;
+  targetPositionMm: number;
+  velocityMmPerSecond: number;
+  maxDurationMs: number;
+  actuator: number;
+  axisSelection: number;
 };
 
 type CommandStatus = {
@@ -383,7 +391,7 @@ type MachineModel = {
   configuration: RunConfiguration;
   submitRequest: GlobalCommandSubmitRequest;
   status: CommandStatus;
-  payloads: Partial<Record<RealCommandKindName, StructureRecord>>;
+  seenCommandIds: Set<string>;
   motion: {
     xAxis: AxisModel;
     zAxis: AxisModel;
@@ -464,6 +472,14 @@ const defaultSubmitRequest = (): GlobalCommandSubmitRequest => ({
   commandId: "",
   commandKind: GlobalCommandKind.None,
   clientId: "",
+  targetMode: OperatingMode.None,
+  configuration: defaultRunConfiguration(),
+  target: 0,
+  targetPositionMm: 0,
+  velocityMmPerSecond: 0,
+  maxDurationMs: 0,
+  actuator: ActuatorId.None,
+  axisSelection: AxisSelection.None,
 });
 
 const defaultRunConfiguration = (): RunConfiguration => ({
@@ -478,7 +494,7 @@ const defaultRunConfiguration = (): RunConfiguration => ({
 
 const defaultCommandStatus = (capacity = 8): CommandStatus => ({
   revision: 0,
-  capacity,
+  capacity: Math.max(1, capacity),
   entries: [],
   nextSequence: 1,
 });
@@ -735,7 +751,7 @@ const commandMetadata: ReadonlyArray<CommandMetadata> =
       domain,
       commandName,
       payloadBrowsePath: spec.payloadTypeName
-        ? `Commands/Payloads/${domain}/${commandName}`
+        ? "Commands/SubmitRequest"
         : "",
     };
   });
@@ -998,6 +1014,14 @@ const createDemoDataTypes = async (
     { name: "commandId", dataType: stringType },
     { name: "commandKind", dataType: globalCommandKind.nodeId },
     { name: "clientId", dataType: stringType },
+    { name: "targetMode", dataType: operatingMode.nodeId },
+    { name: "configuration", dataType: runConfiguration.nodeId },
+    { name: "target", dataType: uint32Type },
+    { name: "targetPositionMm", dataType: doubleType },
+    { name: "velocityMmPerSecond", dataType: doubleType },
+    { name: "maxDurationMs", dataType: uint32Type },
+    { name: "actuator", dataType: actuatorId.nodeId },
+    { name: "axisSelection", dataType: axisSelection.nodeId },
   ]);
   const commandStatusEntry = createStructure("CommandStatusEntry", [
     { name: "sequence", dataType: uint32Type },
@@ -1104,12 +1128,6 @@ const createInitialModel = (options: DemoOpcuaServerOptions): MachineModel => {
     1,
     Math.trunc(options.commandStatusCapacity ?? 8),
   );
-  const payloads: Partial<Record<RealCommandKindName, StructureRecord>> = {};
-  for (const metadata of commandMetadata) {
-    if (metadata.payloadTypeName) {
-      payloads[metadata.kindName] = defaultPayload(metadata.payloadTypeName);
-    }
-  }
 
   return {
     machineState: MachineState.Idle,
@@ -1119,7 +1137,7 @@ const createInitialModel = (options: DemoOpcuaServerOptions): MachineModel => {
     configuration: defaultRunConfiguration(),
     submitRequest: defaultSubmitRequest(),
     status: defaultCommandStatus(commandStatusCapacity),
-    payloads,
+    seenCommandIds: new Set(),
     motion: {
       xAxis: {
         state: AxisState.NotHomed,
@@ -1443,7 +1461,6 @@ const installCommandsBranch = (
   );
 
   installCommandStatusBranch(namespace, parent, dataTypes, model);
-  installPayloadBranches(namespace, parent, dataTypes, model);
   installCatalogBranch(namespace, parent, dataTypes, model);
 };
 
@@ -1463,63 +1480,6 @@ const installCommandStatusBranch = (
     dataTypes.makeExtensionObject,
     () => commandStatusBufferRecord(model.status),
   );
-};
-
-const installPayloadBranches = (
-  namespace: Namespace,
-  commands: ParentNode,
-  dataTypes: DataTypeRegistry,
-  model: MachineModel,
-) => {
-  const payloads = addObject(
-    namespace,
-    commands,
-    "Payloads",
-    "DemoFillingCell.Commands.Payloads",
-  );
-  const domains: Record<CommandDomain, ParentNode> = {
-    Machine: addObject(
-      namespace,
-      payloads,
-      "Machine",
-      "DemoFillingCell.Commands.Payloads.Machine",
-    ),
-    Manual: addObject(
-      namespace,
-      payloads,
-      "Manual",
-      "DemoFillingCell.Commands.Payloads.Manual",
-    ),
-    Maintenance: addObject(
-      namespace,
-      payloads,
-      "Maintenance",
-      "DemoFillingCell.Commands.Payloads.Maintenance",
-    ),
-  };
-
-  for (const metadata of commandMetadata) {
-    if (!metadata.payloadTypeName) continue;
-    addExtensionObjectVariable(
-      namespace,
-      domains[metadata.domain],
-      metadata.commandName,
-      `DemoFillingCell.Commands.Payloads.${metadata.domain}.${metadata.commandName}`,
-      dataTypes.structureTypes[metadata.payloadTypeName],
-      metadata.payloadTypeName,
-      dataTypes.makeExtensionObject,
-      () =>
-        model.payloads[metadata.kindName] ??
-        defaultPayload(metadata.payloadTypeName!),
-      (value) => {
-        model.payloads[metadata.kindName] = normalizePayload(
-          metadata.payloadTypeName!,
-          value,
-        );
-        return StatusCodes.Good;
-      },
-    );
-  }
 };
 
 const installCatalogBranch = (
@@ -2803,44 +2763,42 @@ const observeSubmit = (
   if (submit.commandId === "" || submit.commandKind === GlobalCommandKind.None) {
     return StatusCodes.Good;
   }
-  if (hasRetainedCommandId(model, submit.commandId)) {
-    return StatusCodes.BadInvalidArgument;
+
+  const duplicate = model.seenCommandIds.has(submit.commandId);
+  const busy = hasActiveCommand(model);
+  const entry = appendObservedCommand(model, submit);
+  model.seenCommandIds.add(submit.commandId);
+
+  if (duplicate) {
+    finishCommand(model, entry, {
+      state: CommandState.Rejected,
+      code: "DuplicateCommandId",
+      message: "The commandId has already been observed by this server.",
+    });
+    return StatusCodes.Good;
   }
 
-  const entry = appendObservedCommand(model, submit);
-  if (!entry) return StatusCodes.Good;
+  if (busy) {
+    finishCommand(model, entry, {
+      state: CommandState.Rejected,
+      code: "CommandBusy",
+      message: "Another command is already non-terminal.",
+    });
+    return StatusCodes.Good;
+  }
 
   const metadata = metadataByKind.get(submit.commandKind);
   if (metadata === undefined) {
     finishCommand(model, entry, {
       state: CommandState.Rejected,
-      code: "InvalidCommandKind",
+      code: "UnknownCommandKind",
       message: "The command kind is None or unsupported.",
     });
     return StatusCodes.Good;
   }
 
   if (metadata.payloadTypeName) {
-    const payload = model.payloads[metadata.kindName];
-    if (!payload) {
-      finishCommand(model, entry, {
-        state: CommandState.Rejected,
-        code: "PayloadRequired",
-        message: "The command requires a staged payload.",
-      });
-      return StatusCodes.Good;
-    }
-
-    const payloadCommandId = stringValue(payload.commandId);
-    if (payloadCommandId !== submit.commandId) {
-      finishCommand(model, entry, {
-        state: CommandState.Rejected,
-        code: "PayloadCommandIdMismatch",
-        message:
-          "The staged payload commandId does not match SubmitRequest.commandId.",
-      });
-      return StatusCodes.Good;
-    }
+    const payload = payloadFromSubmit(metadata.payloadTypeName, submit);
 
     const validation = validatePayload(metadata.payloadTypeName, payload);
     if (!validation.available) {
@@ -2856,8 +2814,74 @@ const observeSubmit = (
     return StatusCodes.Good;
   }
 
+  if (hasPayloadFields(submit)) {
+    finishCommand(model, entry, {
+      state: CommandState.Rejected,
+      code: "PayloadKindMismatch",
+      message: "This command kind does not accept a payload.",
+    });
+    return StatusCodes.Good;
+  }
+
   executeCommand(model, metadata, entry, undefined);
   return StatusCodes.Good;
+};
+
+const payloadFromSubmit = (
+  payloadTypeName: PayloadTypeName,
+  submit: GlobalCommandSubmitRequest,
+): StructureRecord => {
+  switch (payloadTypeName) {
+    case "MachineSetModePayload":
+      return { targetMode: submit.targetMode };
+    case "MachineConfigurePayload":
+      return { configuration: submit.configuration };
+    case "MoveXAxisToTargetPayload":
+    case "MoveZAxisToTargetPayload":
+      return {
+        target: submit.target,
+        velocityMmPerSecond: submit.velocityMmPerSecond,
+      };
+    case "MoveAxisToPositionPayload":
+      return {
+        targetPositionMm: submit.targetPositionMm,
+        velocityMmPerSecond: submit.velocityMmPerSecond,
+      };
+    case "JogPayload":
+      return {
+        velocityMmPerSecond: submit.velocityMmPerSecond,
+        maxDurationMs: submit.maxDurationMs,
+      };
+    case "ClearActuatorFaultPayload":
+      return { actuator: submit.actuator };
+    case "AxisSelectionPayload":
+      return { axisSelection: submit.axisSelection };
+  }
+};
+
+const hasPayloadFields = (submit: GlobalCommandSubmitRequest) => {
+  const defaults = defaultSubmitRequest();
+  return (
+    submit.targetMode !== defaults.targetMode ||
+    submit.configuration.productName !== defaults.configuration.productName ||
+    submit.configuration.targetFillVolumeMl !==
+      defaults.configuration.targetFillVolumeMl ||
+    submit.configuration.fillToleranceMl !==
+      defaults.configuration.fillToleranceMl ||
+    submit.configuration.pumpRateMlPerSecond !==
+      defaults.configuration.pumpRateMlPerSecond ||
+    submit.configuration.batchSize !== defaults.configuration.batchSize ||
+    submit.configuration.xAxisSpeedMmPerSecond !==
+      defaults.configuration.xAxisSpeedMmPerSecond ||
+    submit.configuration.zAxisSpeedMmPerSecond !==
+      defaults.configuration.zAxisSpeedMmPerSecond ||
+    submit.target !== defaults.target ||
+    submit.targetPositionMm !== defaults.targetPositionMm ||
+    submit.velocityMmPerSecond !== defaults.velocityMmPerSecond ||
+    submit.maxDurationMs !== defaults.maxDurationMs ||
+    submit.actuator !== defaults.actuator ||
+    submit.axisSelection !== defaults.axisSelection
+  );
 };
 
 const executeCommand = (
@@ -3924,8 +3948,7 @@ const appendObservedCommand = (
     const evictIndex = model.status.entries.findIndex((entry) =>
       isTerminalCommandState(entry.state),
     );
-    if (evictIndex === -1) return undefined;
-    model.status.entries.splice(evictIndex, 1);
+    model.status.entries.splice(evictIndex === -1 ? 0 : evictIndex, 1);
     bumpStatusRevision(model);
   }
 
@@ -3963,8 +3986,8 @@ const updateCommandStatusEntry = (
   bumpStatusRevision(model);
 };
 
-const hasRetainedCommandId = (model: MachineModel, commandId: string) =>
-  model.status.entries.some((entry) => entry.commandId === commandId);
+const hasActiveCommand = (model: MachineModel) =>
+  model.status.entries.some((entry) => !isTerminalCommandState(entry.state));
 
 const isTerminalCommandState = (state: number) =>
   state === CommandState.Completed ||
@@ -4058,6 +4081,14 @@ const normalizeSubmitRequest = (
   commandId: stringValue(value.commandId),
   commandKind: numberValue(value.commandKind),
   clientId: stringValue(value.clientId),
+  targetMode: numberValue(value.targetMode),
+  configuration: normalizeRunConfiguration(structureRecord(value.configuration)),
+  target: numberValue(value.target),
+  targetPositionMm: numberValue(value.targetPositionMm),
+  velocityMmPerSecond: numberValue(value.velocityMmPerSecond),
+  maxDurationMs: numberValue(value.maxDurationMs),
+  actuator: numberValue(value.actuator),
+  axisSelection: numberValue(value.axisSelection),
 });
 
 const normalizeRunConfiguration = (
@@ -4075,7 +4106,8 @@ const normalizeRunConfiguration = (
 const isDefaultSubmit = (submit: GlobalCommandSubmitRequest) =>
   submit.commandId === "" &&
   submit.commandKind === GlobalCommandKind.None &&
-  submit.clientId === "";
+  submit.clientId === "" &&
+  !hasPayloadFields(submit);
 
 const safetyOk = (model: MachineModel) =>
   model.safety.emergencyStopState === EmergencyStopState.Released &&

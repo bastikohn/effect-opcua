@@ -1,4 +1,4 @@
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Stream } from "effect";
 
 import type {
   AxisSelectionCommandInput,
@@ -12,11 +12,14 @@ import type {
   RunConfigurationInput,
 } from "./contract/commands.js";
 import type { DemoMachineCommandOptions, DemoMachineOptions } from "./contract/options.js";
+import type { CommandStatusBuffer } from "./contract/command-status.js";
 import type { DemoMachineCommandCoreService } from "./internal/command-core.js";
 import { DemoMachineCommandCore } from "./internal/command-core.js";
 
 export type DemoMachineCommandsService = {
   readonly submit: DemoMachineCommandCoreService["submit"];
+  readonly readCommandStatus: Effect.Effect<CommandStatusBuffer>;
+  readonly watchCommandStatus: Stream.Stream<CommandStatusBuffer>;
   readonly machine: {
     readonly setMode: (
       targetMode: OperatingModeInput,
@@ -132,6 +135,8 @@ export class DemoMachineCommands extends Context.Service<
 
       return DemoMachineCommands.of({
         submit,
+        readCommandStatus: core.readStatus,
+        watchCommandStatus: core.watchStatus,
         machine: {
           setMode: (targetMode, options) =>
             submit({ _tag: "MachineSetMode", targetMode }, options),
@@ -211,3 +216,12 @@ export const submit = (
   command: DemoMachineCommand,
   options?: DemoMachineCommandOptions,
 ) => Effect.flatMap(DemoMachineCommands, (commands) => commands.submit(command, options));
+
+export const readCommandStatus = Effect.flatMap(
+  DemoMachineCommands,
+  (commands) => commands.readCommandStatus,
+);
+
+export const watchCommandStatus = Stream.unwrap(
+  Effect.map(DemoMachineCommands, (commands) => commands.watchCommandStatus),
+);

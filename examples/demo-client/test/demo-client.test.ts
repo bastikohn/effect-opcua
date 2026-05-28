@@ -66,8 +66,9 @@ describe("@effect-opcua/demo-client", () => {
     const result = await runLive(
       Effect.gen(function* () {
         const telemetry = yield* DemoMachineTelemetry;
-        const status = yield* telemetry.readCommandStatus;
-        const watchedStatus = yield* first(telemetry.watchCommandStatus);
+        const commands = yield* DemoMachineCommands;
+        const status = yield* commands.readCommandStatus;
+        const watchedStatus = yield* first(commands.watchCommandStatus);
         const snapshot = yield* telemetry.readSnapshot;
         const watchedSnapshot = yield* first(telemetry.watchSnapshot);
         return { status, watchedStatus, snapshot, watchedSnapshot };
@@ -76,7 +77,7 @@ describe("@effect-opcua/demo-client", () => {
 
     expect(result.status).toMatchObject({ capacity: 8, entries: [] });
     expect(result.watchedStatus).toEqual(result.status);
-    expect(result.snapshot.revision).toBe(0);
+    expect(result.snapshot.revision).toBe(0n);
     expect(result.snapshot.machine.state).toBe("Idle");
     expect(result.watchedSnapshot).toEqual(result.snapshot);
   });
@@ -94,7 +95,7 @@ describe("@effect-opcua/demo-client", () => {
         const started = yield* commands.machine.start();
         yield* waitUntilSnapshot((snapshot) => snapshot.machine.busy);
         const afterStart = yield* telemetry.readSnapshot;
-        const status = yield* telemetry.readCommandStatus;
+        const status = yield* commands.readCommandStatus;
 
         return { configured, homed, started, afterHome, afterStart, status };
       }),
@@ -305,10 +306,16 @@ const waitUntilSnapshot = (
 ) =>
   DemoMachineTelemetry.pipe(
     Effect.flatMap((telemetry) =>
-      telemetry.watchSnapshot.pipe(
-        Stream.filter(predicate),
-        Stream.runHead,
-        Effect.map(Option.getOrThrow),
+      telemetry.readSnapshot.pipe(
+        Effect.flatMap((snapshot) =>
+          predicate(snapshot)
+            ? Effect.succeed(snapshot)
+            : telemetry.watchSnapshot.pipe(
+                Stream.filter(predicate),
+                Stream.runHead,
+                Effect.map(Option.getOrThrow),
+              ),
+        ),
       ),
     ),
   );

@@ -50,6 +50,14 @@ export const GlobalCommandSubmitRequest = Opcua.structure({
     commandId: Schema.String,
     commandKind: Schema.Number,
     clientId: Schema.String,
+    targetMode: Schema.Number,
+    configuration: RunConfigurationSchema,
+    target: Schema.Number,
+    targetPositionMm: Schema.Number,
+    velocityMmPerSecond: Schema.Number,
+    maxDurationMs: Schema.Number,
+    actuator: Schema.Number,
+    axisSelection: Schema.Number,
   }),
 });
 
@@ -61,4 +69,23 @@ export const defaultRunConfiguration = {
   batchSize: 3,
   xAxisSpeedMmPerSecond: 200,
   zAxisSpeedMmPerSecond: 100,
+} as const;
+
+export const emptySubmitPayload = {
+  targetMode: 0,
+  configuration: {
+    productName: "",
+    targetFillVolumeMl: 0,
+    fillToleranceMl: 0,
+    pumpRateMlPerSecond: 0,
+    batchSize: 0,
+    xAxisSpeedMmPerSecond: 0,
+    zAxisSpeedMmPerSecond: 0,
+  },
+  target: 0,
+  targetPositionMm: 0,
+  velocityMmPerSecond: 0,
+  maxDurationMs: 0,
+  actuator: 0,
+  axisSelection: 0,
 } as const;

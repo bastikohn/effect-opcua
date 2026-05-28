@@ -9,9 +9,9 @@ import { makeLiveTestContext } from "./live.js";
 import {
   GlobalCommandSubmitRequest,
   MachineConfigurePayload,
-  MoveAxisToPositionPayload,
   defaultRunConfiguration,
   demoNodeId,
+  emptySubmitPayload,
 } from "./support/demo-model.js";
 import {
   fakeExtensionObject,
@@ -74,49 +74,43 @@ describe("values", () => {
 
   it("reads and writes demo command structures", async () => {
     const commandId = "client-values-configure";
-    const configure = Opcua.variable({
-      nodeId: demoNodeId("Commands.Payloads.Machine.Configure"),
-      codec: MachineConfigurePayload,
-      access: "readWrite",
-      includeRaw: true,
-    });
     const submit = Opcua.variable({
       nodeId: demoNodeId("Commands.SubmitRequest"),
       codec: GlobalCommandSubmitRequest,
       access: "readWrite",
+      includeRaw: true,
     });
 
     const result = await runLive(
       Effect.gen(function* () {
         const session = yield* OpcuaSession.OpcuaSession;
-        const writtenPayload = yield* session.write(configure, {
-          commandId,
-          configuration: defaultRunConfiguration,
-        });
-        const sample = yield* session.read(configure);
         const submitted = yield* session.write(submit, {
           commandId,
           commandKind: GlobalCommandKind.Machine_Configure,
           clientId: "client-values",
+          ...emptySubmitPayload,
+          configuration: defaultRunConfiguration,
         });
+        const sample = yield* session.read(submit);
         const productName = yield* session.read(
           Opcua.variable({
             nodeId: demoNodeId("State.Configuration.ProductName"),
             codec: Opcua.schema(Schema.String),
           }),
         );
-        return { writtenPayload, sample, submitted, productName };
+        return { sample, submitted, productName };
       }),
     );
 
-    expect(result.writtenPayload).toMatchObject({ _tag: "Written" });
     expect(result.sample).toMatchObject({
       _tag: "Value",
       value: {
-        commandId,
+        commandId: "",
+        commandKind: GlobalCommandKind.None,
+        clientId: "",
         configuration: {
-          productName: defaultRunConfiguration.productName,
-          batchSize: defaultRunConfiguration.batchSize,
+          productName: "",
+          batchSize: 0,
         },
       },
     });
@@ -140,7 +134,12 @@ describe("values", () => {
             codec: GlobalCommandSubmitRequest,
             access: "readWrite",
           }),
-          { commandId: "", commandKind: GlobalCommandKind.None, clientId: "" },
+          {
+            commandId: "",
+            commandKind: GlobalCommandKind.None,
+            clientId: "",
+            ...emptySubmitPayload,
+          },
         );
       }),
     );
@@ -152,34 +151,22 @@ describe("values", () => {
   });
 
   it("keeps keyed batch helpers thin and ordered", async () => {
-    const configureNodeId = demoNodeId("Commands.Payloads.Machine.Configure");
-    const moveNodeId = demoNodeId(
-      "Commands.Payloads.Maintenance.MoveXAxisToPosition",
-    );
+    const submitNodeId = demoNodeId("Commands.SubmitRequest");
     const result = await runLive(
       Effect.gen(function* () {
         return yield* OpcuaSession.writeMany({
           configure: [
             Opcua.variable({
-              nodeId: configureNodeId,
-              codec: MachineConfigurePayload,
+              nodeId: submitNodeId,
+              codec: GlobalCommandSubmitRequest,
               access: "readWrite",
             }),
             {
               commandId: "batch-configure",
+              commandKind: GlobalCommandKind.Machine_Configure,
+              clientId: "client-values",
+              ...emptySubmitPayload,
               configuration: defaultRunConfiguration,
-            },
-          ],
-          move: [
-            Opcua.variable({
-              nodeId: moveNodeId,
-              codec: MoveAxisToPositionPayload,
-              access: "readWrite",
-            }),
-            {
-              commandId: "batch-move",
-              targetPositionMm: 100,
-              velocityMmPerSecond: 25,
             },
           ],
         } as const);
@@ -187,8 +174,7 @@ describe("values", () => {
     );
 
     expect(result).toMatchObject({
-      configure: { _tag: "Written", nodeId: configureNodeId },
-      move: { _tag: "Written", nodeId: moveNodeId },
+      configure: { _tag: "Written", nodeId: submitNodeId },
     });
   });
 

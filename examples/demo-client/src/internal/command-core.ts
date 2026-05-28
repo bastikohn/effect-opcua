@@ -92,10 +92,7 @@ export class DemoMachineCommandCore extends Context.Service<
         yield* active.samples.pipe(
           Stream.runForEach((sample) =>
             sample._tag === "Value"
-              ? SubscriptionRef.set(
-                  statusRef,
-                  mapCommandStatusBuffer(sample.value),
-                )
+              ? updateStatusRef(statusRef, mapCommandStatusBuffer(sample.value))
               : Effect.void,
           ),
           Effect.catch(() => Effect.void),
@@ -140,6 +137,18 @@ const readStatusFromSession = (session: OpcuaSession.OpcuaSession) =>
         }),
       );
     }),
+  );
+
+const updateStatusRef = (
+  ref: SubscriptionRef.SubscriptionRef<CommandStatusBuffer>,
+  next: CommandStatusBuffer,
+) =>
+  SubscriptionRef.get(ref).pipe(
+    Effect.flatMap((current) =>
+      next.revision > current.revision
+        ? SubscriptionRef.set(ref, next)
+        : Effect.void,
+    ),
   );
 
 const submitCommand = (input: {
@@ -192,17 +201,14 @@ const submitCommand = (input: {
     }
 
     yield* Effect.gen(function* () {
-      if (spec.payloadVariable && spec.buildPayload) {
-        yield* writeGood(
-          input.session,
-          spec.payloadVariable,
-          spec.buildPayload(command as never, { commandId }),
-        );
-      }
       yield* writeGood(input.session, Variables.CommandsSubmitRequest, {
         commandId,
         commandKind: spec.kind,
         clientId,
+        ...emptySubmitPayload,
+        ...(spec.buildPayload
+          ? (spec.buildPayload(command as never) as Record<string, unknown>)
+          : {}),
       });
     }).pipe(Effect.ensuring(Ref.set(input.submitInProgress, false)));
 
@@ -245,29 +251,69 @@ const writeGood = (
     ),
   );
 
+const emptySubmitPayload = {
+  targetMode: 0,
+  configuration: {
+    productName: "",
+    targetFillVolumeMl: 0,
+    fillToleranceMl: 0,
+    pumpRateMlPerSecond: 0,
+    batchSize: 0,
+    xAxisSpeedMmPerSecond: 0,
+    zAxisSpeedMmPerSecond: 0,
+  },
+  target: 0,
+  targetPositionMm: 0,
+  velocityMmPerSecond: 0,
+  maxDurationMs: 0,
+  actuator: 0,
+  axisSelection: 0,
+} as const;
+
 const waitForStatusEntry = <A extends CommandStatusEntry>(
   ref: SubscriptionRef.SubscriptionRef<CommandStatusBuffer>,
   commandId: string,
   predicate: (entry: CommandStatusEntry) => entry is A,
-) =>
-  SubscriptionRef.changes(ref).pipe(
-    Stream.map((buffer) =>
-      buffer.entries.find(
-        (entry): entry is A =>
-          entry.commandId === commandId && predicate(entry),
-      ),
-    ),
-    Stream.filter((entry): entry is A => entry !== undefined),
-    Stream.runHead,
-    Effect.flatMap((option) =>
-      Option.isSome(option)
-        ? Effect.succeed(option.value)
-        : Effect.fail(
-            new CommandStatusUnavailable({
-              operation: "watch Commands.Status",
-            }),
+): Effect.Effect<A, CommandStatusUnavailable> =>
+  findStatusEntry(ref, commandId, predicate).pipe(
+    Effect.flatMap((current) =>
+      Option.isSome(current)
+        ? Effect.succeed(current.value)
+        : SubscriptionRef.changes(ref).pipe(
+            Stream.map((buffer) =>
+              buffer.entries.find(
+                (entry): entry is A =>
+                  entry.commandId === commandId && predicate(entry),
+              ),
+            ),
+            Stream.filter((entry): entry is A => entry !== undefined),
+            Stream.runHead,
+            Effect.flatMap((option) =>
+              Option.isSome(option)
+                ? Effect.succeed(option.value)
+                : Effect.fail(
+                    new CommandStatusUnavailable({
+                      operation: "watch Commands.Status",
+                    }),
+                  ),
+            ),
           ),
     ),
+  );
+
+const findStatusEntry = <A extends CommandStatusEntry>(
+  ref: SubscriptionRef.SubscriptionRef<CommandStatusBuffer>,
+  commandId: string,
+  predicate: (entry: CommandStatusEntry) => entry is A,
+) =>
+  SubscriptionRef.get(ref).pipe(
+    Effect.map((buffer) => {
+      const entry = buffer.entries.find(
+        (entry): entry is A =>
+          entry.commandId === commandId && predicate(entry),
+      );
+      return entry === undefined ? Option.none<A>() : Option.some(entry);
+    }),
   );
 
 const timeoutAs = <A, E2>(

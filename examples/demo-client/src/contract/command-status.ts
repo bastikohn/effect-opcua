@@ -6,16 +6,12 @@ export type CommandState =
   | "Completed"
   | "Rejected"
   | "Failed"
-  | "Cancelled"
-  | "Superseded"
   | "Unknown";
 
 export type TerminalCommandState =
   | "Completed"
   | "Rejected"
-  | "Failed"
-  | "Cancelled"
-  | "Superseded";
+  | "Failed";
 
 export type CommandKindName =
   | "None"
@@ -74,7 +70,7 @@ export type CommandKindName =
   | "Unknown";
 
 export type CommandStatusEntry = {
-  readonly sequence: number;
+  readonly sequence: bigint;
   readonly commandId: string;
   readonly commandKind: CommandKindName;
   readonly commandKindValue: number;
@@ -88,7 +84,7 @@ export type CommandStatusEntry = {
 };
 
 export type CommandStatusBuffer = {
-  readonly revision: number;
+  readonly revision: bigint;
   readonly capacity: number;
   readonly entries: ReadonlyArray<CommandStatusEntry>;
 };
@@ -103,11 +99,18 @@ export const terminalCommandStates = new Set<CommandState>([
   "Completed",
   "Rejected",
   "Failed",
-  "Cancelled",
-  "Superseded",
 ]);
 
 export const isTerminalCommandStatusEntry = (
   entry: CommandStatusEntry,
 ): entry is TerminalCommandStatusEntry =>
   terminalCommandStates.has(entry.state);
+
+export const isCommandCompleted = (outcome: CommandOutcome) =>
+  outcome.state === "Completed";
+
+export const isCommandRejected = (outcome: CommandOutcome) =>
+  outcome.state === "Rejected";
+
+export const isCommandFailed = (outcome: CommandOutcome) =>
+  outcome.state === "Failed";

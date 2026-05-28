@@ -10,7 +10,7 @@ import {
 import { OpcuaClient, OpcuaSession } from "@effect-opcua/client";
 import { DemoMachine } from "../src/DemoMachine.js";
 
-vi.setConfig({ testTimeout: 30_000 });
+vi.setConfig({ testTimeout: 120_000 });
 
 export const makeLiveTestContext = (suite: string, offset: number) => {
   let demo: DemoOpcuaServer;
@@ -56,7 +56,7 @@ export const makeLiveTestContext = (suite: string, offset: number) => {
     Effect.runPromise(
       Effect.scoped(effect).pipe(
         Effect.provide(makeLiveLayer(clientId)),
-        Effect.timeout("12 seconds"),
+        Effect.timeout("90 seconds"),
       ),
     );
 

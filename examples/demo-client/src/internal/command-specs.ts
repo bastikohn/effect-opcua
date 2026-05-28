@@ -1,15 +1,7 @@
 import type { Duration } from "effect";
-import type { Opcua } from "@effect-opcua/client";
 
 import type { DemoMachineCommand } from "../contract/commands.js";
 import * as Enums from "../generated/enums.js";
-import * as Variables from "../generated/variables.js";
-
-export type WritablePayloadVariable<A = unknown> = Opcua.VariableDef<
-  string,
-  A,
-  "write" | "readWrite"
->;
 
 export type CommandSpec<
   Tag extends DemoMachineCommand["_tag"] = DemoMachineCommand["_tag"],
@@ -18,11 +10,7 @@ export type CommandSpec<
   readonly tag: Tag;
   readonly kind: Enums.GlobalCommandKindValue;
   readonly domain: "machine" | "manual" | "maintenance";
-  readonly payloadVariable?: WritablePayloadVariable<unknown>;
-  readonly buildPayload?: (
-    input: Input,
-    ctx: { readonly commandId: string },
-  ) => unknown;
+  readonly buildPayload?: (input: Input) => unknown;
   readonly timeouts?: {
     readonly observedTimeout?: Duration.Input;
     readonly timeout?: Duration.Input;
@@ -33,18 +21,14 @@ export const commandSpecs = {
   MachineSetMode: spec("MachineSetMode", {
     kind: Enums.GlobalCommandKind.Machine_SetMode,
     domain: "machine",
-    payloadVariable: Variables.MachineSetModePayload,
-    buildPayload: (input, ctx) => ({
-      commandId: ctx.commandId,
+    buildPayload: (input) => ({
       targetMode: Enums.OperatingMode[input.targetMode],
     }),
   }),
   MachineConfigure: spec("MachineConfigure", {
     kind: Enums.GlobalCommandKind.Machine_Configure,
     domain: "machine",
-    payloadVariable: Variables.MachineConfigurePayload,
-    buildPayload: (input, ctx) => ({
-      commandId: ctx.commandId,
+    buildPayload: (input) => ({
       configuration: input.runConfiguration,
     }),
   }),
@@ -92,51 +76,43 @@ export const commandSpecs = {
     "ManualMoveXAxisToTarget",
     Enums.GlobalCommandKind.Manual_MoveXAxisToTarget,
     "manual",
-    Variables.MoveXAxisToTargetPayload.Manual,
     Enums.XAxisTarget,
   ),
   ManualMoveXAxisToPosition: positionSpec(
     "ManualMoveXAxisToPosition",
     Enums.GlobalCommandKind.Manual_MoveXAxisToPosition,
     "manual",
-    Variables.MoveXAxisToPositionPayload.Manual,
   ),
   ManualMoveZAxisToTarget: targetSpec(
     "ManualMoveZAxisToTarget",
     Enums.GlobalCommandKind.Manual_MoveZAxisToTarget,
     "manual",
-    Variables.MoveZAxisToTargetPayload.Manual,
     Enums.ZAxisTarget,
   ),
   ManualMoveZAxisToPosition: positionSpec(
     "ManualMoveZAxisToPosition",
     Enums.GlobalCommandKind.Manual_MoveZAxisToPosition,
     "manual",
-    Variables.MoveZAxisToPositionPayload.Manual,
   ),
   ManualJogXPositive: jogSpec(
     "ManualJogXPositive",
     Enums.GlobalCommandKind.Manual_JogXPositive,
     "manual",
-    Variables.JogPayload.ManualXPositive,
   ),
   ManualJogXNegative: jogSpec(
     "ManualJogXNegative",
     Enums.GlobalCommandKind.Manual_JogXNegative,
     "manual",
-    Variables.JogPayload.ManualXNegative,
   ),
   ManualJogZPositive: jogSpec(
     "ManualJogZPositive",
     Enums.GlobalCommandKind.Manual_JogZPositive,
     "manual",
-    Variables.JogPayload.ManualZPositive,
   ),
   ManualJogZNegative: jogSpec(
     "ManualJogZNegative",
     Enums.GlobalCommandKind.Manual_JogZNegative,
     "manual",
-    Variables.JogPayload.ManualZNegative,
   ),
   ManualOpenClamp: spec("ManualOpenClamp", {
     kind: Enums.GlobalCommandKind.Manual_OpenClamp,
@@ -169,9 +145,7 @@ export const commandSpecs = {
   ManualClearActuatorFault: spec("ManualClearActuatorFault", {
     kind: Enums.GlobalCommandKind.Manual_ClearActuatorFault,
     domain: "manual",
-    payloadVariable: Variables.ManualClearActuatorFaultPayload,
-    buildPayload: (input, ctx) => ({
-      commandId: ctx.commandId,
+    buildPayload: (input) => ({
       actuator: Enums.ActuatorId[input.actuator],
     }),
   }),
@@ -218,71 +192,59 @@ export const commandSpecs = {
     "MaintenanceMoveXAxisToTarget",
     Enums.GlobalCommandKind.Maintenance_MoveXAxisToTarget,
     "maintenance",
-    Variables.MoveXAxisToTargetPayload.Maintenance,
     Enums.XAxisTarget,
   ),
   MaintenanceMoveXAxisToPosition: positionSpec(
     "MaintenanceMoveXAxisToPosition",
     Enums.GlobalCommandKind.Maintenance_MoveXAxisToPosition,
     "maintenance",
-    Variables.MoveXAxisToPositionPayload.Maintenance,
   ),
   MaintenanceMoveZAxisToTarget: targetSpec(
     "MaintenanceMoveZAxisToTarget",
     Enums.GlobalCommandKind.Maintenance_MoveZAxisToTarget,
     "maintenance",
-    Variables.MoveZAxisToTargetPayload.Maintenance,
     Enums.ZAxisTarget,
   ),
   MaintenanceMoveZAxisToPosition: positionSpec(
     "MaintenanceMoveZAxisToPosition",
     Enums.GlobalCommandKind.Maintenance_MoveZAxisToPosition,
     "maintenance",
-    Variables.MoveZAxisToPositionPayload.Maintenance,
   ),
   MaintenanceJogXPositive: jogSpec(
     "MaintenanceJogXPositive",
     Enums.GlobalCommandKind.Maintenance_JogXPositive,
     "maintenance",
-    Variables.JogPayload.MaintenanceXPositive,
   ),
   MaintenanceJogXNegative: jogSpec(
     "MaintenanceJogXNegative",
     Enums.GlobalCommandKind.Maintenance_JogXNegative,
     "maintenance",
-    Variables.JogPayload.MaintenanceXNegative,
   ),
   MaintenanceJogZPositive: jogSpec(
     "MaintenanceJogZPositive",
     Enums.GlobalCommandKind.Maintenance_JogZPositive,
     "maintenance",
-    Variables.JogPayload.MaintenanceZPositive,
   ),
   MaintenanceJogZNegative: jogSpec(
     "MaintenanceJogZNegative",
     Enums.GlobalCommandKind.Maintenance_JogZNegative,
     "maintenance",
-    Variables.JogPayload.MaintenanceZNegative,
   ),
   MaintenanceHomeAxes: axisSelectionSpec(
     "MaintenanceHomeAxes",
     Enums.GlobalCommandKind.Maintenance_HomeAxes,
-    Variables.AxisSelectionPayload.HomeAxes,
   ),
   MaintenanceEnableAxes: axisSelectionSpec(
     "MaintenanceEnableAxes",
     Enums.GlobalCommandKind.Maintenance_EnableAxes,
-    Variables.AxisSelectionPayload.EnableAxes,
   ),
   MaintenanceDisableAxes: axisSelectionSpec(
     "MaintenanceDisableAxes",
     Enums.GlobalCommandKind.Maintenance_DisableAxes,
-    Variables.AxisSelectionPayload.DisableAxes,
   ),
   MaintenanceClearAxisFault: axisSelectionSpec(
     "MaintenanceClearAxisFault",
     Enums.GlobalCommandKind.Maintenance_ClearAxisFault,
-    Variables.AxisSelectionPayload.ClearAxisFault,
   ),
   MaintenanceOpenClamp: spec("MaintenanceOpenClamp", {
     kind: Enums.GlobalCommandKind.Maintenance_OpenClamp,
@@ -321,15 +283,12 @@ function targetSpec<
   tag: Tag,
   kind: Enums.GlobalCommandKindValue,
   domain: "manual" | "maintenance",
-  payloadVariable: WritablePayloadVariable<unknown>,
   targetEnum: Record<string, number>,
 ) {
   return spec(tag, {
     kind,
     domain,
-    payloadVariable,
-    buildPayload: (input, ctx) => ({
-      commandId: ctx.commandId,
+    buildPayload: (input) => ({
       target: targetEnum[(input as { readonly target: string }).target],
       velocityMmPerSecond: (
         input as { readonly velocityMmPerSecond: number }
@@ -348,14 +307,11 @@ function positionSpec<
   tag: Tag,
   kind: Enums.GlobalCommandKindValue,
   domain: "manual" | "maintenance",
-  payloadVariable: WritablePayloadVariable<unknown>,
 ) {
   return spec(tag, {
     kind,
     domain,
-    payloadVariable,
-    buildPayload: (input, ctx) => ({
-      commandId: ctx.commandId,
+    buildPayload: (input) => ({
       targetPositionMm: (
         input as { readonly targetPositionMm: number }
       ).targetPositionMm,
@@ -380,14 +336,11 @@ function jogSpec<
   tag: Tag,
   kind: Enums.GlobalCommandKindValue,
   domain: "manual" | "maintenance",
-  payloadVariable: WritablePayloadVariable<unknown>,
 ) {
   return spec(tag, {
     kind,
     domain,
-    payloadVariable,
-    buildPayload: (input, ctx) => ({
-      commandId: ctx.commandId,
+    buildPayload: (input) => ({
       velocityMmPerSecond: (
         input as { readonly velocityMmPerSecond: number }
       ).velocityMmPerSecond,
@@ -406,14 +359,11 @@ function axisSelectionSpec<
 >(
   tag: Tag,
   kind: Enums.GlobalCommandKindValue,
-  payloadVariable: WritablePayloadVariable<unknown>,
 ) {
   return spec(tag, {
     kind,
     domain: "maintenance",
-    payloadVariable,
-    buildPayload: (input, ctx) => ({
-      commandId: ctx.commandId,
+    buildPayload: (input) => ({
       axisSelection:
         Enums.AxisSelection[
           (input as { readonly axisSelection: keyof typeof Enums.AxisSelection })

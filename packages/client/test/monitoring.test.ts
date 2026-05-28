@@ -29,7 +29,11 @@ import {
 import type { OpcuaStructureRuntime } from "../src/internal/structure-runtime.js";
 import type { ReadableVariableDef } from "../src/OpcuaVariable.js";
 import { makeLiveTestContext } from "./live.js";
-import { MachineConfigurePayload, demoNodeId } from "./support/demo-model.js";
+import {
+  GlobalCommandSubmitRequest,
+  MachineConfigurePayload,
+  demoNodeId,
+} from "./support/demo-model.js";
 
 const { runLive } = makeLiveTestContext("monitoring", 3);
 
@@ -885,9 +889,9 @@ describe("monitoring", () => {
   }, 20_000);
 
   it("streams structure samples through monitor", async () => {
-    const ConfigurePayload = Opcua.variable({
-      nodeId: demoNodeId("Commands.Payloads.Machine.Configure"),
-      codec: MachineConfigurePayload,
+    const SubmitRequest = Opcua.variable({
+      nodeId: demoNodeId("Commands.SubmitRequest"),
+      codec: GlobalCommandSubmitRequest,
     });
     const result = await runLive(
       Effect.gen(function* () {
@@ -896,7 +900,7 @@ describe("monitoring", () => {
           publishingInterval: Duration.millis(100),
         });
         const monitor = yield* subscription.monitor(
-          { configure: ConfigurePayload } as const,
+          { submit: SubmitRequest } as const,
           monitorOptions(),
         );
         return yield* monitor.samples.pipe(
@@ -909,7 +913,7 @@ describe("monitoring", () => {
 
     expect(result[0]).toMatchObject({
       _tag: "Value",
-      key: "configure",
+      key: "submit",
       value: expect.objectContaining({ commandId: expect.any(String) }),
     });
   }, 20_000);

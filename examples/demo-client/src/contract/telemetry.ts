@@ -1,5 +1,5 @@
 export type DemoMachineSnapshot = {
-  readonly revision: number;
+  readonly revision: bigint;
   readonly machine: {
     readonly state: string;
     readonly stateValue: number;

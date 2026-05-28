@@ -24,7 +24,7 @@ const names = {
 export const makeSnapshot = (
   staging: TelemetryStaging,
 ): DemoMachineSnapshot => ({
-  revision: numberValue(staging.telemetryRevision),
+  revision: bigintValue(staging.telemetryRevision),
   machine: {
     state: enumName(names.machineState, staging.machineState),
     stateValue: numberValue(staging.machineState),
@@ -137,6 +137,24 @@ export const numberValue = (value: unknown): number => {
     return numberValue(value[0]) * 2 ** 32 + numberValue(value[1]);
   }
   return Number(value);
+};
+
+export const bigintValue = (value: unknown): bigint => {
+  if (typeof value === "bigint") return value;
+  if (typeof value === "number") return BigInt(Math.max(0, Math.trunc(value)));
+  if (
+    value &&
+    typeof value === "object" &&
+    "_tag" in value &&
+    ((value as { readonly _tag: unknown })._tag === "UInt64" ||
+      (value as { readonly _tag: unknown })._tag === "Int64")
+  ) {
+    return BigInt((value as unknown as { readonly text: string }).text);
+  }
+  if (Array.isArray(value) && value.length === 2) {
+    return BigInt(numberValue(value[0])) * 2n ** 32n + BigInt(numberValue(value[1]));
+  }
+  return BigInt(Math.max(0, Math.trunc(Number(value))));
 };
 
 const booleanValue = (value: unknown): boolean => value === true;

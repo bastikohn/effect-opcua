@@ -25,6 +25,14 @@ export const GlobalCommandSubmitRequestSchema = Schema.Struct({
   commandId: Schema.String,
   commandKind: Schema.Number,
   clientId: Schema.String,
+  targetMode: Schema.Number,
+  configuration: RunConfigurationSchema,
+  target: Schema.Number,
+  targetPositionMm: Schema.Number,
+  velocityMmPerSecond: Schema.Number,
+  maxDurationMs: Schema.Number,
+  actuator: Schema.Number,
+  axisSelection: Schema.Number,
 });
 
 export type GlobalCommandSubmitRequest =

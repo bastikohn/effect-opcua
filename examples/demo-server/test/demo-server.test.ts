@@ -76,7 +76,7 @@ describe("DemoFillingCell demo server", () => {
     }
   }, 30_000);
 
-  test("exposes the machine tree, command catalog, and typed payload nodes", async () => {
+  test("exposes the machine tree and atomic command catalog", async () => {
     const activeSession = expectSession(session);
 
     const objects = await browseNames(activeSession, "i=85");
@@ -127,21 +127,12 @@ describe("DemoFillingCell demo server", () => {
     await expectReadValue(
       activeSession,
       nodeId("Commands.Catalog.Machine_Configure.PayloadBrowsePath"),
-      "Commands/Payloads/Machine/Configure",
+      "Commands/SubmitRequest",
     );
     await expectReadValue(
       activeSession,
       nodeId("Commands.Catalog.Machine_Configure.PayloadTypeName"),
       "MachineConfigurePayload",
-    );
-
-    const configureDataType = await activeSession.read({
-      nodeId: nodeId("Commands.Payloads.Machine.Configure"),
-      attributeId: AttributeIds.DataType,
-    });
-    expect(configureDataType.statusCode).toBe(StatusCodes.Good);
-    expect(configureDataType.value.value.toString()).toBe(
-      "ns=1;s=DataTypes.MachineConfigurePayload",
     );
 
     const statusDataType = await activeSession.read({
@@ -173,7 +164,7 @@ describe("DemoFillingCell demo server", () => {
     expect(oldScalar.statusCode).not.toBe(StatusCodes.Good);
   });
 
-  test("rejects invalid payload handshakes through one terminal status entry", async () => {
+  test("rejects missing embedded payload through one terminal status entry", async () => {
     const activeSession = expectSession(session);
     const commandId = "payload-mismatch";
 
@@ -191,15 +182,14 @@ describe("DemoFillingCell demo server", () => {
       commandKind: GlobalCommandKind.Machine_Configure,
       clientId: "vitest",
       state: CommandState.Rejected,
-      statusCode: "PayloadCommandIdMismatch",
-      statusMessage:
-        "The staged payload commandId does not match SubmitRequest.commandId.",
+      statusCode: "InvalidPayload",
+      statusMessage: "productName must not be empty.",
     });
 
     await expectSubmitRequestDefault(activeSession);
   });
 
-  test("applies configure, home, and start commands through typed payloads", async () => {
+  test("applies configure, home, and start commands through atomic submit", async () => {
     const activeSession = expectSession(session);
     const commandId = "configure-basic-batch";
 
@@ -215,19 +205,11 @@ describe("DemoFillingCell demo server", () => {
         zAxisSpeedMmPerSecond: 100,
       },
     );
-    const payload = await activeSession.constructExtensionObject(
-      dataTypeNodeId("MachineConfigurePayload"),
-      { commandId, configuration },
-    );
-    await writeStructure(
-      activeSession,
-      nodeId("Commands.Payloads.Machine.Configure"),
-      payload,
-    );
     await writeSubmit(activeSession, {
       commandId,
       commandKind: GlobalCommandKind.Machine_Configure,
       clientId: "vitest",
+      configuration,
     });
 
     let status = await readCommandStatus(activeSession);
@@ -340,16 +322,20 @@ describe("DemoFillingCell demo server", () => {
       clientId: "vitest",
     });
 
-    const duplicateStatus = await writeSubmit(activeSession, {
+    await writeSubmit(activeSession, {
       commandId,
       commandKind: GlobalCommandKind.Machine_Start,
       clientId: "vitest",
     });
 
-    expect(duplicateStatus).toBe(StatusCodes.BadInvalidArgument);
     const status = await readCommandStatus(activeSession);
     expect(status.entries.filter((entry) => entry.commandId === commandId))
-      .toHaveLength(1);
+      .toHaveLength(2);
+    expect(status.entries.at(-1)).toMatchObject({
+      commandId,
+      state: CommandState.Rejected,
+      statusCode: "DuplicateCommandId",
+    });
   });
 
   const restartDemoServer = async (
@@ -433,11 +419,40 @@ const writeSubmit = async (
     readonly commandId: string;
     readonly commandKind: number;
     readonly clientId: string;
+    readonly targetMode?: number;
+    readonly configuration?: ExtensionObject;
+    readonly target?: number;
+    readonly targetPositionMm?: number;
+    readonly velocityMmPerSecond?: number;
+    readonly maxDurationMs?: number;
+    readonly actuator?: number;
+    readonly axisSelection?: number;
   },
 ) => {
+  const configuration =
+    value.configuration ??
+    (await session.constructExtensionObject(dataTypeNodeId("RunConfiguration"), {
+      productName: "",
+      targetFillVolumeMl: 0,
+      fillToleranceMl: 0,
+      pumpRateMlPerSecond: 0,
+      batchSize: 0,
+      xAxisSpeedMmPerSecond: 0,
+      zAxisSpeedMmPerSecond: 0,
+    }));
   const submit = await session.constructExtensionObject(
     dataTypeNodeId("GlobalCommandSubmitRequest"),
-    value,
+    {
+      targetMode: 0,
+      configuration,
+      target: 0,
+      targetPositionMm: 0,
+      velocityMmPerSecond: 0,
+      maxDurationMs: 0,
+      actuator: 0,
+      axisSelection: 0,
+      ...value,
+    },
   );
   return writeStructure(session, nodeId("Commands.SubmitRequest"), submit);
 };
@@ -484,6 +499,13 @@ const expectSubmitRequestDefault = async (session: ClientSession) => {
       commandId: "",
       commandKind: 0,
       clientId: "",
+      targetMode: 0,
+      target: 0,
+      targetPositionMm: 0,
+      velocityMmPerSecond: 0,
+      maxDurationMs: 0,
+      actuator: 0,
+      axisSelection: 0,
     });
     return;
   }

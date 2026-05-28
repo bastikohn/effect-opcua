@@ -14,6 +14,7 @@ import type { DemoMachineOptions } from "../contract/options.js";
 import type { DemoMachineSnapshot } from "../contract/telemetry.js";
 import * as Variables from "../generated/variables.js";
 import {
+  bigintValue,
   makeSnapshot,
   type TelemetryStaging,
 } from "./telemetry-snapshot.js";
@@ -36,7 +37,7 @@ export class DemoMachineTelemetryCore extends Context.Service<
           publishingInterval: Duration.millis(100),
         });
         const active = yield* subscription.monitor(
-          Variables.SnapshotVariables,
+          { telemetryRevision: Variables.TelemetryRevision },
           {
             startup: "strict",
             validation: "strict",
@@ -48,36 +49,14 @@ export class DemoMachineTelemetryCore extends Context.Service<
             clientBuffer: Opcua.BufferPolicy.sliding(64),
           },
         );
-        const initialResults = yield* session.readMany(
-          Variables.SnapshotVariables,
-          { validation: "strict" },
-        );
-        const initialStaging = yield* readManyToStaging(initialResults);
-        const stagingRef = yield* Ref.make<TelemetryStaging>(initialStaging);
-        const snapshotRef = yield* SubscriptionRef.make(
-          makeSnapshot(initialStaging),
-        );
+        const initialSnapshot = yield* readSnapshotFromSession(session);
+        const latestRevision = yield* Ref.make(initialSnapshot.revision);
+        const snapshotRef = yield* SubscriptionRef.make(initialSnapshot);
 
         yield* active.samples.pipe(
           Stream.runForEach((sample) =>
             sample._tag === "Value"
-              ? Ref.update(stagingRef, (staging) => ({
-                  ...staging,
-                  [sample.key]: sample.value,
-                })).pipe(
-                  Effect.andThen(
-                    sample.key === "telemetryRevision"
-                      ? Ref.get(stagingRef).pipe(
-                          Effect.flatMap((staging) =>
-                            SubscriptionRef.set(
-                              snapshotRef,
-                              makeSnapshot(staging),
-                            ),
-                          ),
-                        )
-                      : Effect.void,
-                  ),
-                )
+              ? refreshSnapshot(session, snapshotRef, latestRevision, sample.value)
               : Effect.void,
           ),
           Effect.catch(() => Effect.void),
@@ -91,6 +70,28 @@ export class DemoMachineTelemetryCore extends Context.Service<
       }),
     );
 }
+
+const readSnapshotFromSession = (session: OpcuaSession.OpcuaSession) =>
+  session
+    .readMany(Variables.SnapshotVariables, { validation: "strict" })
+    .pipe(Effect.flatMap(readManyToStaging), Effect.map(makeSnapshot));
+
+const refreshSnapshot = (
+  session: OpcuaSession.OpcuaSession,
+  snapshotRef: SubscriptionRef.SubscriptionRef<DemoMachineSnapshot>,
+  latestRevision: Ref.Ref<bigint>,
+  sampledRevision: unknown,
+) =>
+  Effect.gen(function* () {
+    const revision = bigintValue(sampledRevision);
+    const latest = yield* Ref.get(latestRevision);
+    if (revision <= latest) return;
+
+    const snapshot = yield* readSnapshotFromSession(session);
+    if (snapshot.revision < latest) return;
+    yield* Ref.set(latestRevision, snapshot.revision);
+    yield* SubscriptionRef.set(snapshotRef, snapshot);
+  }).pipe(Effect.catch(() => Effect.void));
 
 const readManyToStaging = (
   results: Record<string, { readonly _tag: string; readonly value?: unknown }>,

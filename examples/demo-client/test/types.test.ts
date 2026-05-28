@@ -41,14 +41,23 @@ const expectCommandTypes = (commands: DemoMachineCommandsService) => {
 
 void expectCommandTypes;
 
-const expectTelemetryTypes = (telemetry: DemoMachineTelemetryService) => {
-  Effect.map(telemetry.readCommandStatus, (status) => {
+const expectCommandStatusTypes = (commands: DemoMachineCommandsService) => {
+  Effect.map(commands.readCommandStatus, (status) => {
     const state: string | undefined = status.entries[0]?.state;
     void state;
 
     // @ts-expect-error curated command status exposes string states, not raw numbers
     const rawState: number | undefined = status.entries[0]?.state;
     void rawState;
+  });
+};
+
+void expectCommandStatusTypes;
+
+const expectTelemetryTypes = (telemetry: DemoMachineTelemetryService) => {
+  Effect.map(telemetry.readSnapshot, (snapshot) => {
+    const revision: bigint = snapshot.revision;
+    void revision;
   });
 };
 
