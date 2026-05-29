@@ -13,6 +13,7 @@
     "dev:server": "pnpm --filter @effect-opcua/demo-server start",
     "dev:tui": "pnpm --filter @effect-opcua/tui start",
     "test:integration": "pnpm --filter @effect-opcua/client test",
+    "test:types": "tstyche",
     "typecheck": "pnpm -r --filter='@effect-opcua/*' typecheck",
     "test": "pnpm -r --workspace-concurrency=1 --filter='@effect-opcua/*' test",
     "lint": "eslint . --max-warnings=0",
@@ -31,8 +32,9 @@
     "eslint": "^9.0.0",
     "prettier": "^3.0.0",
     "tsdown": "^0.16.0",
-    "typescript-eslint": "^8.0.0",
+    "tstyche": "^7.2.1",
     "typescript": "^5.0.0",
+    "typescript-eslint": "^8.0.0",
     "unrun": "^0.3.0",
     "vitest": "^4.0.0"
   }
