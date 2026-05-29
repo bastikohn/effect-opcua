@@ -1,0 +1,43 @@
+{
+  "name": "@effect-opcua/codegen",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Effect OPC-UA client code generator",
+  "sideEffects": false,
+  "type": "module",
+  "files": [
+    "README.md",
+    "dist",
+    "package.json",
+    "src"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json",
+    "./internal/*": null
+  },
+  "bin": {
+    "effect-opcua-codegen": "./dist/cli.mjs"
+  },
+  "main": "./dist/index.mjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "scripts": {
+    "build": "tsdown --config-loader unrun",
+    "dev": "tsdown --watch --config-loader unrun",
+    "typecheck": "tsc --noEmit --project tsconfig.json",
+    "test": "vitest run --passWithNoTests",
+    "clean": "rm -rf dist coverage node_modules"
+  },
+  "peerDependencies": {
+    "effect": "4.0.0-beta.66"
+  },
+  "dependencies": {
+    "@effect-opcua/client": "workspace:*",
+    "unrun": "^0.3.0"
+  },
+  "devDependencies": {}
+}

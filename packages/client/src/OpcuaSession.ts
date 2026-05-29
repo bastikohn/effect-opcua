@@ -55,6 +55,12 @@ import {
   wireSubscriptionEvents,
 } from "./internal/events.js";
 import { makeMetadataService } from "./internal/metadata.js";
+import type {
+  OpcuaAccessBits,
+  OpcuaMetadataReadFailure,
+  OpcuaNodeMetadata,
+  OpcuaNodeMetadataResult,
+} from "./internal/metadata.js";
 import {
   makeSubscription as makeSubscriptionImpl,
   type OpcuaSubscription,
@@ -90,6 +96,12 @@ import {
 } from "./internal/session-operations.js";
 
 export type { OpcuaBrowseReference } from "./internal/browse.js";
+export type {
+  OpcuaAccessBits,
+  OpcuaMetadataReadFailure,
+  OpcuaNodeMetadata,
+  OpcuaNodeMetadataResult,
+};
 
 export type ReadManyServiceOptions = {
   readonly maxNodesPerRead?: number;
@@ -257,6 +269,16 @@ export type OpcuaSession = {
     nodeId: NodeIdString,
     options?: OpcuaBrowseChildrenOptions,
   ) => Effect.Effect<OpcuaBrowseChildrenResult, OpcuaError>;
+  readonly readNamespaceArray: () => Effect.Effect<
+    readonly string[],
+    OpcuaError
+  >;
+  readonly readNodeMetadata: (
+    nodeId: string,
+  ) => Effect.Effect<OpcuaNodeMetadata, OpcuaError>;
+  readonly readManyNodeMetadata: (
+    nodeIds: readonly string[],
+  ) => Effect.Effect<readonly OpcuaNodeMetadataResult[], OpcuaError>;
   readonly makeSubscription: (options: {
     readonly publishingInterval: Duration.Duration;
     readonly lifetimeCount?: number;
@@ -340,6 +362,17 @@ export const makeSubscription = (
   options: Parameters<OpcuaSession["makeSubscription"]>[0],
 ) =>
   Effect.flatMap(OpcuaSession, (session) => session.makeSubscription(options));
+
+export const readNamespaceArray = () =>
+  Effect.flatMap(OpcuaSession, (session) => session.readNamespaceArray());
+
+export const readNodeMetadata = (nodeId: string) =>
+  Effect.flatMap(OpcuaSession, (session) => session.readNodeMetadata(nodeId));
+
+export const readManyNodeMetadata = (nodeIds: readonly string[]) =>
+  Effect.flatMap(OpcuaSession, (session) =>
+    session.readManyNodeMetadata(nodeIds),
+  );
 
 export const makeSession = (
   unsafeRaw: ClientSession,
@@ -596,6 +629,16 @@ export const makeSession = (
         };
       });
 
+    const readNamespaceArray: OpcuaSession["readNamespaceArray"] = () =>
+      metadata.namespaceArray();
+
+    const readNodeMetadata: OpcuaSession["readNodeMetadata"] = (nodeId) =>
+      metadata.node(nodeId);
+
+    const readManyNodeMetadata: OpcuaSession["readManyNodeMetadata"] = (
+      nodeIds,
+    ) => metadata.nodes(nodeIds);
+
     return {
       read,
       write,
@@ -608,6 +651,9 @@ export const makeSession = (
       browseNext,
       releaseBrowseContinuation,
       browseChildren,
+      readNamespaceArray,
+      readNodeMetadata,
+      readManyNodeMetadata,
       events: Stream.fromPubSub(events),
       unsafeRaw,
     };

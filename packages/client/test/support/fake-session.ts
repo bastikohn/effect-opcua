@@ -21,6 +21,7 @@ import type { OpcuaSessionEvent } from "../../src/internal/events.js";
 import {
   AttributeIds,
   DataType,
+  NodeClass,
   StatusCodes,
   Variant,
   coerceNodeId,
@@ -34,6 +35,14 @@ export type FakeVariableMetadata = {
   readonly userAccessLevel?: number;
 };
 
+export type FakeNodeMetadata = {
+  readonly nodeClass?: NodeClass;
+  readonly browseName?: string;
+  readonly browseNameNamespaceIndex?: number;
+  readonly displayName?: string;
+  readonly description?: string;
+};
+
 export type FakeMethodDefinition = {
   readonly inputArguments?: ReadonlyArray<Argument>;
   readonly outputArguments?: ReadonlyArray<Argument>;
@@ -43,6 +52,9 @@ export type FakeMethodDefinition = {
 
 export type FakeSessionOptions = {
   readonly batching?: OpcuaSessionBatchingOptions;
+  readonly namespaceArray?: ReadonlyArray<string>;
+  readonly nodeMetadata?: Readonly<Record<string, FakeNodeMetadata>>;
+  readonly missingNodeIds?: ReadonlyArray<string>;
   readonly readValues?: (
     nodesToRead: ReadonlyArray<ReadValueIdOptions>,
   ) => ReadonlyArray<DataValue>;
@@ -153,11 +165,28 @@ const readValueBatch = (
   batch: ReadonlyArray<ReadValueIdOptions>,
 ) => {
   calls.valueReads.push([...batch]);
+  if (batch.every((node) => isNamespaceArrayNodeId(node.nodeId?.toString()))) {
+    return batch.map(
+      () =>
+        ({
+          statusCode: StatusCodes.Good,
+          value: {
+            value: options.namespaceArray ?? [
+              "http://opcfoundation.org/UA/",
+              "urn:effect-opcua:test",
+            ],
+          },
+        }) as unknown as DataValue,
+    );
+  }
   return (
     options.readValues?.(batch) ??
     batch.map((_, index) => numberDataValue(index))
   );
 };
+
+const isNamespaceArrayNodeId = (nodeId: string | undefined) =>
+  nodeId === "i=2255" || nodeId === "ns=0;i=2255";
 
 const readMetadataBatch = (
   options: FakeSessionOptions,
@@ -173,9 +202,38 @@ const metadataDataValue = (
   node: ReadValueIdOptions,
 ): DataValue => {
   const nodeId = node.nodeId?.toString() ?? "";
+  if (options.missingNodeIds?.includes(nodeId)) {
+    return { statusCode: StatusCodes.BadNodeIdUnknown } as unknown as DataValue;
+  }
+  const nodeMetadata = options.nodeMetadata?.[nodeId] ?? {};
   const variable = options.variableMetadata?.[nodeId] ?? {};
   const method = methodDefinition(options, nodeId);
   switch (node.attributeId) {
+    case AttributeIds.NodeClass:
+      return variantDataValue(
+        DataType.Int32,
+        nodeMetadata.nodeClass ?? NodeClass.Variable,
+      );
+    case AttributeIds.BrowseName:
+      return variantDataValue(DataType.QualifiedName, {
+        namespaceIndex: nodeMetadata.browseNameNamespaceIndex ?? 1,
+        name: nodeMetadata.browseName ?? nodeId,
+        toString: () => nodeMetadata.browseName ?? nodeId,
+      });
+    case AttributeIds.DisplayName:
+      return variantDataValue(DataType.LocalizedText, {
+        text: nodeMetadata.displayName ?? nodeMetadata.browseName ?? nodeId,
+        locale: undefined,
+      });
+    case AttributeIds.Description:
+      return nodeMetadata.description
+        ? variantDataValue(DataType.LocalizedText, {
+            text: nodeMetadata.description,
+            locale: undefined,
+          })
+        : ({
+            statusCode: StatusCodes.BadAttributeIdInvalid,
+          } as unknown as DataValue);
     case AttributeIds.DataType:
       return variantDataValue(
         DataType.NodeId,

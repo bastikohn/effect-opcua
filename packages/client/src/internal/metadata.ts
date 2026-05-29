@@ -1,14 +1,19 @@
 import {
+  AccessLevelFlag,
   AttributeIds,
   BrowseDirection,
   DataType,
   DataTypeIds,
+  NodeClass,
   NodeId,
   NodeIdType,
   ReferenceTypeIds,
+  StatusCodes,
   coerceNodeId,
   type BrowseDescriptionOptions,
   type ClientSession,
+  type DataValue,
+  type ReadValueIdOptions,
 } from "node-opcua";
 import { Effect } from "effect";
 
@@ -33,6 +38,11 @@ import {
   type MethodMetadata,
 } from "../OpcuaMethod.js";
 import { isGood } from "./normalize.js";
+import {
+  normalizeLocalizedText,
+  normalizeQualifiedName,
+  normalizeStatusCode,
+} from "./normalize.js";
 import type { OpcuaStructureRuntime } from "./structure-runtime.js";
 import {
   accessDeniedError,
@@ -44,6 +54,22 @@ import {
 } from "../OpcuaVariable.js";
 
 export type MetadataService = {
+  readonly namespaceArray: () => Effect.Effect<
+    readonly string[],
+    OpcuaServiceError | OpcuaConfigurationError
+  >;
+  readonly node: (
+    nodeId: NodeIdString,
+  ) => Effect.Effect<
+    OpcuaNodeMetadata,
+    OpcuaServiceError | OpcuaConfigurationError
+  >;
+  readonly nodes: (
+    nodeIds: readonly NodeIdString[],
+  ) => Effect.Effect<
+    readonly OpcuaNodeMetadataResult[],
+    OpcuaServiceError | OpcuaConfigurationError
+  >;
   readonly variable: (
     def: AnyVariableDef,
   ) => Effect.Effect<
@@ -62,6 +88,67 @@ export type MetadataService = {
   readonly invalidate: Effect.Effect<void>;
 };
 
+export type OpcuaAccessBits = {
+  readonly readable: boolean;
+  readonly writable: boolean;
+};
+
+export type OpcuaNodeMetadata = {
+  readonly nodeId: string;
+
+  readonly nodeClass?: string;
+  readonly browseName?: string;
+  readonly browseNameNamespaceIndex?: number;
+
+  readonly displayName?: string;
+  readonly description?: string;
+
+  readonly dataType?: string;
+  readonly valueRank?: number;
+  readonly arrayDimensions?: readonly number[];
+
+  readonly accessLevel?: OpcuaAccessBits;
+  readonly userAccessLevel?: OpcuaAccessBits;
+
+  readonly namespaceIndex?: number;
+  readonly namespaceUri?: string;
+};
+
+export type OpcuaMetadataAttribute =
+  | "NodeClass"
+  | "BrowseName"
+  | "DisplayName"
+  | "Description"
+  | "DataType"
+  | "ValueRank"
+  | "ArrayDimensions"
+  | "AccessLevel"
+  | "UserAccessLevel";
+
+export type OpcuaMetadataReadFailure =
+  | {
+      readonly _tag: "NonGoodStatus";
+      readonly attribute: OpcuaMetadataAttribute;
+      readonly status: ReturnType<typeof normalizeStatusCode>;
+    }
+  | {
+      readonly _tag: "InvalidValue";
+      readonly attribute: OpcuaMetadataAttribute;
+      readonly message: string;
+    };
+
+export type OpcuaNodeMetadataResult =
+  | {
+      readonly _tag: "Success";
+      readonly nodeId: string;
+      readonly metadata: OpcuaNodeMetadata;
+    }
+  | {
+      readonly _tag: "Failure";
+      readonly nodeId: string;
+      readonly reason: OpcuaMetadataReadFailure;
+    };
+
 type MethodBaseMetadata = {
   readonly objectId: NodeIdString;
   readonly methodId: NodeIdString;
@@ -75,9 +162,45 @@ export const makeMetadataService = (
   session: ClientSession,
   structureRuntime: OpcuaStructureRuntime,
 ): MetadataService => {
+  let namespaceArrayCache: readonly string[] | undefined;
   const variableCache = new Map<string, VariableMetadata>();
   const methodCache = new Map<string, MethodBaseMetadata>();
   const builtInDataTypeCache = new Map<string, DataType>();
+
+  const namespaceArray = () =>
+    Effect.suspend(() => {
+      if (namespaceArrayCache !== undefined) {
+        return Effect.succeed(namespaceArrayCache);
+      }
+      return readNamespaceArray(session).pipe(
+        Effect.tap((value) =>
+          Effect.sync(() => {
+            namespaceArrayCache = value;
+          }),
+        ),
+      );
+    });
+
+  const nodes: MetadataService["nodes"] = (nodeIds) =>
+    readManyNodeMetadata(session, namespaceArray, nodeIds);
+
+  const node: MetadataService["node"] = (nodeId) =>
+    Effect.gen(function* () {
+      const [result] = yield* nodes([nodeId]);
+      if (!result || result._tag === "Failure") {
+        return yield* Effect.fail(
+          configurationError({
+            operation: "metadata.node",
+            nodeId,
+            cause:
+              result?._tag === "Failure"
+                ? result.reason
+                : "No metadata result was returned",
+          }),
+        );
+      }
+      return result.metadata;
+    });
 
   const builtInDataType: MetadataService["builtInDataType"] = (
     dataTypeNodeId,
@@ -184,12 +307,252 @@ export const makeMetadataService = (
     });
 
   const invalidate = Effect.sync(() => {
+    namespaceArrayCache = undefined;
     variableCache.clear();
     methodCache.clear();
     builtInDataTypeCache.clear();
   });
 
-  return { variable, method, builtInDataType, invalidate };
+  return {
+    namespaceArray,
+    node,
+    nodes,
+    variable,
+    method,
+    builtInDataType,
+    invalidate,
+  };
+};
+
+const readNamespaceArray = (session: ClientSession) =>
+  Effect.gen(function* () {
+    const dataValue = yield* Effect.tryPromise({
+      try: () =>
+        session.read(
+          { nodeId: coerceNodeId("i=2255"), attributeId: AttributeIds.Value },
+          0,
+        ),
+      catch: (cause) =>
+        serviceError({
+          operation: "metadata.namespaceArray",
+          nodeId: "i=2255",
+          cause,
+        }),
+    });
+    if (!isGood(dataValue.statusCode)) {
+      return yield* Effect.fail(
+        configurationError({
+          operation: "metadata.namespaceArray",
+          nodeId: "i=2255",
+          cause: normalizeStatusCode(dataValue.statusCode),
+        }),
+      );
+    }
+    const value = dataValue.value?.value;
+    if (
+      !Array.isArray(value) ||
+      !value.every((item) => typeof item === "string")
+    ) {
+      return yield* Effect.fail(
+        configurationError({
+          operation: "metadata.namespaceArray",
+          nodeId: "i=2255",
+          cause: "NamespaceArray value is not a string array",
+        }),
+      );
+    }
+    return [...value];
+  });
+
+const metadataAttributes = [
+  ["NodeClass", AttributeIds.NodeClass],
+  ["BrowseName", AttributeIds.BrowseName],
+  ["DisplayName", AttributeIds.DisplayName],
+  ["Description", AttributeIds.Description],
+  ["DataType", AttributeIds.DataType],
+  ["ValueRank", AttributeIds.ValueRank],
+  ["ArrayDimensions", AttributeIds.ArrayDimensions],
+  ["AccessLevel", AttributeIds.AccessLevel],
+  ["UserAccessLevel", AttributeIds.UserAccessLevel],
+] as const satisfies ReadonlyArray<
+  readonly [OpcuaMetadataAttribute, AttributeIds]
+>;
+
+const requiredMetadataAttributes = new Set<OpcuaMetadataAttribute>([
+  "NodeClass",
+  "BrowseName",
+]);
+
+const readManyNodeMetadata = (
+  session: ClientSession,
+  namespaceArray: MetadataService["namespaceArray"],
+  nodeIds: readonly NodeIdString[],
+) =>
+  Effect.gen(function* () {
+    const namespaceUris = yield* namespaceArray();
+    const readPlan = nodeIds.map((nodeId) => {
+      const parsed = coerceNodeId(nodeId);
+      const nodesToRead = metadataAttributes.map(
+        ([attribute, attributeId]) =>
+          ({
+            nodeId: parsed,
+            attributeId,
+            attribute,
+          }) as ReadValueIdOptions & {
+            readonly attribute: OpcuaMetadataAttribute;
+          },
+      );
+      return { nodeId, parsed, nodesToRead };
+    });
+    const flatNodes = readPlan.flatMap((entry) => entry.nodesToRead);
+    const values = yield* Effect.tryPromise({
+      try: () => session.read(flatNodes, 0),
+      catch: (cause) =>
+        serviceError({
+          operation: "metadata.nodes",
+          cause,
+        }),
+    });
+    if (values.length !== flatNodes.length) {
+      return yield* Effect.fail(
+        serviceError({
+          operation: "metadata.nodes",
+          cause: `Expected ${flatNodes.length} DataValues, got ${values.length}`,
+        }),
+      );
+    }
+
+    let offset = 0;
+    return readPlan.map((entry): OpcuaNodeMetadataResult => {
+      const valuesByAttribute = new Map<OpcuaMetadataAttribute, DataValue>();
+      for (const [attribute] of metadataAttributes) {
+        valuesByAttribute.set(attribute, values[offset++]!);
+      }
+      const failure = metadataFailure(valuesByAttribute);
+      if (failure) {
+        return {
+          _tag: "Failure",
+          nodeId: entry.nodeId,
+          reason: failure,
+        };
+      }
+      return {
+        _tag: "Success",
+        nodeId: entry.nodeId,
+        metadata: nodeMetadataFromValues(
+          entry.nodeId,
+          entry.parsed.namespace,
+          namespaceUris[entry.parsed.namespace],
+          valuesByAttribute,
+        ),
+      };
+    });
+  });
+
+const metadataFailure = (
+  values: ReadonlyMap<OpcuaMetadataAttribute, DataValue>,
+): OpcuaMetadataReadFailure | undefined => {
+  for (const attribute of requiredMetadataAttributes) {
+    const value = values.get(attribute);
+    if (!value || !isGood(value.statusCode)) {
+      return {
+        _tag: "NonGoodStatus",
+        attribute,
+        status: normalizeStatusCode(
+          value?.statusCode ?? StatusCodes.BadInternalError,
+        ),
+      };
+    }
+  }
+  if (typeof values.get("NodeClass")?.value?.value !== "number") {
+    return {
+      _tag: "InvalidValue",
+      attribute: "NodeClass",
+      message: "NodeClass value is not numeric",
+    };
+  }
+  if (!values.get("BrowseName")?.value?.value) {
+    return {
+      _tag: "InvalidValue",
+      attribute: "BrowseName",
+      message: "BrowseName value is missing",
+    };
+  }
+  return undefined;
+};
+
+const nodeMetadataFromValues = (
+  nodeId: string,
+  namespaceIndex: number,
+  namespaceUri: string | undefined,
+  values: ReadonlyMap<OpcuaMetadataAttribute, DataValue>,
+): OpcuaNodeMetadata => {
+  const browseNameValue = values.get("BrowseName")?.value?.value;
+  const displayNameValue = values.get("DisplayName");
+  const descriptionValue = values.get("Description");
+  const nodeClassNumber = values.get("NodeClass")?.value?.value as number;
+  const browseName = normalizeQualifiedName(
+    browseNameValue as Parameters<typeof normalizeQualifiedName>[0],
+  );
+  return {
+    nodeId,
+    nodeClass: NodeClass[nodeClassNumber] ?? String(nodeClassNumber),
+    browseName: browseName.name,
+    browseNameNamespaceIndex: browseName.namespaceIndex,
+    displayName: localizedText(displayNameValue),
+    description: localizedText(descriptionValue),
+    dataType: nodeIdValue(values.get("DataType")),
+    valueRank: numberValue(values.get("ValueRank")),
+    arrayDimensions: numberArrayValue(values.get("ArrayDimensions")),
+    accessLevel: accessBits(values.get("AccessLevel")),
+    userAccessLevel: accessBits(values.get("UserAccessLevel")),
+    namespaceIndex,
+    namespaceUri,
+  };
+};
+
+const localizedText = (dataValue: DataValue | undefined) => {
+  if (!dataValue || !isGood(dataValue.statusCode) || !dataValue.value?.value) {
+    return undefined;
+  }
+  return normalizeLocalizedText(
+    dataValue.value.value as Parameters<typeof normalizeLocalizedText>[0],
+  ).text;
+};
+
+const nodeIdValue = (dataValue: DataValue | undefined) => {
+  if (!dataValue || !isGood(dataValue.statusCode)) return undefined;
+  const value = dataValue.value?.value;
+  return value instanceof NodeId ? value.toString() : undefined;
+};
+
+const numberValue = (dataValue: DataValue | undefined) => {
+  if (!dataValue || !isGood(dataValue.statusCode)) return undefined;
+  const value = dataValue.value?.value;
+  return typeof value === "number" ? value : undefined;
+};
+
+const numberArrayValue = (dataValue: DataValue | undefined) => {
+  if (!dataValue || !isGood(dataValue.statusCode)) return undefined;
+  const value = dataValue.value?.value;
+  if (
+    !Array.isArray(value) ||
+    !value.every((item) => typeof item === "number")
+  ) {
+    return undefined;
+  }
+  return [...value];
+};
+
+const accessBits = (
+  dataValue: DataValue | undefined,
+): OpcuaAccessBits | undefined => {
+  const value = numberValue(dataValue);
+  if (value === undefined) return undefined;
+  return {
+    readable: (value & AccessLevelFlag.CurrentRead) !== 0,
+    writable: (value & AccessLevelFlag.CurrentWrite) !== 0,
+  };
 };
 
 const discoverVariableMetadata = (
