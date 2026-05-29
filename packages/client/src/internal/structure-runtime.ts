@@ -26,6 +26,7 @@ import {
   type StructureDef,
 } from "./structures.js";
 import { isPlainRecord } from "./predicates.js";
+import { structureBodyFromExtensionObject } from "./structure-adapter.js";
 
 export type OpcuaStructureRuntime = {
   readonly ensureInitialized: () => Effect.Effect<void, OpcuaServiceError>;
@@ -102,7 +103,10 @@ export const makeStructureRuntime = (
     );
 
   const decodeStructure = <A>(codec: StructureDef<A>, rawValue: unknown): A =>
-    decodeWithSchema(codec.schema, extractStructurePojo(rawValue)) as A;
+    decodeWithSchema(
+      codec.schema,
+      structureBodyFromExtensionObject(rawValue),
+    ) as A;
 
   const decodeStructureArray = <A>(
     codec: StructureArrayDef<A>,
@@ -186,33 +190,6 @@ const arrayValue = <A>(
           error: "Structure array value must be an array",
         }),
       );
-
-export const extractStructurePojo = (value: unknown): unknown => {
-  if (!value || typeof value !== "object") {
-    throw new TypeError("Expected structure object");
-  }
-  if (isPlainRecord(value)) return value;
-  const record = value as Record<string, unknown>;
-  if (typeof record.toJSON === "function") {
-    const json = record.toJSON();
-    if (isPlainRecord(json)) return json;
-  }
-  if ("schema" in record) {
-    const entries = Object.entries(record).filter(([key]) =>
-      isStructureDataKey(key),
-    );
-    if (entries.length > 0) return Object.fromEntries(entries);
-  }
-  throw new TypeError("Could not extract plain structure body");
-};
-
-const isStructureDataKey = (key: string) =>
-  !key.startsWith("_") &&
-  key !== "schema" &&
-  key !== "encode" &&
-  key !== "decode" &&
-  key !== "binaryStoreSize" &&
-  key !== "constructor";
 
 export const validateStructureMetadata = (
   operation: string,

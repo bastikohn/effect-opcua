@@ -10,6 +10,12 @@ import {
   type Variant,
 } from "node-opcua";
 
+import {
+  extensionObjectBody,
+  extensionObjectTypeName,
+  isNodeOpcuaExtensionObject,
+} from "./structure-adapter.js";
+
 export type OpcuaStatusInfo = {
   readonly text: string;
   readonly code: number;
@@ -56,7 +62,12 @@ export type OpcuaDynamicValue =
   | {
       readonly _tag: "ExtensionObject";
       readonly typeName?: string;
-      readonly value?: unknown;
+      readonly value: Readonly<Record<string, OpcuaDynamicValue>>;
+    }
+  | {
+      readonly _tag: "Object";
+      readonly typeName?: string;
+      readonly value: Readonly<Record<string, OpcuaDynamicValue>>;
     };
 
 export type OpcuaNodeIdInfo = {
@@ -182,31 +193,33 @@ export const normalizeDynamicValue = (
     }
     return value;
   }
-  if (typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    if ("text" in record && !("name" in record)) {
-      return {
-        _tag: "LocalizedText",
-        text: String(record.text ?? ""),
-        locale: typeof record.locale === "string" ? record.locale : undefined,
-      };
-    }
-    if ("name" in record && "namespaceIndex" in record) {
-      return {
-        _tag: "QualifiedName",
-        namespaceIndex:
-          typeof record.namespaceIndex === "number" ? record.namespaceIndex : 0,
-        name: String(record.name ?? ""),
-        text:
-          typeof record.toString === "function"
-            ? String(record.toString())
-            : `${String(record.namespaceIndex ?? 0)}:${String(record.name ?? "")}`,
-      };
-    }
+  if (value instanceof LocalizedText) {
+    return {
+      _tag: "LocalizedText",
+      text: value.text ?? "",
+      locale: value.locale ?? undefined,
+    };
+  }
+  if (value instanceof QualifiedName) {
+    return {
+      _tag: "QualifiedName",
+      namespaceIndex: value.namespaceIndex ?? 0,
+      name: value.name ?? "",
+      text: value.toString(),
+    };
+  }
+  if (isNodeOpcuaExtensionObject(value)) {
     return {
       _tag: "ExtensionObject",
-      typeName: value.constructor?.name,
-      value: normalizePlainObject(record),
+      typeName: extensionObjectTypeName(value),
+      value: normalizePlainObject(extensionObjectBody(value)),
+    };
+  }
+  if (typeof value === "object") {
+    return {
+      _tag: "Object",
+      typeName: objectTypeName(value),
+      value: normalizePlainObject(value as Record<string, unknown>),
     };
   }
   return String(value);
@@ -275,9 +288,23 @@ export const denormalizeDynamicValue = (
     }
     case "ExtensionObject":
       throw new TypeError("ExtensionObject dynamic writes require a schema");
+    case "Object":
+      throw new TypeError("Object dynamic writes require a schema");
     default:
+      if (
+        metadata?.raw.dataType === DataType.ExtensionObject &&
+        value !== null &&
+        value !== undefined
+      ) {
+        throw new TypeError("ExtensionObject dynamic writes require a schema");
+      }
       return value;
   }
+};
+
+const objectTypeName = (value: object): string | undefined => {
+  const name = value.constructor?.name;
+  return name && name !== "Object" ? name : undefined;
 };
 
 const assertDynamicDataType = (

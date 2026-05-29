@@ -4,7 +4,12 @@ import { Effect, Schema } from "effect";
 import { GlobalCommandKind } from "../../../examples/demo-server/src/index.js";
 import * as Opcua from "../src/Opcua.js";
 import * as OpcuaSession from "../src/OpcuaSession.js";
-import { DataType, StatusCodes, VariantArrayType } from "../src/node-opcua.js";
+import {
+  type DataValue,
+  DataType,
+  StatusCodes,
+  VariantArrayType,
+} from "../src/node-opcua.js";
 import { makeLiveTestContext } from "./live.js";
 import {
   GlobalCommandSubmitRequest,
@@ -15,6 +20,7 @@ import {
 } from "./support/demo-model.js";
 import {
   fakeExtensionObject,
+  fakeOpaqueExtensionObject,
   makeFakeSession,
   variantDataValue,
 } from "./support/fake-session.js";
@@ -31,6 +37,16 @@ const ScanSettings = Opcua.structure({
   }),
 });
 const ScanSettingsQueue = Opcua.structureArray(ScanSettings);
+
+const unsafeVariantDataValue = (
+  dataType: DataType,
+  value: unknown,
+  arrayType = VariantArrayType.Scalar,
+): DataValue =>
+  ({
+    statusCode: StatusCodes.Good,
+    value: { dataType, value, arrayType },
+  }) as unknown as DataValue;
 
 describe("values", () => {
   it("reads dynamic and schema-backed variables through definitions", async () => {
@@ -70,6 +86,151 @@ describe("values", () => {
       _tag: "DecodeError",
       status: { isGood: true },
     });
+  });
+
+  it("does not report arbitrary dynamic objects as ExtensionObjects", async () => {
+    const nodeId = "ns=1;s=RawObject";
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* makeFakeSession({
+            readValues: () => [
+              unsafeVariantDataValue(DataType.ExtensionObject, {
+                duration: 10,
+                cycles: 1,
+              }),
+            ],
+          });
+          return yield* fake.session.read(Opcua.variable({ nodeId }));
+        }),
+      ),
+    );
+
+    expect(result).toMatchObject({
+      _tag: "Value",
+      value: {
+        _tag: "Object",
+        value: {
+          duration: 10,
+          cycles: 1,
+        },
+      },
+    });
+  });
+
+  it("reports dynamic ExtensionObjects only for node-opcua ExtensionObjects", async () => {
+    const nodeId = "ns=1;s=ScanSettings";
+    const value = {
+      duration: 10,
+      cycles: 1,
+      dataAvailable: true,
+    };
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* makeFakeSession({
+            readValues: () => [
+              variantDataValue(
+                DataType.ExtensionObject,
+                fakeExtensionObject("ns=1;i=3010", value),
+              ),
+            ],
+          });
+          return yield* fake.session.read(Opcua.variable({ nodeId }));
+        }),
+      ),
+    );
+
+    expect(result).toMatchObject({
+      _tag: "Value",
+      value: {
+        _tag: "ExtensionObject",
+        typeName: "FakeExtensionObject",
+        value,
+      },
+    });
+  });
+
+  it("preserves opaque dynamic ExtensionObject payload fields", async () => {
+    const nodeId = "ns=1;s=Opaque";
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* makeFakeSession({
+            readValues: () => [
+              variantDataValue(
+                DataType.ExtensionObject,
+                fakeOpaqueExtensionObject(
+                  "ns=2;i=6001",
+                  Buffer.from([1, 2, 3]),
+                ),
+              ),
+            ],
+          });
+          return yield* fake.session.read(Opcua.variable({ nodeId }));
+        }),
+      ),
+    );
+
+    expect(result).toMatchObject({
+      _tag: "Value",
+      value: {
+        _tag: "ExtensionObject",
+        typeName: "FakeOpaqueExtensionObject",
+        value: {
+          nodeId: {
+            _tag: "NodeId",
+            text: "ns=2;i=6001",
+          },
+          buffer: {
+            _tag: "ByteString",
+            base64: "AQID",
+          },
+        },
+      },
+    });
+  });
+
+  it("rejects plain objects from explicit structure codecs", async () => {
+    const nodeId = "ns=1;s=ScanSettings";
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* makeFakeSession({
+            variableMetadata: {
+              [nodeId]: {
+                dataType: "ns=1;i=3010",
+                valueRank: -1,
+                accessLevel: 3,
+                userAccessLevel: 3,
+              },
+            },
+            dataTypeSuperTypes: { "ns=1;i=3010": "i=22" },
+            readValues: () => [
+              unsafeVariantDataValue(DataType.ExtensionObject, {
+                duration: 10,
+                cycles: 1,
+                dataAvailable: true,
+              }),
+            ],
+          });
+          return yield* fake.session.read(
+            Opcua.variable({
+              nodeId,
+              codec: ScanSettings,
+            }),
+          );
+        }),
+      ),
+    );
+
+    expect(result).toMatchObject({
+      _tag: "DecodeError",
+      error: expect.any(TypeError),
+    });
+    expect(result._tag === "DecodeError" && String(result.error)).toContain(
+      "Expected node-opcua ExtensionObject",
+    );
   });
 
   it("reads and writes demo command structures", async () => {

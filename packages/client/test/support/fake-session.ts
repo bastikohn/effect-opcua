@@ -262,6 +262,11 @@ export const fakeExtensionObject = (
   value: Record<string, unknown>,
 ) => new FakeExtensionObject(coerceNodeId(dataType), value);
 
+export const fakeOpaqueExtensionObject = (
+  nodeId: string | NodeId,
+  buffer: Buffer,
+) => new FakeOpaqueExtensionObject(coerceNodeId(nodeId), buffer);
+
 class FakeExtensionObject extends ExtensionObject {
   readonly dataType: NodeId;
 
@@ -275,5 +280,16 @@ class FakeExtensionObject extends ExtensionObject {
     return Object.fromEntries(
       Object.entries(this).filter(([key]) => key !== "dataType"),
     );
+  }
+}
+
+class FakeOpaqueExtensionObject extends ExtensionObject {
+  readonly nodeId: NodeId;
+  readonly buffer: Buffer;
+
+  constructor(nodeId: NodeId, buffer: Buffer) {
+    super();
+    this.nodeId = nodeId;
+    this.buffer = buffer;
   }
 }
