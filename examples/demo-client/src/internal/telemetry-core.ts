@@ -12,10 +12,10 @@ import {
 import { CommandStatusUnavailable } from "../contract/errors.js";
 import type { DemoMachineOptions } from "../contract/options.js";
 import type { DemoMachineSnapshot } from "../contract/telemetry.js";
-import * as Variables from "../generated/variables.js";
 import {
   bigintValue,
   makeSnapshot,
+  snapshotVariables,
   type TelemetryStaging,
 } from "./telemetry-snapshot.js";
 
@@ -38,7 +38,7 @@ export class DemoMachineTelemetryCore extends Context.Service<
           publishingInterval: Duration.millis(100),
         });
         const active = yield* subscription.monitor(
-          { telemetryRevision: Variables.TelemetryRevision },
+          { telemetryRevision: snapshotVariables.telemetryRevision },
           {
             startup: "strict",
             validation: "strict",
@@ -80,7 +80,7 @@ export class DemoMachineTelemetryCore extends Context.Service<
 
 const readSnapshotFromSession = (session: OpcuaSession.OpcuaSession) =>
   session
-    .readMany(Variables.SnapshotVariables, { validation: "strict" })
+    .readMany(snapshotVariables, { validation: "strict" })
     .pipe(Effect.flatMap(readManyToStaging), Effect.map(makeSnapshot));
 
 const refreshSnapshot = (
@@ -101,7 +101,7 @@ const refreshSnapshot = (
   }).pipe(Effect.catch(() => Effect.void));
 
 const readManyToStaging = (
-  results: Record<string, { readonly _tag: string; readonly value?: unknown }>,
+  results: OpcuaSession.ReadManyResult<typeof snapshotVariables>,
 ) =>
   Effect.gen(function* () {
     const staging: Record<string, unknown> = {};

@@ -62,14 +62,14 @@ describe("Demo client", () => {
   });
 
   it("checks generated escape hatch types", () => {
-    const raw: Generated.Structures.RawCommandStatusBuffer = {
+    const raw: Generated.Structures.CommandStatusBuffer = {
       revision: 1,
       capacity: 8,
       entries: [],
     };
 
-    expect(raw).type.toBe<Generated.Structures.RawCommandStatusBuffer>();
-    expect<typeof Generated.Variables.Variables.Commands>().type.toHaveProperty(
+    expect(raw).type.toBe<Generated.Structures.CommandStatusBuffer>();
+    expect<typeof Generated.Variables.Commands>().type.toHaveProperty(
       "Status",
     );
     expect<typeof Root>().type.not.toHaveProperty("Variables");

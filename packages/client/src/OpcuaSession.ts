@@ -94,6 +94,16 @@ import {
   writeManyWithState,
   type SessionOperationsState,
 } from "./internal/session-operations.js";
+import {
+  readDataTypeDefinition as readDataTypeDefinitionImpl,
+  readManyDataTypeDefinitions as readManyDataTypeDefinitionsImpl,
+  type OpcuaDataTypeDefinition,
+  type OpcuaDataTypeDefinitionResult,
+  type OpcuaEnumDefinition,
+  type OpcuaEnumField,
+  type OpcuaStructureDefinition,
+  type OpcuaStructureField,
+} from "./internal/data-type-definition.js";
 
 export type { OpcuaBrowseReference } from "./internal/browse.js";
 export type {
@@ -101,6 +111,12 @@ export type {
   OpcuaMetadataReadFailure,
   OpcuaNodeMetadata,
   OpcuaNodeMetadataResult,
+  OpcuaDataTypeDefinition,
+  OpcuaDataTypeDefinitionResult,
+  OpcuaEnumDefinition,
+  OpcuaEnumField,
+  OpcuaStructureDefinition,
+  OpcuaStructureField,
 };
 
 export type ReadManyServiceOptions = {
@@ -279,6 +295,12 @@ export type OpcuaSession = {
   readonly readManyNodeMetadata: (
     nodeIds: readonly string[],
   ) => Effect.Effect<readonly OpcuaNodeMetadataResult[], OpcuaError>;
+  readonly readDataTypeDefinition: (
+    dataTypeNodeId: string,
+  ) => Effect.Effect<OpcuaDataTypeDefinitionResult, OpcuaError>;
+  readonly readManyDataTypeDefinitions: (
+    dataTypeNodeIds: readonly string[],
+  ) => Effect.Effect<readonly OpcuaDataTypeDefinitionResult[], OpcuaError>;
   readonly makeSubscription: (options: {
     readonly publishingInterval: Duration.Duration;
     readonly lifetimeCount?: number;
@@ -372,6 +394,18 @@ export const readNodeMetadata = (nodeId: string) =>
 export const readManyNodeMetadata = (nodeIds: readonly string[]) =>
   Effect.flatMap(OpcuaSession, (session) =>
     session.readManyNodeMetadata(nodeIds),
+  );
+
+export const readDataTypeDefinition = (dataTypeNodeId: string) =>
+  Effect.flatMap(OpcuaSession, (session) =>
+    session.readDataTypeDefinition(dataTypeNodeId),
+  );
+
+export const readManyDataTypeDefinitions = (
+  dataTypeNodeIds: readonly string[],
+) =>
+  Effect.flatMap(OpcuaSession, (session) =>
+    session.readManyDataTypeDefinitions(dataTypeNodeIds),
   );
 
 export const makeSession = (
@@ -639,6 +673,14 @@ export const makeSession = (
       nodeIds,
     ) => metadata.nodes(nodeIds);
 
+    const readDataTypeDefinition: OpcuaSession["readDataTypeDefinition"] = (
+      dataTypeNodeId,
+    ) => readDataTypeDefinitionImpl(unsafeRaw, metadata, dataTypeNodeId);
+
+    const readManyDataTypeDefinitions: OpcuaSession["readManyDataTypeDefinitions"] =
+      (dataTypeNodeIds) =>
+        readManyDataTypeDefinitionsImpl(unsafeRaw, metadata, dataTypeNodeIds);
+
     return {
       read,
       write,
@@ -654,6 +696,8 @@ export const makeSession = (
       readNamespaceArray,
       readNodeMetadata,
       readManyNodeMetadata,
+      readDataTypeDefinition,
+      readManyDataTypeDefinitions,
       events: Stream.fromPubSub(events),
       unsafeRaw,
     };

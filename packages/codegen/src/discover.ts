@@ -3,14 +3,14 @@ import { OpcuaSession } from "@effect-opcua/client";
 import type { OpcuaError } from "@effect-opcua/client/OpcuaError";
 import type { OpcuaNodeMetadata } from "@effect-opcua/client/OpcuaSession";
 
-import { diagnostic, sortDiagnostics } from "./diagnostics.js";
+import { errorIssue, issue, sortIssues } from "./diagnostics.js";
 import { codegenError } from "./errors.js";
 import type {
-  CodegenDiagnostic,
-  DiscoveredAddressSpace,
+  CodegenIssue,
   DiscoveredNode,
   DiscoveredReference,
   DiscoveredRoot,
+  DiscoveryModel,
   NodeKey,
   NormalizedCodegenConfig,
   NormalizedExcludeRule,
@@ -22,16 +22,12 @@ type TraversalItem = {
   readonly parentNodeId?: string;
   readonly rootIndex: number;
   readonly rootSegmentCount: number;
-  readonly browsePathSegments: readonly string[];
+  readonly path: readonly string[];
 };
 
-type NodeDraft = Omit<
-  DiscoveredNode,
-  "browsePath" | "browsePathSegments" | "allBrowsePaths"
-> & {
-  browsePath: string;
-  browsePathSegments: readonly string[];
-  allBrowsePaths: readonly string[];
+type NodeDraft = Omit<DiscoveredNode, "path" | "allPaths"> & {
+  path: readonly string[];
+  allPaths: readonly (readonly string[])[];
   rootSegmentCount: number;
 };
 
@@ -47,16 +43,16 @@ const metadataPropertyNames = new Set([
   "NodeVersion",
 ]);
 
-export const discoverAddressSpace = (
+export const discover = (
   config: NormalizedCodegenConfig,
 ): Effect.Effect<
-  DiscoveredAddressSpace,
+  DiscoveryModel,
   import("./errors.js").CodegenError | OpcuaError,
   OpcuaSession.OpcuaSession
 > =>
   Effect.gen(function* () {
     const session = yield* OpcuaSession.OpcuaSession;
-    const diagnostics: CodegenDiagnostic[] = [];
+    const issues: CodegenIssue[] = [];
     const references: DiscoveredReference[] = [];
     const nodes = new Map<NodeKey, NodeDraft>();
     const roots: DiscoveredRoot[] = [];
@@ -68,65 +64,80 @@ export const discoverAddressSpace = (
       const rootMetadata = yield* session.readNodeMetadata(root.nodeId);
       addOrUpdateNode(nodes, {
         metadata: rootMetadata,
-        browsePathSegments: root.browsePathSegments,
+        path: root.path,
         parentNodeId: undefined,
         rootIndex,
-        rootSegmentCount: root.browsePathSegments.length,
+        rootSegmentCount: root.path.length,
       });
     }
 
     const queue: TraversalItem[] = roots.map((root) => ({
       nodeId: root.nodeId,
       rootIndex: root.rootIndex,
-      rootSegmentCount: root.browsePathSegments.length,
-      browsePathSegments: root.browsePathSegments,
+      rootSegmentCount: root.path.length,
+      path: root.path,
     }));
     const visitedPaths = new Set<string>();
 
     while (queue.length > 0) {
       const current = queue.shift()!;
-      const visitKey = `${current.nodeId}\u0000${current.browsePathSegments.join(".")}`;
+      const visitKey = `${current.nodeId}\u0000${current.path.join("\u0000")}`;
       if (visitedPaths.has(visitKey)) continue;
       visitedPaths.add(visitKey);
 
       const result = yield* session.browseChildren(current.nodeId);
-      if (result._tag === "NonGoodStatus") continue;
+      if (result._tag === "NonGoodStatus") {
+        const browseIssue = issue("browse.failure", {
+          message: `Could not browse ${current.nodeId}`,
+          nodeId: current.nodeId,
+          path: current.path,
+          cause: result.status,
+          severity:
+            config.discovery.onBrowseFailure === "fail" ? "error" : undefined,
+        });
+        if (browseIssue.severity === "error") {
+          return yield* Effect.fail(
+            codegenError({ _tag: "DiscoveryFailed" }, [browseIssue]),
+          );
+        }
+        issues.push(browseIssue);
+        continue;
+      }
 
       const children = selectedChildReferences(result.references);
       const duplicate = duplicateBrowseName(children);
       if (duplicate) {
         return yield* Effect.fail(
-          codegenError({
-            _tag: "AmbiguousBrowsePath",
-            browsePath: [...current.browsePathSegments, duplicate.name].join(
-              ".",
-            ),
-            candidates: duplicate.candidates,
-          }),
+          codegenError(
+            { _tag: "DiscoveryFailed" },
+            [
+              errorIssue("browse.ambiguousPath", {
+                message: "Multiple children have the same BrowseName segment",
+                path: [...current.path, duplicate.name],
+                cause: { candidates: duplicate.candidates },
+              }),
+            ],
+          ),
         );
       }
+      const metadataByNodeId = yield* readChildMetadata(
+        session,
+        children,
+        config.exclude,
+        current.path,
+      );
 
       for (const child of children) {
         const browseName = child.browseName?.name;
         const targetNodeId = child.nodeId.text;
         if (!browseName || !targetNodeId) continue;
-        if (browseName.includes(".")) {
-          return yield* Effect.fail(
-            codegenError({
-              _tag: "UnsupportedBrowsePathSegment",
-              segment: browseName,
-              browsePathSegments: [...current.browsePathSegments, browseName],
-            }),
-          );
-        }
         const referenceType = normalizeNamespaceZeroNodeId(
           child.referenceTypeId ?? "",
         );
         if (referenceType === "i=46" && metadataPropertyNames.has(browseName)) {
           continue;
         }
-        const childPathSegments = [...current.browsePathSegments, browseName];
-        const childBrowsePath = childPathSegments.join(".");
+        const childPath = [...current.path, browseName];
         references.push({
           sourceNodeId: current.nodeId,
           targetNodeId,
@@ -135,12 +146,12 @@ export const discoverAddressSpace = (
           browseName,
         });
 
-        const exclude = matchingExclude(config.exclude, childBrowsePath);
+        const exclude = matchingExclude(config.exclude, childPath);
         if (exclude?.mode === "prune") {
-          diagnostics.push(
-            diagnostic("branch.pruned", {
-              message: `Pruned ${childBrowsePath}`,
-              browsePath: childBrowsePath,
+          issues.push(
+            issue("branch.pruned", {
+              message: `Pruned ${displayPath(childPath)}`,
+              path: childPath,
               nodeId: targetNodeId,
             }),
           );
@@ -148,57 +159,61 @@ export const discoverAddressSpace = (
         }
 
         if (exclude?.mode !== "omit") {
-          const metadata = yield* session.readNodeMetadata(targetNodeId);
+          const metadata = metadataByNodeId.get(targetNodeId);
+          if (!metadata) continue;
           addOrUpdateNode(nodes, {
             metadata,
-            browsePathSegments: childPathSegments,
+            path: childPath,
             parentNodeId: current.nodeId,
             rootIndex: current.rootIndex,
             rootSegmentCount: current.rootSegmentCount,
           });
         } else {
-          diagnostics.push(
-            diagnostic("node.omitted", {
-              message: `Omitted ${childBrowsePath}`,
-              browsePath: childBrowsePath,
+          issues.push(
+            issue("node.omitted", {
+              message: `Omitted ${displayPath(childPath)}`,
+              path: childPath,
               nodeId: targetNodeId,
             }),
           );
         }
 
-        if (
-          child.nodeClass === "Object" ||
-          child.nodeClass === "Variable" ||
-          child.nodeClass === "Method"
-        ) {
+        if (shouldBrowseChildren(config, child.nodeClass)) {
           queue.push({
             nodeId: targetNodeId,
             parentNodeId: current.nodeId,
             rootIndex: current.rootIndex,
             rootSegmentCount: current.rootSegmentCount,
-            browsePathSegments: childPathSegments,
+            path: childPath,
           });
         }
       }
     }
 
     for (const node of nodes.values()) {
-      if (node.allBrowsePaths.length > 1) {
-        diagnostics.push(
-          diagnostic("node.multiPath", {
-            message: `Node ${node.nodeId} was reached through multiple browse paths`,
-            browsePath: node.browsePath,
+      if (node.allPaths.length > 1) {
+        issues.push(
+          issue("node.multiPath", {
+            message: `Node ${node.nodeId} was reached through multiple paths`,
+            path: node.path,
             nodeId: node.nodeId,
           }),
         );
       }
     }
 
+    const finalizedNodes = finalizeNodes(nodes);
+    const dataTypeDefinitions = yield* discoverDataTypeDefinitions(
+      session,
+      finalizedNodes,
+    );
+
     return {
       roots,
-      nodes: finalizeNodes(nodes),
+      nodes: finalizedNodes,
       references: sortReferences(references),
-      diagnostics: sortDiagnostics(diagnostics),
+      dataTypeDefinitions,
+      issues: sortIssues(issues),
     };
   });
 
@@ -213,9 +228,9 @@ const resolveRoot = (
         root as Extract<NormalizedRootConfig, { readonly nodeId: string }>,
         rootIndex,
       )
-    : resolveBrowsePathRoot(
+    : resolvePathRoot(
         session,
-        root as Extract<NormalizedRootConfig, { readonly browsePath: string }>,
+        root as Extract<NormalizedRootConfig, { readonly path: readonly string[] }>,
         rootIndex,
       );
 
@@ -227,41 +242,37 @@ const resolveNodeIdRoot = (
   Effect.gen(function* () {
     const metadata = yield* session.readNodeMetadata(root.nodeId);
     const browseName = metadata.browseName ?? root.nodeId;
-    if (browseName.includes(".")) {
-      return yield* Effect.fail(
-        codegenError({
-          _tag: "UnsupportedBrowsePathSegment",
-          segment: browseName,
-          browsePathSegments: [browseName],
-        }),
-      );
-    }
     return {
       rootIndex,
       nodeId: root.nodeId,
-      browsePath: browseName,
-      browsePathSegments: [browseName],
+      path: [browseName],
       exportPrefix: root.exportPrefix,
     } satisfies DiscoveredRoot;
   });
 
-const resolveBrowsePathRoot = (
+const resolvePathRoot = (
   session: OpcuaSession.OpcuaSession,
-  root: Extract<NormalizedRootConfig, { readonly browsePath: string }>,
+  root: Extract<NormalizedRootConfig, { readonly path: readonly string[] }>,
   rootIndex: number,
 ) =>
   Effect.gen(function* () {
     let currentNodeId = objectsFolderNodeId;
     const resolvedSegments: string[] = [];
-    for (const segment of root.browsePathSegments) {
+    for (const segment of root.path) {
       const result = yield* session.browseChildren(currentNodeId);
       if (result._tag === "NonGoodStatus") {
         return yield* Effect.fail(
-          codegenError({
-            _tag: "RootResolutionFailed",
-            root,
-            message: `Could not browse ${currentNodeId} while resolving ${root.browsePath}`,
-          }),
+          codegenError(
+            { _tag: "DiscoveryFailed" },
+            [
+              errorIssue("root.resolutionFailed", {
+                message: `Could not browse ${currentNodeId} while resolving ${displayPath(root.path)}`,
+                path: root.path,
+                nodeId: currentNodeId,
+                cause: result.status,
+              }),
+            ],
+          ),
         );
       }
       const matches = selectedChildReferences(result.references).filter(
@@ -269,20 +280,29 @@ const resolveBrowsePathRoot = (
       );
       if (matches.length === 0) {
         return yield* Effect.fail(
-          codegenError({
-            _tag: "RootResolutionFailed",
-            root,
-            message: `Missing root browse path segment ${segment}`,
-          }),
+          codegenError(
+            { _tag: "DiscoveryFailed" },
+            [
+              errorIssue("root.resolutionFailed", {
+                message: `Missing root path segment ${segment}`,
+                path: [...resolvedSegments, segment],
+              }),
+            ],
+          ),
         );
       }
       if (matches.length > 1) {
         return yield* Effect.fail(
-          codegenError({
-            _tag: "AmbiguousBrowsePath",
-            browsePath: [...resolvedSegments, segment].join("."),
-            candidates: matches.map((match) => match.nodeId.text),
-          }),
+          codegenError(
+            { _tag: "DiscoveryFailed" },
+            [
+              errorIssue("browse.ambiguousPath", {
+                message: "Multiple children match the root path segment",
+                path: [...resolvedSegments, segment],
+                cause: { candidates: matches.map((match) => match.nodeId.text) },
+              }),
+            ],
+          ),
         );
       }
       currentNodeId = matches[0]!.nodeId.text;
@@ -291,8 +311,7 @@ const resolveBrowsePathRoot = (
     return {
       rootIndex,
       nodeId: currentNodeId,
-      browsePath: resolvedSegments.join("."),
-      browsePathSegments: resolvedSegments,
+      path: resolvedSegments,
       exportPrefix: root.exportPrefix,
     } satisfies DiscoveredRoot;
   });
@@ -336,19 +355,96 @@ const referenceSort = (
 
 const matchingExclude = (
   rules: readonly NormalizedExcludeRule[],
-  browsePath: string,
+  path: readonly string[],
 ) =>
   rules.find((rule) =>
-    typeof rule.browsePath === "string"
-      ? rule.browsePath === browsePath
-      : rule.browsePath.test(browsePath),
+    rule._tag === "Path"
+      ? samePath(rule.path, path)
+      : matchPathPattern(rule.pathPattern, path),
   );
+
+const readChildMetadata = (
+  session: OpcuaSession.OpcuaSession,
+  children: readonly OpcuaSession.OpcuaBrowseReference[],
+  exclude: readonly NormalizedExcludeRule[],
+  parentPath: readonly string[],
+) =>
+  Effect.gen(function* () {
+    const metadataTargets = children.flatMap((child) => {
+      const browseName = child.browseName?.name;
+      const targetNodeId = child.nodeId.text;
+      if (!browseName || !targetNodeId) return [];
+      const childPath = [...parentPath, browseName];
+      return matchingExclude(exclude, childPath)?.mode === "omit"
+        ? []
+        : [targetNodeId];
+    });
+    if (metadataTargets.length === 0) {
+      return new Map<string, OpcuaNodeMetadata>();
+    }
+
+    const results = yield* session.readManyNodeMetadata(metadataTargets);
+    const failed = results.find((result) => result._tag === "Failure");
+    if (failed?._tag === "Failure") {
+      return yield* Effect.fail(
+        codegenError(
+          { _tag: "DiscoveryFailed" },
+          [
+            errorIssue("metadata.readFailed", {
+              message: `Could not read metadata for ${failed.nodeId}`,
+              nodeId: failed.nodeId,
+              cause: failed.reason,
+            }),
+          ],
+        ),
+      );
+    }
+
+    return new Map(
+      results.flatMap((result) =>
+        result._tag === "Success"
+          ? ([[result.nodeId, result.metadata]] as const)
+          : [],
+      ),
+    );
+  });
+
+const matchPathPattern = (
+  pattern: readonly import("./types.js").PathPatternSegment[],
+  path: readonly string[],
+): boolean => {
+  const match = (patternIndex: number, pathIndex: number): boolean => {
+    if (patternIndex === pattern.length) return pathIndex === path.length;
+    const segment = pattern[patternIndex]!;
+    if (segment === "**") {
+      return (
+        match(patternIndex + 1, pathIndex) ||
+        (pathIndex < path.length && match(patternIndex, pathIndex + 1))
+      );
+    }
+    if (pathIndex >= path.length) return false;
+    return (
+      segmentMatches(segment, path[pathIndex]!) &&
+      match(patternIndex + 1, pathIndex + 1)
+    );
+  };
+  return match(0, 0);
+};
+
+const segmentMatches = (
+  pattern: Exclude<import("./types.js").PathPatternSegment, "**">,
+  segment: string,
+) => (pattern instanceof RegExp ? pattern.test(segment) : pattern === segment);
+
+const samePath = (left: readonly string[], right: readonly string[]) =>
+  left.length === right.length &&
+  left.every((segment, index) => segment === right[index]);
 
 const addOrUpdateNode = (
   nodes: Map<NodeKey, NodeDraft>,
   input: {
     readonly metadata: OpcuaNodeMetadata;
-    readonly browsePathSegments: readonly string[];
+    readonly path: readonly string[];
     readonly parentNodeId?: string;
     readonly rootIndex: number;
     readonly rootSegmentCount: number;
@@ -356,38 +452,34 @@ const addOrUpdateNode = (
 ) => {
   const key = input.metadata.nodeId;
   const existing = nodes.get(key);
-  const browsePath = input.browsePathSegments.join(".");
   if (existing) {
-    const allBrowsePaths = [
-      ...new Set([...existing.allBrowsePaths, browsePath]),
-    ].sort();
+    const allPaths = uniquePaths([...existing.allPaths, input.path]);
     if (
       comparePathRank(
         {
           rootIndex: input.rootIndex,
           rootSegmentCount: input.rootSegmentCount,
-          browsePath,
+          path: input.path,
           nodeId: key,
         },
         {
           rootIndex: existing.rootIndex ?? Number.MAX_SAFE_INTEGER,
           rootSegmentCount: existing.rootSegmentCount,
-          browsePath: existing.browsePath,
+          path: existing.path,
           nodeId: existing.nodeId,
         },
       ) < 0
     ) {
       nodes.set(key, {
         ...existing,
-        browsePath,
-        browsePathSegments: input.browsePathSegments,
-        allBrowsePaths,
+        path: input.path,
+        allPaths,
         parentNodeId: input.parentNodeId,
         rootIndex: input.rootIndex,
         rootSegmentCount: input.rootSegmentCount,
       });
     } else {
-      nodes.set(key, { ...existing, allBrowsePaths });
+      nodes.set(key, { ...existing, allPaths });
     }
     return;
   }
@@ -400,12 +492,10 @@ const addOrUpdateNode = (
     namespaceIndex:
       input.metadata.namespaceIndex ?? parseNodeId(key).namespaceIndex,
     namespaceUri: input.metadata.namespaceUri,
-    browseName:
-      input.metadata.browseName ?? input.browsePathSegments.at(-1) ?? key,
+    browseName: input.metadata.browseName ?? input.path.at(-1) ?? key,
     browseNameNamespaceIndex: input.metadata.browseNameNamespaceIndex,
-    browsePath,
-    browsePathSegments: input.browsePathSegments,
-    allBrowsePaths: [browsePath],
+    path: input.path,
+    allPaths: [input.path],
     nodeClass,
     displayName: input.metadata.displayName,
     description: input.metadata.description,
@@ -437,6 +527,61 @@ const normalizeNodeClass = (
   }
 };
 
+const shouldBrowseChildren = (
+  config: NormalizedCodegenConfig,
+  nodeClass: string | undefined,
+) =>
+  nodeClass === "Object" ||
+  (config.discovery.includeVariableChildren && nodeClass === "Variable");
+
+const discoverDataTypeDefinitions = (
+  session: OpcuaSession.OpcuaSession,
+  nodes: ReadonlyMap<NodeKey, DiscoveredNode>,
+) =>
+  Effect.gen(function* () {
+    const seen = new Set<string>();
+    const queue = [...nodes.values()]
+      .filter((node) => node.nodeClass === "Variable")
+      .flatMap((node) => (node.dataTypeNodeId ? [node.dataTypeNodeId] : []))
+      .filter((nodeId) => !isBuiltInDataType(nodeId));
+    const results: import("@effect-opcua/client/OpcuaSession").OpcuaDataTypeDefinitionResult[] =
+      [];
+
+    while (queue.length > 0) {
+      const batch = [...new Set(queue.splice(0))]
+        .filter((nodeId) => !seen.has(nodeId))
+        .sort();
+      if (batch.length === 0) continue;
+      batch.forEach((nodeId) => seen.add(nodeId));
+      const batchResults = yield* session.readManyDataTypeDefinitions(batch);
+      results.push(...batchResults);
+      for (const result of batchResults) {
+        if (
+          result._tag !== "Success" ||
+          result.definition._tag !== "Structure"
+        ) {
+          continue;
+        }
+        for (const field of result.definition.fields) {
+          if (
+            field.dataTypeNodeId &&
+            !isBuiltInDataType(field.dataTypeNodeId) &&
+            !seen.has(field.dataTypeNodeId)
+          ) {
+            queue.push(field.dataTypeNodeId);
+          }
+        }
+      }
+    }
+
+    return results;
+  });
+
+const isBuiltInDataType = (nodeId: string) => {
+  const normalized = normalizeNamespaceZeroNodeId(nodeId);
+  return /^i=\d+$/.test(normalized);
+};
+
 const parseNodeId = (nodeId: string, namespaceIndex?: number) => {
   const match = /^ns=(\d+);(.+)$/.exec(nodeId);
   return {
@@ -449,25 +594,25 @@ const comparePathRank = (
   left: {
     readonly rootIndex: number;
     readonly rootSegmentCount: number;
-    readonly browsePath: string;
+    readonly path: readonly string[];
     readonly nodeId: string;
   },
   right: {
     readonly rootIndex: number;
     readonly rootSegmentCount: number;
-    readonly browsePath: string;
+    readonly path: readonly string[];
     readonly nodeId: string;
   },
 ) =>
   left.rootIndex - right.rootIndex ||
   relativeLength(left) - relativeLength(right) ||
-  left.browsePath.localeCompare(right.browsePath) ||
+  displayPath(left.path).localeCompare(displayPath(right.path)) ||
   left.nodeId.localeCompare(right.nodeId);
 
 const relativeLength = (item: {
   readonly rootSegmentCount: number;
-  readonly browsePath: string;
-}) => item.browsePath.split(".").length - item.rootSegmentCount;
+  readonly path: readonly string[];
+}) => item.path.length - item.rootSegmentCount;
 
 const finalizeNodes = (nodes: ReadonlyMap<NodeKey, NodeDraft>) => {
   const entries: Array<readonly [NodeKey, DiscoveredNode]> = [];
@@ -477,16 +622,21 @@ const finalizeNodes = (nodes: ReadonlyMap<NodeKey, NodeDraft>) => {
       key,
       {
         ...finalNode,
-        allBrowsePaths: [...node.allBrowsePaths].sort(),
+        allPaths: uniquePaths(node.allPaths),
       },
     ]);
   }
   return new Map(
     entries.sort((left, right) =>
-      left[1].browsePath.localeCompare(right[1].browsePath),
+      displayPath(left[1].path).localeCompare(displayPath(right[1].path)),
     ),
   ) as ReadonlyMap<NodeKey, DiscoveredNode>;
 };
+
+const uniquePaths = (paths: readonly (readonly string[])[]) =>
+  [
+    ...new Map(paths.map((path) => [path.join("\u0000"), [...path]])).values(),
+  ].sort((left, right) => displayPath(left).localeCompare(displayPath(right)));
 
 const sortReferences = (references: readonly DiscoveredReference[]) =>
   [...references].sort(
@@ -496,5 +646,9 @@ const sortReferences = (references: readonly DiscoveredReference[]) =>
       left.targetNodeId.localeCompare(right.targetNodeId),
   );
 
+const displayPath = (path: readonly string[]) => path.join(" / ");
+
 const normalizeNamespaceZeroNodeId = (nodeId: string) =>
   nodeId.startsWith("ns=0;") ? nodeId.slice("ns=0;".length) : nodeId;
+
+export const discoverAddressSpace = discover;

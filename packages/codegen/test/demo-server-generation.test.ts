@@ -10,7 +10,7 @@ import {
   startDemoOpcuaServer,
   type DemoOpcuaServer,
 } from "../../../examples/demo-server/src/index.js";
-import { generateOpcuaClient } from "../src/generate.js";
+import { generate } from "../src/generate.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
@@ -36,28 +36,32 @@ describe("codegen prototype", () => {
     if (tempDir) await rm(tempDir, { recursive: true, force: true });
   }, 30_000);
 
-  it("generates a typecheckable scalar client surface for the demo server", async () => {
+  it("generates a typecheckable client surface for the demo server", async () => {
     const outputDir = join(tempDir, "generated");
     const result = await Effect.runPromise(
       Effect.scoped(
-        generateOpcuaClient({
+        generate({
           connection: {
             endpointUrl: demo.endpointUrl,
             clientOptions: { endpointMustExist: false },
           },
           outputDir,
-          roots: [{ browsePath: "DemoFillingCell" }],
+          roots: [{ path: ["DemoFillingCell"] }],
           exclude: [
             {
-              browsePath: "DemoFillingCell.Commands.Catalog",
+              path: ["DemoFillingCell", "Commands", "Catalog"],
               mode: "prune",
             },
             {
-              browsePath: "DemoFillingCell.OperatorFeedback",
+              path: ["DemoFillingCell", "OperatorFeedback"],
               mode: "prune",
             },
             {
-              browsePath: /\.InterfaceVersion(Major|Minor|Patch)$/,
+              pathPattern: [
+                "DemoFillingCell",
+                "**",
+                /^InterfaceVersion(Major|Minor|Patch)$/,
+              ],
               mode: "omit",
             },
           ],
@@ -70,11 +74,15 @@ describe("codegen prototype", () => {
       "enums.ts",
       "structures.ts",
       "variables.ts",
-      "methods.ts",
       "index.ts",
     ]);
 
     const nodeIds = await readFile(join(outputDir, "nodeIds.ts"), "utf8");
+    const enums = await readFile(join(outputDir, "enums.ts"), "utf8");
+    const structures = await readFile(
+      join(outputDir, "structures.ts"),
+      "utf8",
+    );
     const variables = await readFile(join(outputDir, "variables.ts"), "utf8");
     const index = await readFile(join(outputDir, "index.ts"), "utf8");
 
@@ -86,21 +94,36 @@ describe("codegen prototype", () => {
     expect(nodeIds).not.toContain("OperatorFeedback");
     expect(nodeIds).not.toContain("InterfaceVersionMajor");
 
-    expect(variables).toContain(
-      "export const FillingTankLevelMl = Opcua.variable",
-    );
+    expect(variables).toContain("export const Filling = {");
+    expect(variables).toContain("LevelMl: Opcua.variable");
     expect(variables).toContain("codec: Opcua.schema(Schema.Number)");
-    expect(variables).toContain(
-      "export const CommandsSubmitRequest = Opcua.variable",
-    );
-    expect(variables).toContain("codec: Opcua.dynamic()");
+    expect(variables).toContain("SubmitRequest: Opcua.variable");
+    expect(variables).toContain("codec: Structures.GlobalCommandSubmitRequest");
+    expect(variables).toContain("codec: Opcua.schema(Enums.MachineStateSchema)");
     expect(variables).toContain('access: "readWrite"');
     expect(variables).not.toContain("PayloadBrowsePath");
     expect(variables).not.toContain("OperatorFeedback");
     expect(variables).not.toContain("InterfaceVersionMajor");
 
+    expect(enums).toContain("export const GlobalCommandKind = {");
+    expect(enums).toContain("MachineSetMode: 100");
+    expect(enums).toContain(
+      "export const MachineStateSchema = Schema.Literals([",
+    );
+
+    expect(structures).toContain(
+      "export const GlobalCommandSubmitRequest = Opcua.structure({",
+    );
+    expect(structures).toContain(
+      "commandKind: Enums.GlobalCommandKindSchema",
+    );
+    expect(structures).toContain("entries: Schema.Array(CommandStatusEntrySchema)");
+
     expect(index).toContain('export * as NodeIds from "./nodeIds.js";');
+    expect(index).toContain('export * as Enums from "./enums.js";');
+    expect(index).toContain('export * as Structures from "./structures.js";');
     expect(index).toContain('export * as Variables from "./variables.js";');
+    expect(index).not.toContain("Methods");
 
     await writeFile(
       join(tempDir, "index.ts"),

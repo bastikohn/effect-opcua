@@ -378,6 +378,8 @@ const metadataAttributes = [
   readonly [OpcuaMetadataAttribute, AttributeIds]
 >;
 
+const maxMetadataNodesPerRead = 50;
+
 const requiredMetadataAttributes = new Set<OpcuaMetadataAttribute>([
   "NodeClass",
   "BrowseName",
@@ -389,7 +391,26 @@ const readManyNodeMetadata = (
   nodeIds: readonly NodeIdString[],
 ) =>
   Effect.gen(function* () {
+    if (nodeIds.length === 0) return [];
     const namespaceUris = yield* namespaceArray();
+    const results: OpcuaNodeMetadataResult[] = [];
+    for (const batch of chunks(nodeIds, maxMetadataNodesPerRead)) {
+      const batchResults = yield* readNodeMetadataBatch(
+        session,
+        namespaceUris,
+        batch,
+      );
+      results.push(...batchResults);
+    }
+    return results;
+  });
+
+const readNodeMetadataBatch = (
+  session: ClientSession,
+  namespaceUris: readonly string[],
+  nodeIds: readonly NodeIdString[],
+) =>
+  Effect.gen(function* () {
     const readPlan = nodeIds.map((nodeId) => {
       const parsed = coerceNodeId(nodeId);
       const nodesToRead = metadataAttributes.map(
@@ -448,6 +469,14 @@ const readManyNodeMetadata = (
       };
     });
   });
+
+const chunks = <A>(items: readonly A[], size: number): readonly A[][] => {
+  const result: A[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    result.push([...items.slice(index, index + size)]);
+  }
+  return result;
+};
 
 const metadataFailure = (
   values: ReadonlyMap<OpcuaMetadataAttribute, DataValue>,

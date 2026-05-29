@@ -1,7 +1,7 @@
 import * as Enums from "../generated/enums.js";
 import type {
-  RawCommandStatusBuffer,
-  RawCommandStatusEntry,
+  CommandStatusBuffer as RawCommandStatusBuffer,
+  CommandStatusEntry as RawCommandStatusEntry,
 } from "../generated/structures.js";
 import type {
   CommandKindName,

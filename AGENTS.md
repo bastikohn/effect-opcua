@@ -1,5 +1,9 @@
 # AGENTS.md
 
+## General Instructions
+
+Must-comply with for all tasks: **Always try to reduce complexity and reduce the amount of code in this library.**
+
 ## Project status
 
 This library is brand new - no active users. It's ok to introduce breaking changes, if they improve the code quality, ergonomics, or performance.

@@ -69,7 +69,7 @@ export class DemoMachineCommandCore extends Context.Service<
           publishingInterval: Duration.millis(100),
         });
         const active = yield* subscription.monitor(
-          { status: Variables.CommandsStatus },
+          { status: Variables.Commands.Status },
           {
             startup: "strict",
             validation: "strict",
@@ -120,7 +120,7 @@ export class DemoMachineCommandCore extends Context.Service<
 }
 
 const readStatusFromSession = (session: OpcuaSession.OpcuaSession) =>
-  session.read(Variables.CommandsStatus).pipe(
+  session.read(Variables.Commands.Status).pipe(
     Effect.flatMap((result) => {
       if (result._tag === "Value") {
         return Effect.succeed(mapCommandStatusBuffer(result.value));
@@ -128,7 +128,7 @@ const readStatusFromSession = (session: OpcuaSession.OpcuaSession) =>
       return Effect.fail(
         new CommandStatusUnavailable({
           operation: "read Commands.Status",
-          nodeId: Variables.CommandsStatus.nodeId,
+          nodeId: Variables.Commands.Status.nodeId,
           cause: result,
         }),
       );
@@ -197,7 +197,7 @@ const submitCommand = (input: {
     }
 
     yield* Effect.gen(function* () {
-      yield* writeGood(input.session, Variables.CommandsSubmitRequest, {
+      yield* writeGood(input.session, Variables.Commands.SubmitRequest, {
         commandId,
         commandKind: spec.kind,
         clientId,

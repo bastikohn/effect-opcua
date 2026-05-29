@@ -2,11 +2,9 @@
 import { Effect } from "effect";
 
 import { loadConfig } from "./config.js";
-import {
-  checkOpcuaClientGeneratedNormalized,
-  generateOpcuaClientNormalized,
-} from "./generate.js";
-import type { CodegenDiagnostic } from "./types.js";
+import { checkNormalized, generateNormalized } from "./generate.js";
+import { displayPath } from "./diagnostics.js";
+import type { CodegenIssue } from "./types.js";
 
 type CliOptions = {
   readonly configPath: string;
@@ -24,14 +22,14 @@ const main = async () => {
   const effect = Effect.gen(function* () {
     const config = yield* loadConfig(options.configPath);
     return options.check
-      ? yield* checkOpcuaClientGeneratedNormalized(config)
-      : yield* generateOpcuaClientNormalized(config);
+      ? yield* checkNormalized(config)
+      : yield* generateNormalized(config);
   });
 
   try {
     const result = await Effect.runPromise(Effect.scoped(effect));
+    printIssues(result.issues, options.verbose);
     if ("ok" in result) {
-      printDiagnostics(result.diagnostics, options.verbose);
       if (!result.ok) {
         process.stderr.write(
           `Generated output is stale (${result.staleFiles.length} stale, ${result.missingFiles.length} missing).\n`,
@@ -44,7 +42,6 @@ const main = async () => {
       );
       return;
     }
-    printDiagnostics(result.diagnostics, options.verbose);
     process.stdout.write(`Generated ${result.writtenFiles.length} files.\n`);
   } catch (error) {
     process.stderr.write(`${formatError(error)}\n`);
@@ -79,25 +76,57 @@ const parseArgs = (args: readonly string[]): CliOptions | Error => {
   return { configPath, verbose, check };
 };
 
-const printDiagnostics = (
-  diagnostics: readonly CodegenDiagnostic[],
-  verbose: boolean,
-) => {
+const printIssues = (issues: readonly CodegenIssue[], verbose: boolean) => {
   const visible = verbose
-    ? diagnostics
-    : diagnostics.filter((item) => item.severity === "warning");
+    ? issues
+    : issues.filter((item) => item.severity !== "info");
   for (const item of visible) {
-    process.stderr.write(
-      `[${item.severity}] ${item.code}: ${item.message}${item.browsePath ? ` (${item.browsePath})` : ""}\n`,
+    process.stderr.write(`${formatIssue(item)}\n`);
+  }
+};
+
+const formatIssue = (item: CodegenIssue) => {
+  const lines = [`${item.severity} ${item.code}`];
+  if (item.path) lines.push(`Path: ${displayPath(item.path)}`);
+  if (item.generatedPath) {
+    lines.push(`Generated key: ${item.generatedPath.join(".")}`);
+  }
+  lines.push(`Message: ${item.message}`);
+  const candidates = candidatesFromCause(item.cause);
+  if (candidates.length > 0) {
+    lines.push("Candidates:");
+    for (const candidate of candidates) {
+      lines.push(`- ${candidate}`);
+    }
+  }
+  return lines.join("\n");
+};
+
+const candidatesFromCause = (cause: unknown): readonly string[] => {
+  if (
+    typeof cause === "object" &&
+    cause !== null &&
+    "candidates" in cause &&
+    Array.isArray((cause as { readonly candidates?: unknown }).candidates)
+  ) {
+    return (cause as { readonly candidates: readonly unknown[] }).candidates.map(
+      String,
     );
   }
+  return [];
 };
 
 const formatError = (error: unknown) => {
   if (isTagged(error, "CodegenError")) {
-    const reason = (error as { readonly reason: { readonly _tag: string } })
-      .reason;
-    return `Codegen failed: ${reason._tag}`;
+    const typed = error as {
+      readonly reason: { readonly _tag: string };
+      readonly issues?: readonly CodegenIssue[];
+    };
+    const issues = typed.issues ?? [];
+    return [
+      `Codegen failed: ${typed.reason._tag}`,
+      ...issues.map(formatIssue),
+    ].join("\n");
   }
   if (isTagged(error, "OpcuaError")) {
     const reason = (error as { readonly reason: { readonly _tag: string } })

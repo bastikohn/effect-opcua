@@ -1,34 +1,62 @@
 import { Effect } from "effect";
 
 import { codegenError } from "./errors.js";
-import type { CodegenDiagnostic, CodegenDiagnosticCode } from "./types.js";
+import type { CodegenIssue } from "./types.js";
 
-const warningCodes = new Set<CodegenDiagnosticCode>([
+const warningCodes = new Set([
+  "browse.failure",
+  "branch.pruned",
+  "node.omitted",
+  "node.multiPath",
+  "variable.writeOnlySkipped",
   "codec.dynamicFallback",
   "codec.unsupportedArrayRank",
-  "variable.writeOnlySkipped",
-  "method.malformedArgumentsSkipped",
-  "enum.metadataMissing",
+  "datatype.definitionMissing",
+  "datatype.definitionUnsupported",
+  "datatype.definitionFailure",
+  "datatype.unionUnsupported",
+  "enum.emptyName",
+  "enum.nameCollision",
+  "enum.memberEmptyName",
   "enum.memberNameCollision",
+  "structure.emptyName",
+  "structure.nameCollision",
+  "structure.fieldEmptyName",
+  "structure.fieldNameCollision",
+  "structure.unsupportedField",
+  "structure.recursiveField",
 ]);
 
-export const diagnostic = (
-  code: CodegenDiagnosticCode,
-  input: Omit<CodegenDiagnostic, "severity" | "code">,
-): CodegenDiagnostic => ({
-  severity: warningCodes.has(code) ? "warning" : "info",
-  code,
-  ...input,
-});
+export const issue = (
+  code: string,
+  input: Omit<CodegenIssue, "severity" | "code"> & {
+    readonly severity?: CodegenIssue["severity"];
+  },
+): CodegenIssue => {
+  const { severity, ...rest } = input;
+  return {
+    severity: severity ?? (warningCodes.has(code) ? "warning" : "info"),
+    code,
+    ...rest,
+  };
+};
 
-export const sortDiagnostics = (
-  diagnostics: readonly CodegenDiagnostic[],
-): readonly CodegenDiagnostic[] =>
-  [...diagnostics].sort(
+export const errorIssue = (
+  code: string,
+  input: Omit<CodegenIssue, "severity" | "code">,
+): CodegenIssue => issue(code, { ...input, severity: "error" });
+
+export const sortIssues = (
+  issues: readonly CodegenIssue[],
+): readonly CodegenIssue[] =>
+  [...issues].sort(
     (left, right) =>
       [
         severityRank(left.severity) - severityRank(right.severity),
-        (left.browsePath ?? "").localeCompare(right.browsePath ?? ""),
+        displayPath(left.path).localeCompare(displayPath(right.path)),
+        displayPath(left.generatedPath).localeCompare(
+          displayPath(right.generatedPath),
+        ),
         (left.file ?? "").localeCompare(right.file ?? ""),
         left.code.localeCompare(right.code),
         (left.nodeId ?? "").localeCompare(right.nodeId ?? ""),
@@ -36,15 +64,32 @@ export const sortDiagnostics = (
       ].find((value) => value !== 0) ?? 0,
   );
 
-export const enforceDiagnosticsPolicy = (
+export const enforceIssuePolicy = (
   warningsAsErrors: boolean,
-  diagnostics: readonly CodegenDiagnostic[],
-) =>
-  warningsAsErrors && diagnostics.some((item) => item.severity === "warning")
-    ? Effect.fail(
-        codegenError({ _tag: "DiagnosticsPolicyViolation" }, diagnostics),
+  issues: readonly CodegenIssue[],
+) => {
+  const promoted = warningsAsErrors
+    ? issues.map((item) =>
+        item.severity === "warning"
+          ? ({ ...item, severity: "error" as const })
+          : item,
       )
-    : Effect.succeed(diagnostics);
+    : issues;
+  return promoted.some((item) => item.severity === "error")
+    ? Effect.fail(codegenError({ _tag: "IssuePolicyViolation" }, promoted))
+    : Effect.succeed(sortIssues(promoted));
+};
 
-const severityRank = (severity: CodegenDiagnostic["severity"]) =>
-  severity === "warning" ? 0 : 1;
+export const displayPath = (path: readonly string[] | undefined) =>
+  path?.join(" / ") ?? "";
+
+const severityRank = (severity: CodegenIssue["severity"]) => {
+  switch (severity) {
+    case "error":
+      return 0;
+    case "warning":
+      return 1;
+    case "info":
+      return 2;
+  }
+};

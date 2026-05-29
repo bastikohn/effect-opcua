@@ -130,4 +130,27 @@ describe("metadata", () => {
       metadata: { browseName: "First", nodeClass: "Object" },
     });
   });
+
+  it("chunks large batch metadata reads", async () => {
+    const nodeIds = Array.from(
+      { length: 51 },
+      (_, index) => `ns=1;s=Node${index}`,
+    );
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* makeFakeSession({
+            namespaceArray: ["http://opcfoundation.org/UA/", "urn:test"],
+          });
+          const empty = yield* fake.session.readManyNodeMetadata([]);
+          const large = yield* fake.session.readManyNodeMetadata(nodeIds);
+          return { empty, large, calls: fake.calls.metadataReads };
+        }),
+      ),
+    );
+
+    expect(result.empty).toEqual([]);
+    expect(result.large.map((entry) => entry.nodeId)).toEqual(nodeIds);
+    expect(result.calls.map((batch) => batch.length)).toEqual([450, 9]);
+  });
 });

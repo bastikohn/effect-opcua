@@ -65,6 +65,9 @@ export type FakeSessionOptions = {
     readonly index: number;
   }) => CallMethodResult;
   readonly dataTypeSuperTypes?: Readonly<Record<string, string | NodeId>>;
+  readonly dataTypeDefinitions?: Readonly<Record<string, unknown>>;
+  readonly dataTypeEnumValues?: Readonly<Record<string, ReadonlyArray<unknown>>>;
+  readonly dataTypeEnumStrings?: Readonly<Record<string, ReadonlyArray<unknown>>>;
   readonly onWrite?: (
     nodesToWrite: ReadonlyArray<WriteValueOptions>,
   ) => ReadonlyArray<StatusCode> | void;
@@ -130,9 +133,34 @@ export const makeFakeSession = (options: FakeSessionOptions = {}) =>
         calls.browses.push(description);
         const nodeId = coerceNodeId(description.nodeId).toString();
         const superType = options.dataTypeSuperTypes?.[nodeId];
+        const enumPropertyReferences = [
+          ...(nodeId in (options.dataTypeEnumValues ?? {})
+            ? [
+                {
+                  browseName: { name: "EnumValues", toString: () => "EnumValues" },
+                  nodeId: coerceNodeId(enumPropertyNodeId(nodeId, "EnumValues")),
+                  nodeClass: NodeClass.Variable,
+                },
+              ]
+            : []),
+          ...(nodeId in (options.dataTypeEnumStrings ?? {})
+            ? [
+                {
+                  browseName: { name: "EnumStrings", toString: () => "EnumStrings" },
+                  nodeId: coerceNodeId(enumPropertyNodeId(nodeId, "EnumStrings")),
+                  nodeClass: NodeClass.Variable,
+                },
+              ]
+            : []),
+        ];
         return {
           statusCode: StatusCodes.Good,
-          references: superType ? [{ nodeId: coerceNodeId(superType) }] : [],
+          references:
+            enumPropertyReferences.length > 0
+              ? enumPropertyReferences
+              : superType
+                ? [{ nodeId: coerceNodeId(superType) }]
+                : [],
         } as unknown as BrowseResult;
       },
       getArgumentDefinition: async (methodId: NodeId) => {
@@ -176,8 +204,11 @@ const readValueBatch = (
               "urn:effect-opcua:test",
             ],
           },
-        }) as unknown as DataValue,
+      }) as unknown as DataValue,
     );
+  }
+  if (batch.every((node) => enumPropertyValue(options, node) !== undefined)) {
+    return batch.map((node) => enumPropertyValue(options, node)!);
   }
   return (
     options.readValues?.(batch) ??
@@ -187,6 +218,30 @@ const readValueBatch = (
 
 const isNamespaceArrayNodeId = (nodeId: string | undefined) =>
   nodeId === "i=2255" || nodeId === "ns=0;i=2255";
+
+const enumPropertyNodeId = (dataTypeNodeId: string, property: string) =>
+  `ns=999;s=${encodeURIComponent(dataTypeNodeId)}.${property}`;
+
+const enumPropertyValue = (
+  options: FakeSessionOptions,
+  node: ReadValueIdOptions,
+): DataValue | undefined => {
+  const nodeId = node.nodeId?.toString() ?? "";
+  const match = /^ns=999;s=(.+)\.(EnumValues|EnumStrings)$/.exec(nodeId);
+  if (!match) return undefined;
+  const dataTypeNodeId = decodeURIComponent(match[1]!);
+  const property = match[2]!;
+  const values =
+    property === "EnumValues"
+      ? options.dataTypeEnumValues?.[dataTypeNodeId]
+      : options.dataTypeEnumStrings?.[dataTypeNodeId];
+  return values
+    ? ({
+        statusCode: StatusCodes.Good,
+        value: { value: [...values] },
+      } as unknown as DataValue)
+    : undefined;
+};
 
 const readMetadataBatch = (
   options: FakeSessionOptions,
@@ -255,6 +310,17 @@ const metadataDataValue = (
       return variantDataValue(DataType.Boolean, method.executable ?? true);
     case AttributeIds.UserExecutable:
       return variantDataValue(DataType.Boolean, method.userExecutable ?? true);
+    case AttributeIds.DataTypeDefinition: {
+      if (nodeId in (options.dataTypeDefinitions ?? {})) {
+        return {
+          statusCode: StatusCodes.Good,
+          value: { value: options.dataTypeDefinitions?.[nodeId] },
+        } as unknown as DataValue;
+      }
+      return {
+        statusCode: StatusCodes.BadAttributeIdInvalid,
+      } as unknown as DataValue;
+    }
     default:
       return numberDataValue(0);
   }

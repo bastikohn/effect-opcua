@@ -10,6 +10,8 @@ This directory has two tracks:
 
 - [Getting started](users/getting-started.md): install, connect, and run the
   first program.
+- [Code generation](users/codegen.md): generate NodeIds, variables, enums, and
+  structures from an OPC UA server.
 - [Core concepts](users/core-concepts.md): definitions, codecs, layers, result
   shapes, and raw access.
 - [Recipes](users/recipes.md): common read, write, method, monitor, browse, and

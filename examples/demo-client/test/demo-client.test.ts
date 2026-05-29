@@ -12,7 +12,7 @@ import { DemoMachineCommands } from "../src/DemoMachineCommands.js";
 import { DemoMachineTelemetry } from "../src/DemoMachineTelemetry.js";
 import { DemoMachineCommandCore } from "../src/internal/command-core.js";
 import * as Variables from "../src/generated/variables.js";
-import type { RawCommandStatusBuffer } from "../src/generated/structures.js";
+import type { CommandStatusBuffer as RawCommandStatusBuffer } from "../src/generated/structures.js";
 import {
   CommandObservationTimeout,
   CommandSubmissionInProgress,
@@ -39,7 +39,7 @@ describe("@effect-opcua/demo-client", () => {
     expect(Root.DemoMachineCommands).toBeDefined();
     expect(Root.DemoMachineTelemetry).toBeDefined();
     expect(Root.DemoMachineCommand).toBeDefined();
-    expect(Generated.Variables.Variables.Commands.Status.nodeId).toBe(
+    expect(Generated.Variables.Commands.Status.nodeId).toBe(
       "ns=1;s=DemoFillingCell.Commands.Status",
     );
 
@@ -351,7 +351,7 @@ const makeFakeSessionLayer = (options: FakeCoreOptions) =>
         read: () =>
           Effect.succeed({
             _tag: "Value",
-            nodeId: Variables.CommandsStatus.nodeId,
+            nodeId: Variables.Commands.Status.nodeId,
             value: emptyRawStatusBuffer(),
             status: { isGood: true, text: "Good" },
           }),
@@ -359,7 +359,7 @@ const makeFakeSessionLayer = (options: FakeCoreOptions) =>
           Effect.sleep(options.writeDelay).pipe(
             Effect.andThen(
               options.observeSubmit &&
-                def.nodeId === Variables.CommandsSubmitRequest.nodeId
+                def.nodeId === Variables.Commands.SubmitRequest.nodeId
                 ? Queue.offer(samples, statusSample(value))
                 : Effect.void,
             ),
@@ -383,14 +383,14 @@ const emptyRawStatusBuffer = (): RawCommandStatusBuffer => ({
 const statusSample = (value: unknown) => {
   const submit = value as {
     readonly commandId: string;
-    readonly commandKind: number;
+    readonly commandKind: RawCommandStatusBuffer["entries"][number]["commandKind"];
     readonly clientId: string;
   };
   const now = new Date();
   return {
     _tag: "Value",
     key: "status",
-    nodeId: Variables.CommandsStatus.nodeId,
+    nodeId: Variables.Commands.Status.nodeId,
     value: {
       revision: 1,
       capacity: 8,

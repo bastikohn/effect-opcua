@@ -1,12 +1,9 @@
-export { defineConfig } from "./config.js";
-export { generateOpcuaClient, checkOpcuaClientGenerated } from "./generate.js";
+export { defineConfig, generate, check } from "./public.js";
+export { CodegenError } from "./errors.js";
 
 export type {
-  CheckOpcuaClientGeneratedResult,
+  CheckResult,
   CodegenConfig,
-  CodegenDiagnostic,
-  CodegenIr,
-  DiscoveredAddressSpace,
-  GenerateOpcuaClientResult,
-  NormalizedCodegenConfig,
-} from "./types.js";
+  CodegenIssue,
+  GenerateResult,
+} from "./public-types.js";

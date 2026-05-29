@@ -1,9 +1,74 @@
 import * as Enums from "../generated/enums.js";
 import type { DemoMachineSnapshot } from "../contract/telemetry.js";
+import * as Variables from "../generated/variables.js";
+
+export const snapshotVariables = {
+  telemetryRevision: Variables.Telemetry.Revision,
+  machineState: Variables.State.MachineState,
+  operatingMode: Variables.State.OperatingMode,
+  cyclePhase: Variables.State.CyclePhase,
+  ready: Variables.State.Ready,
+  busy: Variables.State.Busy,
+  configurationValid: Variables.State.ConfigurationValid,
+  homed: Variables.State.Homed,
+  safetyOk: Variables.State.SafetyOk,
+  faultActive: Variables.State.FaultActive,
+  warningActive: Variables.State.WarningActive,
+  productName: Variables.State.Configuration.ProductName,
+  targetFillVolumeMl: Variables.State.Configuration.TargetFillVolumeMl,
+  fillToleranceMl: Variables.State.Configuration.FillToleranceMl,
+  pumpRateMlPerSecond: Variables.State.Configuration.PumpRateMlPerSecond,
+  batchSize: Variables.State.Configuration.BatchSize,
+  xAxisSpeedMmPerSecond: Variables.State.Configuration.XAxisSpeedMmPerSecond,
+  zAxisSpeedMmPerSecond: Variables.State.Configuration.ZAxisSpeedMmPerSecond,
+  xAxisState: Variables.Motion.XAxis.State,
+  xAxisActualPositionMm: Variables.Motion.XAxis.ActualPositionMm,
+  xAxisTargetPositionMm: Variables.Motion.XAxis.TargetPositionMm,
+  xAxisHomed: Variables.Motion.XAxis.Homed,
+  xAxisEnabled: Variables.Motion.XAxis.Enabled,
+  xAxisFaultCode: Variables.Motion.XAxis.FaultCode,
+  xAxisCurrentTarget: Variables.Motion.XAxis.CurrentTarget,
+  zAxisState: Variables.Motion.ZAxis.State,
+  zAxisActualPositionMm: Variables.Motion.ZAxis.ActualPositionMm,
+  zAxisTargetPositionMm: Variables.Motion.ZAxis.TargetPositionMm,
+  zAxisHomed: Variables.Motion.ZAxis.Homed,
+  zAxisEnabled: Variables.Motion.ZAxis.Enabled,
+  zAxisFaultCode: Variables.Motion.ZAxis.FaultCode,
+  zAxisCurrentTarget: Variables.Motion.ZAxis.CurrentTarget,
+  tankLevelMl: Variables.Filling.Tank.LevelMl,
+  tankCapacityMl: Variables.Filling.Tank.CapacityMl,
+  tankLow: Variables.Filling.Tank.LowLevel,
+  tankEmpty: Variables.Filling.Tank.Empty,
+  pumpState: Variables.Filling.Pump.State,
+  pumpRunning: Variables.Filling.Pump.Running,
+  pumpFaultCode: Variables.Filling.Pump.FaultCode,
+  nozzleValveState: Variables.Filling.NozzleValve.State,
+  nozzleValveOpen: Variables.Filling.NozzleValve.Open,
+  nozzleValveFaultCode: Variables.Filling.NozzleValve.FaultCode,
+  clampState: Variables.PartHandling.Clamp.State,
+  clampOpen: Variables.PartHandling.Clamp.Open,
+  clampClosed: Variables.PartHandling.Clamp.Closed,
+  clampFaultCode: Variables.PartHandling.Clamp.FaultCode,
+  partPresent: Variables.PartHandling.PartPresent,
+  inspectionFillLevelMl: Variables.Inspection.FillLevelMl,
+  inspectionFillLevelOk: Variables.Inspection.FillLevelOk,
+  inspectionResult: Variables.Inspection.Result,
+  rejectReason: Variables.Inspection.RejectReason,
+  inspectionSensorFaultCode: Variables.Inspection.SensorFaultCode,
+  batchTargetCount: Variables.Production.Batch.TargetCount,
+  batchStartedCount: Variables.Production.Batch.StartedCount,
+  batchCompletedCount: Variables.Production.Batch.CompletedCount,
+  batchGoodCount: Variables.Production.Batch.GoodCount,
+  batchRejectedCount: Variables.Production.Batch.RejectedCount,
+  batchRemainingCount: Variables.Production.Batch.RemainingCount,
+  activeWarningCount: Variables.Diagnostics.Summary.ActiveWarningCount,
+  activeFaultCount: Variables.Diagnostics.Summary.ActiveFaultCount,
+  highestSeverity: Variables.Diagnostics.Summary.HighestSeverity,
+  primaryFaultCode: Variables.Diagnostics.Summary.PrimaryFaultCode,
+} as const;
 
 export type TelemetryStaging = {
-  readonly telemetryRevision: unknown;
-  readonly [key: string]: unknown;
+  readonly [Key in keyof typeof snapshotVariables]: unknown;
 };
 
 const names = {

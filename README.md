@@ -9,6 +9,8 @@ acceptable when they improve API quality, ergonomics, or performance.
 ## Packages
 
 - `@effect-opcua/client`: public client library.
+- `@effect-opcua/codegen`: generates typed NodeIds, variables, enums, and
+  structures from an OPC UA server.
 - `@effect-opcua/demo-server`: simulated OPC UA filling-cell server.
 - `@effect-opcua/demo-client`: typed backend/HMI SDK example for the demo
   server.
@@ -18,6 +20,7 @@ acceptable when they improve API quality, ergonomics, or performance.
 
 - [Documentation index](docs/README.md)
 - [Getting started](docs/users/getting-started.md)
+- [Code generation](docs/users/codegen.md)
 - [Core concepts](docs/users/core-concepts.md)
 - [Recipes](docs/users/recipes.md)
 - [Contributor architecture](docs/contributors/architecture.md)

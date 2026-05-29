@@ -5,6 +5,13 @@
     "moduleResolution": "Bundler",
     "lib": ["ESNext"],
     "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@effect-opcua/client": ["packages/client/src/index.ts"],
+      "@effect-opcua/client/*": ["packages/client/src/*"],
+      "@effect-opcua/codegen": ["packages/codegen/src/index.ts"],
+      "@effect-opcua/codegen/*": ["packages/codegen/src/*"]
+    },
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,

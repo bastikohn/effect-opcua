@@ -1,13 +1,19 @@
-import type { OPCUAClientOptions } from "@effect-opcua/client/node-opcua";
+import type {
+  OPCUAClientOptions,
+  UserIdentityInfo,
+} from "@effect-opcua/client/node-opcua";
+import type { OpcuaDataTypeDefinitionResult } from "@effect-opcua/client/OpcuaSession";
 
 export type CodegenConfig = {
   readonly connection?: {
     readonly endpointUrl?: string;
     readonly clientOptions?: OPCUAClientOptions;
+    readonly userIdentity?: UserIdentityInfo;
   };
   readonly outputDir?: string;
   readonly roots?: readonly RootConfig[];
   readonly exclude?: readonly ExcludeRuleConfig[];
+  readonly discovery?: DiscoveryConfig;
   readonly naming?: {
     readonly rootStripping?: boolean;
     readonly case?: "pascal";
@@ -17,25 +23,68 @@ export type CodegenConfig = {
   };
 };
 
-export type RootConfig = {
-  readonly browsePath?: string;
-  readonly nodeId?: string;
-  readonly exportPrefix?: string;
-};
+export type RootConfig =
+  | {
+      readonly path: readonly string[];
+      readonly nodeId?: never;
+      readonly browsePath?: never;
+      readonly exportPrefix?: string;
+    }
+  | {
+      readonly path?: never;
+      readonly nodeId: string;
+      readonly browsePath?: never;
+      readonly exportPrefix?: string;
+    }
+  | {
+      readonly path?: never;
+      readonly nodeId?: never;
+      readonly browsePath: string;
+      readonly exportPrefix?: string;
+    };
 
-export type ExcludeRuleConfig = {
-  readonly browsePath?: string | RegExp;
-  readonly mode?: "prune" | "omit";
+export type PathPatternSegment = string | RegExp | "**";
+
+export type ExcludeRuleConfig =
+  | {
+      readonly path: readonly string[];
+      readonly pathPattern?: never;
+      readonly browsePath?: never;
+      readonly mode?: "prune" | "omit";
+    }
+  | {
+      readonly path?: never;
+      readonly pathPattern: readonly PathPatternSegment[];
+      readonly browsePath?: never;
+      readonly mode?: "prune" | "omit";
+    }
+  | {
+      readonly path?: never;
+      readonly pathPattern?: never;
+      readonly browsePath: string | RegExp;
+      readonly mode?: "prune" | "omit";
+    };
+
+export type DiscoveryConfig = {
+  readonly rootBase?: "objectsFolder";
+  readonly includeVariableChildren?: boolean;
+  readonly onBrowseFailure?: "warn" | "fail";
 };
 
 export type NormalizedCodegenConfig = {
   readonly connection: {
     readonly endpointUrl: string;
     readonly clientOptions?: OPCUAClientOptions;
+    readonly userIdentity?: UserIdentityInfo;
   };
   readonly outputDir: string;
   readonly roots: readonly NormalizedRootConfig[];
   readonly exclude: readonly NormalizedExcludeRule[];
+  readonly discovery: {
+    readonly rootBase: "objectsFolder";
+    readonly includeVariableChildren: boolean;
+    readonly onBrowseFailure: "warn" | "fail";
+  };
   readonly naming: {
     readonly rootStripping: boolean;
     readonly case: "pascal";
@@ -47,71 +96,64 @@ export type NormalizedCodegenConfig = {
 
 export type NormalizedRootConfig =
   | {
-      readonly browsePath: string;
-      readonly browsePathSegments: readonly string[];
+      readonly path: readonly string[];
       readonly nodeId?: never;
       readonly exportPrefix?: string;
     }
   | {
-      readonly browsePath?: never;
-      readonly browsePathSegments?: never;
+      readonly path?: never;
       readonly nodeId: string;
       readonly exportPrefix?: string;
     };
 
-export type NormalizedExcludeRule = {
-  readonly browsePath: string | RegExp;
-  readonly mode: "prune" | "omit";
-};
+export type NormalizedExcludeRule =
+  | {
+      readonly _tag: "Path";
+      readonly path: readonly string[];
+      readonly mode: "prune" | "omit";
+    }
+  | {
+      readonly _tag: "PathPattern";
+      readonly pathPattern: readonly PathPatternSegment[];
+      readonly mode: "prune" | "omit";
+    };
 
-export type CodegenDiagnostic = {
-  readonly severity: "info" | "warning";
-  readonly code: CodegenDiagnosticCode;
+export type CodegenIssue = {
+  readonly severity: "info" | "warning" | "error";
+  readonly code: string;
   readonly message: string;
-  readonly browsePath?: string;
   readonly nodeId?: string;
+  readonly path?: readonly string[];
+  readonly generatedPath?: readonly string[];
   readonly file?: string;
+  readonly cause?: unknown;
 };
-
-export type CodegenDiagnosticCode =
-  | "node.omitted"
-  | "branch.pruned"
-  | "node.multiPath"
-  | "codec.dynamicFallback"
-  | "codec.unsupportedArrayRank"
-  | "variable.writeOnlySkipped"
-  | "method.malformedArgumentsSkipped"
-  | "enum.metadataMissing"
-  | "enum.memberNameCollision"
-  | "file.written"
-  | "file.checked";
 
 export type GeneratedFile = {
   readonly path: string;
   readonly contents: string;
 };
 
-export type GenerateOpcuaClientResult = {
-  readonly ir: CodegenIr;
+export type GenerateResult = {
   readonly files: readonly GeneratedFile[];
-  readonly diagnostics: readonly CodegenDiagnostic[];
+  readonly issues: readonly CodegenIssue[];
   readonly writtenFiles: readonly string[];
 };
 
-export type CheckOpcuaClientGeneratedResult = {
-  readonly ir: CodegenIr;
+export type CheckResult = {
   readonly files: readonly GeneratedFile[];
-  readonly diagnostics: readonly CodegenDiagnostic[];
+  readonly issues: readonly CodegenIssue[];
   readonly staleFiles: readonly string[];
   readonly missingFiles: readonly string[];
   readonly ok: boolean;
 };
 
-export type DiscoveredAddressSpace = {
+export type DiscoveryModel = {
   readonly roots: readonly DiscoveredRoot[];
   readonly nodes: ReadonlyMap<NodeKey, DiscoveredNode>;
   readonly references: readonly DiscoveredReference[];
-  readonly diagnostics: readonly CodegenDiagnostic[];
+  readonly dataTypeDefinitions: readonly OpcuaDataTypeDefinitionResult[];
+  readonly issues: readonly CodegenIssue[];
 };
 
 export type NodeKey = string;
@@ -119,8 +161,7 @@ export type NodeKey = string;
 export type DiscoveredRoot = {
   readonly rootIndex: number;
   readonly nodeId: string;
-  readonly browsePath: string;
-  readonly browsePathSegments: readonly string[];
+  readonly path: readonly string[];
   readonly exportPrefix?: string;
 };
 
@@ -144,9 +185,8 @@ export type DiscoveredNode = {
   readonly browseName: string;
   readonly browseNameNamespaceIndex?: number;
 
-  readonly browsePath: string;
-  readonly browsePathSegments: readonly string[];
-  readonly allBrowsePaths: readonly string[];
+  readonly path: readonly string[];
+  readonly allPaths: readonly (readonly string[])[];
 
   readonly nodeClass:
     | "Object"
@@ -179,46 +219,36 @@ export type DiscoveredReference = {
   readonly browseName: string;
 };
 
-export type CodegenIr = {
+export type CodegenModel = {
   readonly nodeIds: readonly NodeIdDefinition[];
+  readonly dataTypeNodeIds: readonly DataTypeNodeIdDefinition[];
   readonly variables: readonly VariableDefinition[];
-  readonly methods: readonly MethodDefinition[];
   readonly enums: readonly EnumDefinition[];
   readonly structures: readonly StructureDefinition[];
-  readonly diagnostics: readonly CodegenDiagnostic[];
+  readonly issues: readonly CodegenIssue[];
 };
 
 export type NodeIdDefinition = {
   readonly nodeId: string;
-  readonly browsePath: string;
-  readonly browsePathSegments: readonly string[];
+  readonly path: readonly string[];
+  readonly generatedPath: readonly string[];
+};
+
+export type DataTypeNodeIdDefinition = {
+  readonly nodeId: string;
+  readonly name: string;
 };
 
 export type VariableDefinition = {
-  readonly exportName: string;
-  readonly nodeIdPath: readonly string[];
-  readonly browsePath: string;
+  readonly path: readonly string[];
+  readonly generatedPath: readonly string[];
   readonly nodeId: string;
-  readonly codec: CodecExpression;
+  readonly codec: VariableCodecExpression;
   readonly access: "read" | "readWrite";
 };
 
-export type MethodDefinition = {
-  readonly exportName: string;
-  readonly objectNodeIdPath: readonly string[];
-  readonly methodNodeIdPath: readonly string[];
-  readonly browsePath: string;
-  readonly input: readonly MethodArgumentDefinition[];
-  readonly output: readonly MethodArgumentDefinition[];
-};
-
-export type MethodArgumentDefinition = {
-  readonly name: string;
-  readonly codec: CodecExpression;
-};
-
 export type EnumDefinition = {
-  readonly exportName: string;
+  readonly name: string;
   readonly dataTypeNodeId: string;
   readonly browseName: string;
   readonly members: readonly EnumMemberDefinition[];
@@ -230,7 +260,7 @@ export type EnumMemberDefinition = {
 };
 
 export type StructureDefinition = {
-  readonly exportName: string;
+  readonly name: string;
   readonly dataTypeNodeId: string;
   readonly browseName: string;
   readonly fields: readonly StructureFieldDefinition[];
@@ -238,18 +268,64 @@ export type StructureDefinition = {
 
 export type StructureFieldDefinition = {
   readonly name: string;
-  readonly codec: CodecExpression;
+  readonly originalName: string;
+  readonly schema: SchemaExpression;
+  readonly optional: boolean;
 };
 
-export type CodecExpression =
+export type ScalarSchema = "Boolean" | "Number" | "String" | "Date";
+
+export type VariableCodecExpression =
   | {
       readonly _tag: "Schema";
-      readonly schema: "Boolean" | "Number" | "String" | "Date";
+      readonly schema: ScalarSchema;
     }
   | {
       readonly _tag: "SchemaArray";
-      readonly element: "Boolean" | "Number" | "String" | "Date";
+      readonly element: ScalarSchema;
+    }
+  | {
+      readonly _tag: "Enum";
+      readonly name: string;
+    }
+  | {
+      readonly _tag: "EnumArray";
+      readonly name: string;
+    }
+  | {
+      readonly _tag: "Structure";
+      readonly name: string;
+    }
+  | {
+      readonly _tag: "StructureArray";
+      readonly name: string;
     }
   | {
       readonly _tag: "Dynamic";
     };
+
+export type SchemaExpression =
+  | {
+      readonly _tag: "Scalar";
+      readonly schema: ScalarSchema;
+    }
+  | {
+      readonly _tag: "Array";
+      readonly item: Exclude<SchemaExpression, { readonly _tag: "Array" }>;
+    }
+  | {
+      readonly _tag: "Enum";
+      readonly name: string;
+    }
+  | {
+      readonly _tag: "Structure";
+      readonly name: string;
+    }
+  | {
+      readonly _tag: "Unknown";
+    };
+
+export type GeneratedPath = {
+  readonly path: readonly string[];
+  readonly generatedPath: readonly string[];
+};
