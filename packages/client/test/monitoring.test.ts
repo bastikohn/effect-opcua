@@ -305,7 +305,28 @@ describe("monitoring", () => {
     });
   });
 
-  it("rejects missing option objects and invalid deadbands", async () => {
+  it("rejects duplicate monitor NodeIds when the first key is empty", async () => {
+    const duplicate = Opcua.variable({ nodeId: "ns=1;s=Monitor.Duplicate" });
+
+    await expect(
+      Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const fake = yield* makeFakeSubscription();
+            return yield* fake.subscription.monitor(
+              { "": duplicate, later: duplicate } as const,
+              unitMonitorOptions(),
+            );
+          }),
+        ),
+      ),
+    ).rejects.toMatchObject({
+      _tag: "OpcuaError",
+      reason: { _tag: "MonitorConfiguration" },
+    });
+  });
+
+  it("rejects missing option objects, invalid create options, and invalid deadbands", async () => {
     await expect(
       Effect.runPromise(
         Effect.scoped(
@@ -322,6 +343,30 @@ describe("monitoring", () => {
       _tag: "OpcuaError",
       reason: { _tag: "MonitorConfiguration" },
     });
+
+    for (const create of [
+      null,
+      { nope: 1 },
+      { maxItemsPerRequest: 0 },
+      { maxConcurrentRequests: 0 },
+    ]) {
+      await expect(
+        Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const fake = yield* makeFakeSubscription();
+              return yield* fake.subscription.monitor(
+                makeItems(1),
+                unitMonitorOptions({ create: create as never }),
+              );
+            }),
+          ),
+        ),
+      ).rejects.toMatchObject({
+        _tag: "OpcuaError",
+        reason: { _tag: "MonitorConfiguration" },
+      });
+    }
 
     for (const filter of [
       Opcua.MonitorFilter.statusValue(Opcua.MonitorDeadband.absolute(-1)),

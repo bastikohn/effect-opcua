@@ -170,7 +170,7 @@ export const validateUniqueTargets = <Normalized>(
     for (const entry of entries) {
       const target = options.target(entry);
       const duplicate = seen.get(target);
-      if (duplicate) {
+      if (duplicate !== undefined) {
         return Effect.fail(
           configurationError({
             operation: options.operation,

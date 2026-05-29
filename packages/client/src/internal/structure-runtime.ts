@@ -43,10 +43,7 @@ export type OpcuaStructureRuntime = {
     ReadonlyArray<ExtensionObject>,
     OpcuaEncodeError | OpcuaServiceError
   >;
-  readonly decodeStructure: <A>(
-    codec: StructureDef<A>,
-    rawValue: unknown,
-  ) => A;
+  readonly decodeStructure: <A>(codec: StructureDef<A>, rawValue: unknown) => A;
   readonly decodeStructureArray: <A>(
     codec: StructureArrayDef<A>,
     rawValues: unknown,
@@ -104,10 +101,8 @@ export const makeStructureRuntime = (
       encodeStructure(nodeId, codec.item, value),
     );
 
-  const decodeStructure = <A>(
-    codec: StructureDef<A>,
-    rawValue: unknown,
-  ): A => decodeWithSchema(codec.schema, extractStructurePojo(rawValue)) as A;
+  const decodeStructure = <A>(codec: StructureDef<A>, rawValue: unknown): A =>
+    decodeWithSchema(codec.schema, extractStructurePojo(rawValue)) as A;
 
   const decodeStructureArray = <A>(
     codec: StructureArrayDef<A>,
@@ -231,9 +226,7 @@ export const validateStructureMetadata = (
   },
   structure: AnyStructureDef,
 ) => {
-  const codec = isStructureArrayDef(structure)
-    ? structure.item
-    : structure;
+  const codec = isStructureArrayDef(structure) ? structure.item : structure;
   if (metadata.raw.builtInDataType !== DataType.ExtensionObject) {
     return configurationError({
       operation,

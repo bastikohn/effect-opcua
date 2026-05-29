@@ -296,6 +296,17 @@ describe("keyed batch APIs", () => {
         Effect.scoped(
           Effect.gen(function* () {
             const fake = yield* makeFakeSession();
+            return yield* fake.session.readMany({ "": A, b: A } as const);
+          }),
+        ),
+      ),
+    ).rejects.toSatisfy(isConfigurationError);
+
+    await expect(
+      Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const fake = yield* makeFakeSession();
             return yield* fake.session.writeMany({
               a: [B, 1],
               b: [B, 2],

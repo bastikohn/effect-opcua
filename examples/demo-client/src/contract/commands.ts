@@ -85,8 +85,7 @@ export type ClearActuatorFaultInput = typeof ClearActuatorFaultInput.Type;
 export const AxisSelectionCommandInput = Schema.Struct({
   axisSelection: AxisSelectionInput,
 });
-export type AxisSelectionCommandInput =
-  typeof AxisSelectionCommandInput.Type;
+export type AxisSelectionCommandInput = typeof AxisSelectionCommandInput.Type;
 
 export const DemoMachineCommand = Schema.Union([
   Schema.TaggedStruct("MachineSetMode", { targetMode: OperatingModeInput }),
@@ -158,7 +157,10 @@ export const DemoMachineCommand = Schema.Union([
   Schema.TaggedStruct("MaintenanceJogZPositive", JogInput.fields),
   Schema.TaggedStruct("MaintenanceJogZNegative", JogInput.fields),
   Schema.TaggedStruct("MaintenanceHomeAxes", AxisSelectionCommandInput.fields),
-  Schema.TaggedStruct("MaintenanceEnableAxes", AxisSelectionCommandInput.fields),
+  Schema.TaggedStruct(
+    "MaintenanceEnableAxes",
+    AxisSelectionCommandInput.fields,
+  ),
   Schema.TaggedStruct(
     "MaintenanceDisableAxes",
     AxisSelectionCommandInput.fields,

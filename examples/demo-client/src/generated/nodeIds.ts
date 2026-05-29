@@ -94,9 +94,7 @@ export const State = {
     ProductName: demoNodeId("State.Configuration.ProductName"),
     TargetFillVolumeMl: demoNodeId("State.Configuration.TargetFillVolumeMl"),
     FillToleranceMl: demoNodeId("State.Configuration.FillToleranceMl"),
-    PumpRateMlPerSecond: demoNodeId(
-      "State.Configuration.PumpRateMlPerSecond",
-    ),
+    PumpRateMlPerSecond: demoNodeId("State.Configuration.PumpRateMlPerSecond"),
     BatchSize: demoNodeId("State.Configuration.BatchSize"),
     XAxisSpeedMmPerSecond: demoNodeId(
       "State.Configuration.XAxisSpeedMmPerSecond",

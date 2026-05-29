@@ -2,15 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import {
-  Effect,
-  Layer,
-  Option,
-  Queue,
-  Result,
-  Scope,
-  Stream,
-} from "effect";
+import { Effect, Layer, Option, Queue, Result, Scope, Stream } from "effect";
 import type { Duration } from "effect";
 import { OpcuaSession } from "@effect-opcua/client";
 

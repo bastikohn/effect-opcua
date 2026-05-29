@@ -76,12 +76,7 @@ export const structure = <S extends AnySchema>(options: {
   _tag: "Structure",
   name: options.name,
   dataTypeId: options.dataTypeId,
-  schema: options.schema as Schema.Codec<
-    unknown,
-    SchemaType<S>,
-    never,
-    never
-  >,
+  schema: options.schema as Schema.Codec<unknown, SchemaType<S>, never, never>,
 });
 
 export const structureArray = <A>(

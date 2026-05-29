@@ -8,10 +8,7 @@ export type CommandState =
   | "Failed"
   | "Unknown";
 
-export type TerminalCommandState =
-  | "Completed"
-  | "Rejected"
-  | "Failed";
+export type TerminalCommandState = "Completed" | "Rejected" | "Failed";
 
 export type CommandKindName =
   | "None"

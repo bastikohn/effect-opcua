@@ -18,11 +18,13 @@ export type AnyStructureDef =
   | StructureDef<unknown>
   | StructureArrayDef<unknown>;
 
-export const isStructureDef = (value: unknown): value is StructureDef<unknown> =>
+export const isStructureDef = (
+  value: unknown,
+): value is StructureDef<unknown> =>
   Boolean(
     value &&
-      typeof value === "object" &&
-      (value as { readonly _tag?: string })._tag === "Structure",
+    typeof value === "object" &&
+    (value as { readonly _tag?: string })._tag === "Structure",
   );
 
 export const isStructureArrayDef = (
@@ -30,6 +32,6 @@ export const isStructureArrayDef = (
 ): value is StructureArrayDef<unknown> =>
   Boolean(
     value &&
-      typeof value === "object" &&
-      (value as { readonly _tag?: string })._tag === "StructureArray",
+    typeof value === "object" &&
+    (value as { readonly _tag?: string })._tag === "StructureArray",
   );

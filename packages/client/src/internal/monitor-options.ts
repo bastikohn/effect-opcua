@@ -57,6 +57,11 @@ const allowedOverrideKeys = new Set([
   "timestamps",
 ]);
 
+const allowedCreateKeys = new Set([
+  "maxItemsPerRequest",
+  "maxConcurrentRequests",
+]);
+
 export const normalizeMonitorItems = <Items extends MonitorItemDictionary>(
   items: Items,
 ): Effect.Effect<
@@ -105,7 +110,7 @@ export const normalizeMonitorItems = <Items extends MonitorItemDictionary>(
       }
       const nodeId = rawNodeId.toString();
       const duplicate = seenNodeIds.get(nodeId);
-      if (duplicate) {
+      if (duplicate !== undefined) {
         return Effect.fail(
           makeMonitorConfigurationErrorForOperation("monitor.items", {
             key,
@@ -222,11 +227,31 @@ export const validateMonitorOptions = <Items>(
       }
     }
 
+    const create = options.create;
+    if (create !== undefined) {
+      if (!isPlainRecord(create)) {
+        return Effect.fail(
+          makeMonitorConfigurationErrorForOperation("monitor.options.create", {
+            cause: "create must be an object",
+          }),
+        );
+      }
+      const unknown = Object.keys(create).filter(
+        (name) => !allowedCreateKeys.has(name),
+      );
+      if (unknown.length > 0) {
+        return Effect.fail(
+          makeMonitorConfigurationErrorForOperation("monitor.options.create", {
+            cause: `unsupported create option: ${unknown.join(", ")}`,
+          }),
+        );
+      }
+    }
+
     const maxItemsPerRequest =
-      options.create?.maxItemsPerRequest ?? defaultCreate.maxItemsPerRequest;
+      create?.maxItemsPerRequest ?? defaultCreate.maxItemsPerRequest;
     const maxConcurrentRequests =
-      options.create?.maxConcurrentRequests ??
-      defaultCreate.maxConcurrentRequests;
+      create?.maxConcurrentRequests ?? defaultCreate.maxConcurrentRequests;
     if (!positiveInteger(maxItemsPerRequest)) {
       return Effect.fail(
         makeMonitorConfigurationErrorForOperation("monitor.options.create", {

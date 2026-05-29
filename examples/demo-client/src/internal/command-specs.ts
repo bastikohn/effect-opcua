@@ -290,9 +290,8 @@ function targetSpec<
     domain,
     buildPayload: (input) => ({
       target: targetEnum[(input as { readonly target: string }).target],
-      velocityMmPerSecond: (
-        input as { readonly velocityMmPerSecond: number }
-      ).velocityMmPerSecond,
+      velocityMmPerSecond: (input as { readonly velocityMmPerSecond: number })
+        .velocityMmPerSecond,
     }),
   });
 }
@@ -312,12 +311,10 @@ function positionSpec<
     kind,
     domain,
     buildPayload: (input) => ({
-      targetPositionMm: (
-        input as { readonly targetPositionMm: number }
-      ).targetPositionMm,
-      velocityMmPerSecond: (
-        input as { readonly velocityMmPerSecond: number }
-      ).velocityMmPerSecond,
+      targetPositionMm: (input as { readonly targetPositionMm: number })
+        .targetPositionMm,
+      velocityMmPerSecond: (input as { readonly velocityMmPerSecond: number })
+        .velocityMmPerSecond,
     }),
   });
 }
@@ -341,9 +338,8 @@ function jogSpec<
     kind,
     domain,
     buildPayload: (input) => ({
-      velocityMmPerSecond: (
-        input as { readonly velocityMmPerSecond: number }
-      ).velocityMmPerSecond,
+      velocityMmPerSecond: (input as { readonly velocityMmPerSecond: number })
+        .velocityMmPerSecond,
       maxDurationMs: (input as { readonly maxDurationMs: number })
         .maxDurationMs,
     }),
@@ -356,18 +352,18 @@ function axisSelectionSpec<
     | "MaintenanceEnableAxes"
     | "MaintenanceDisableAxes"
     | "MaintenanceClearAxisFault",
->(
-  tag: Tag,
-  kind: Enums.GlobalCommandKindValue,
-) {
+>(tag: Tag, kind: Enums.GlobalCommandKindValue) {
   return spec(tag, {
     kind,
     domain: "maintenance",
     buildPayload: (input) => ({
       axisSelection:
         Enums.AxisSelection[
-          (input as { readonly axisSelection: keyof typeof Enums.AxisSelection })
-            .axisSelection
+          (
+            input as {
+              readonly axisSelection: keyof typeof Enums.AxisSelection;
+            }
+          ).axisSelection
         ],
     }),
   });

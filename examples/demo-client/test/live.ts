@@ -18,8 +18,7 @@ export const makeLiveTestContext = (suite: string, offset: number) => {
   beforeEach(async () => {
     const poolId = Number(process.env.VITEST_POOL_ID ?? 0);
     const port =
-      52_000 +
-      ((process.pid + offset * 100 + poolId + Date.now()) % 10_000);
+      52_000 + ((process.pid + offset * 100 + poolId + Date.now()) % 10_000);
     const certificateRootFolder = join(
       tmpdir(),
       `effect-opcua-demo-client-${suite}-${process.pid}-${port}`,
@@ -49,7 +48,9 @@ export const makeLiveTestContext = (suite: string, offset: number) => {
     effect: Effect.Effect<
       A,
       E,
-      Scope.Scope | import("../src/DemoMachineCommands.js").DemoMachineCommands | import("../src/DemoMachineTelemetry.js").DemoMachineTelemetry
+      | Scope.Scope
+      | import("../src/DemoMachineCommands.js").DemoMachineCommands
+      | import("../src/DemoMachineTelemetry.js").DemoMachineTelemetry
     >,
     clientId?: string,
   ) =>

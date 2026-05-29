@@ -51,7 +51,6 @@ export type MethodArg<A> = {
   readonly _tag: "MethodArg";
   readonly codec: OpcuaCodec<unknown>;
   readonly selector?: MethodArgSelector;
-  readonly selectorError?: string;
   readonly _A?: A;
 };
 
@@ -672,12 +671,6 @@ const explicitMapping = (
   const usedIndexes = new Set<number>();
   const mapping: Array<MethodArgumentMapping> = [];
   for (const [key, arg] of Object.entries(fields)) {
-    if (arg.selectorError) {
-      return configurationError({
-        operation: "method.argumentMap",
-        cause: `Argument field ${key}: ${arg.selectorError}`,
-      });
-    }
     const selector = arg.selector ?? { _tag: "Name" as const, name: key };
     const matches =
       selector._tag === "Index"

@@ -234,9 +234,13 @@ export const SnapshotVariables = {
   activeWarningCount: numberVariable(
     NodeIds.Diagnostics.Summary.ActiveWarningCount,
   ),
-  activeFaultCount: numberVariable(NodeIds.Diagnostics.Summary.ActiveFaultCount),
+  activeFaultCount: numberVariable(
+    NodeIds.Diagnostics.Summary.ActiveFaultCount,
+  ),
   highestSeverity: numberVariable(NodeIds.Diagnostics.Summary.HighestSeverity),
-  primaryFaultCode: stringVariable(NodeIds.Diagnostics.Summary.PrimaryFaultCode),
+  primaryFaultCode: stringVariable(
+    NodeIds.Diagnostics.Summary.PrimaryFaultCode,
+  ),
   telemetryRevision: TelemetryRevision,
 } as const;
 

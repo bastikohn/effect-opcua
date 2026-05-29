@@ -82,7 +82,10 @@ export const makeSnapshot = (
     pumpStateValue: numberValue(staging.pumpState),
     pumpRunning: booleanValue(staging.pumpRunning),
     pumpFaultCode: stringValue(staging.pumpFaultCode),
-    nozzleValveState: enumName(names.nozzleValveState, staging.nozzleValveState),
+    nozzleValveState: enumName(
+      names.nozzleValveState,
+      staging.nozzleValveState,
+    ),
     nozzleValveStateValue: numberValue(staging.nozzleValveState),
     nozzleValveOpen: booleanValue(staging.nozzleValveOpen),
     nozzleValveFaultCode: stringValue(staging.nozzleValveFaultCode),
@@ -115,7 +118,10 @@ export const makeSnapshot = (
   diagnostics: {
     activeWarningCount: numberValue(staging.activeWarningCount),
     activeFaultCount: numberValue(staging.activeFaultCount),
-    highestSeverity: enumName(names.diagnosticSeverity, staging.highestSeverity),
+    highestSeverity: enumName(
+      names.diagnosticSeverity,
+      staging.highestSeverity,
+    ),
     highestSeverityValue: numberValue(staging.highestSeverity),
     primaryFaultCode: stringValue(staging.primaryFaultCode),
   },
@@ -152,7 +158,9 @@ export const bigintValue = (value: unknown): bigint => {
     return BigInt((value as unknown as { readonly text: string }).text);
   }
   if (Array.isArray(value) && value.length === 2) {
-    return BigInt(numberValue(value[0])) * 2n ** 32n + BigInt(numberValue(value[1]));
+    return (
+      BigInt(numberValue(value[0])) * 2n ** 32n + BigInt(numberValue(value[1]))
+    );
   }
   return BigInt(Math.max(0, Math.trunc(Number(value))));
 };

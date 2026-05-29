@@ -27,7 +27,6 @@ import {
   type CommandOutcome,
   type CommandStatusBuffer,
   type CommandStatusEntry,
-  type TerminalCommandStatusEntry,
 } from "../contract/command-status.js";
 import {
   defaultClientId,
@@ -38,10 +37,7 @@ import * as Variables from "../generated/variables.js";
 import { mapCommandStatusBuffer } from "./command-status-mapper.js";
 import { getCommandSpec } from "./command-specs.js";
 import { makeCommandId } from "./ids.js";
-import {
-  resolveCommandTimeout,
-  resolveObservedTimeout,
-} from "./timeouts.js";
+import { resolveCommandTimeout, resolveObservedTimeout } from "./timeouts.js";
 
 export type DemoMachineCommandCoreService = {
   readonly readStatus: Effect.Effect<CommandStatusBuffer>;
@@ -316,14 +312,14 @@ const findStatusEntry = <A extends CommandStatusEntry>(
     }),
   );
 
-const timeoutAs = <A, E2>(
-  duration: Duration.Input,
-  error: E2,
-) =>
+const timeoutAs =
+  <A, E2>(duration: Duration.Input, error: E2) =>
   <E1, R>(effect: Effect.Effect<A, E1, R>) =>
     effect.pipe(
       Effect.timeoutOption(duration),
       Effect.flatMap((option) =>
-        Option.isSome(option) ? Effect.succeed(option.value) : Effect.fail(error),
+        Option.isSome(option)
+          ? Effect.succeed(option.value)
+          : Effect.fail(error),
       ),
     );

@@ -12,8 +12,9 @@ export class DemoMachine {
       DemoMachineCommandCore.layerLive(options),
       DemoMachineTelemetryCore.layerLive(options),
     );
-    return Layer.merge(DemoMachineCommands.layer, DemoMachineTelemetry.layer).pipe(
-      Layer.provide(coreLayer),
-    );
+    return Layer.merge(
+      DemoMachineCommands.layer,
+      DemoMachineTelemetry.layer,
+    ).pipe(Layer.provide(coreLayer));
   };
 }

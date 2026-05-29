@@ -750,9 +750,7 @@ const commandMetadata: ReadonlyArray<CommandMetadata> =
       kind: GlobalCommandKind[spec.kindName],
       domain,
       commandName,
-      payloadBrowsePath: spec.payloadTypeName
-        ? "Commands/SubmitRequest"
-        : "",
+      payloadBrowsePath: spec.payloadTypeName ? "Commands/SubmitRequest" : "",
     };
   });
 
@@ -1305,7 +1303,9 @@ const installStateBranch = (
     () =>
       model.machineState === MachineState.Running ||
       model.machineState === MachineState.Resetting ||
-      model.status.entries.some((entry) => !isTerminalCommandState(entry.state)),
+      model.status.entries.some(
+        (entry) => !isTerminalCommandState(entry.state),
+      ),
   );
   addBoolean(
     namespace,
@@ -2659,23 +2659,6 @@ const addUInt64 = (
     },
   });
 
-const addDateTime = (
-  namespace: Namespace,
-  parent: ParentNode,
-  browseName: string,
-  nodeIdPath: string,
-  getValue: () => Date,
-) =>
-  addScalar(
-    namespace,
-    parent,
-    browseName,
-    nodeIdPath,
-    "DateTime",
-    DataType.DateTime,
-    getValue,
-  );
-
 const addEnumVariable = (
   namespace: Namespace,
   parent: ParentNode,
@@ -2760,7 +2743,10 @@ const observeSubmit = (
   submit: GlobalCommandSubmitRequest,
 ) => {
   if (isDefaultSubmit(submit)) return StatusCodes.Good;
-  if (submit.commandId === "" || submit.commandKind === GlobalCommandKind.None) {
+  if (
+    submit.commandId === "" ||
+    submit.commandKind === GlobalCommandKind.None
+  ) {
     return StatusCodes.Good;
   }
 
@@ -2920,9 +2906,7 @@ const executeCommand = (
 
   if (result.available) bumpTelemetryRevision(model);
   finishCommand(model, entry, {
-    state: result.available
-      ? CommandState.Completed
-      : CommandState.Rejected,
+    state: result.available ? CommandState.Completed : CommandState.Rejected,
     code: result.available ? "Completed" : result.reasonCode,
     message: result.available ? "Command completed." : result.message,
   });
@@ -4038,43 +4022,6 @@ const tickModel = (model: MachineModel, now: number) => {
   if (changed) bumpTelemetryRevision(model);
 };
 
-const defaultPayload = (payloadTypeName: PayloadTypeName): StructureRecord => {
-  switch (payloadTypeName) {
-    case "MachineSetModePayload":
-      return { commandId: "", targetMode: OperatingMode.None };
-    case "MachineConfigurePayload":
-      return { commandId: "", configuration: defaultRunConfiguration() };
-    case "MoveXAxisToTargetPayload":
-      return {
-        commandId: "",
-        target: XAxisTarget.None,
-        velocityMmPerSecond: 0,
-      };
-    case "MoveZAxisToTargetPayload":
-      return {
-        commandId: "",
-        target: ZAxisTarget.None,
-        velocityMmPerSecond: 0,
-      };
-    case "MoveAxisToPositionPayload":
-      return { commandId: "", targetPositionMm: 0, velocityMmPerSecond: 0 };
-    case "JogPayload":
-      return { commandId: "", velocityMmPerSecond: 0, maxDurationMs: 0 };
-    case "ClearActuatorFaultPayload":
-      return { commandId: "", actuator: ActuatorId.None };
-    case "AxisSelectionPayload":
-      return { commandId: "", axisSelection: AxisSelection.None };
-  }
-};
-
-const normalizePayload = (
-  payloadTypeName: PayloadTypeName,
-  value: StructureRecord,
-): StructureRecord => ({
-  ...defaultPayload(payloadTypeName),
-  ...value,
-});
-
 const normalizeSubmitRequest = (
   value: StructureRecord,
 ): GlobalCommandSubmitRequest => ({
@@ -4082,7 +4029,9 @@ const normalizeSubmitRequest = (
   commandKind: numberValue(value.commandKind),
   clientId: stringValue(value.clientId),
   targetMode: numberValue(value.targetMode),
-  configuration: normalizeRunConfiguration(structureRecord(value.configuration)),
+  configuration: normalizeRunConfiguration(
+    structureRecord(value.configuration),
+  ),
   target: numberValue(value.target),
   targetPositionMm: numberValue(value.targetPositionMm),
   velocityMmPerSecond: numberValue(value.velocityMmPerSecond),
@@ -4227,9 +4176,7 @@ const structureValue = (value: unknown): unknown => {
 const cloneRecord = (value: StructureRecord): StructureRecord =>
   structureRecord(value);
 
-const commandStatusBufferRecord = (
-  status: CommandStatus,
-): StructureRecord => ({
+const commandStatusBufferRecord = (status: CommandStatus): StructureRecord => ({
   revision: status.revision,
   capacity: status.capacity,
   entries: status.entries.map((entry) => ({

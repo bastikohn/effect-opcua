@@ -308,8 +308,9 @@ describe("DemoFillingCell demo server", () => {
     expect(status.entries.map((entry) => numberValue(entry.sequence))).toEqual([
       2, 3,
     ]);
-    expect(status.entries.every((entry) => entry.state === CommandState.Rejected))
-      .toBe(true);
+    expect(
+      status.entries.every((entry) => entry.state === CommandState.Rejected),
+    ).toBe(true);
   });
 
   test("rejects duplicate retained command IDs defensively", async () => {
@@ -329,8 +330,9 @@ describe("DemoFillingCell demo server", () => {
     });
 
     const status = await readCommandStatus(activeSession);
-    expect(status.entries.filter((entry) => entry.commandId === commandId))
-      .toHaveLength(2);
+    expect(
+      status.entries.filter((entry) => entry.commandId === commandId),
+    ).toHaveLength(2);
     expect(status.entries.at(-1)).toMatchObject({
       commandId,
       state: CommandState.Rejected,
@@ -431,15 +433,18 @@ const writeSubmit = async (
 ) => {
   const configuration =
     value.configuration ??
-    (await session.constructExtensionObject(dataTypeNodeId("RunConfiguration"), {
-      productName: "",
-      targetFillVolumeMl: 0,
-      fillToleranceMl: 0,
-      pumpRateMlPerSecond: 0,
-      batchSize: 0,
-      xAxisSpeedMmPerSecond: 0,
-      zAxisSpeedMmPerSecond: 0,
-    }));
+    (await session.constructExtensionObject(
+      dataTypeNodeId("RunConfiguration"),
+      {
+        productName: "",
+        targetFillVolumeMl: 0,
+        fillToleranceMl: 0,
+        pumpRateMlPerSecond: 0,
+        batchSize: 0,
+        xAxisSpeedMmPerSecond: 0,
+        zAxisSpeedMmPerSecond: 0,
+      },
+    ));
   const submit = await session.constructExtensionObject(
     dataTypeNodeId("GlobalCommandSubmitRequest"),
     {

@@ -28,8 +28,9 @@ export class DemoMachineTelemetryCore extends Context.Service<
   DemoMachineTelemetryCore,
   DemoMachineTelemetryCoreService
 >()("@effect-opcua/demo-client/internal/DemoMachineTelemetryCore") {
-  static layerLive = (_options: DemoMachineOptions = {}) =>
-    Layer.effect(
+  static layerLive = (options: DemoMachineOptions = {}) => {
+    void options;
+    return Layer.effect(
       DemoMachineTelemetryCore,
       Effect.gen(function* () {
         const session = yield* OpcuaSession.OpcuaSession;
@@ -56,7 +57,12 @@ export class DemoMachineTelemetryCore extends Context.Service<
         yield* active.samples.pipe(
           Stream.runForEach((sample) =>
             sample._tag === "Value"
-              ? refreshSnapshot(session, snapshotRef, latestRevision, sample.value)
+              ? refreshSnapshot(
+                  session,
+                  snapshotRef,
+                  latestRevision,
+                  sample.value,
+                )
               : Effect.void,
           ),
           Effect.catch(() => Effect.void),
@@ -69,6 +75,7 @@ export class DemoMachineTelemetryCore extends Context.Service<
         });
       }),
     );
+  };
 }
 
 const readSnapshotFromSession = (session: OpcuaSession.OpcuaSession) =>

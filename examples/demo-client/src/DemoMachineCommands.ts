@@ -11,7 +11,10 @@ import type {
   OperatingModeInput,
   RunConfigurationInput,
 } from "./contract/commands.js";
-import type { DemoMachineCommandOptions, DemoMachineOptions } from "./contract/options.js";
+import type {
+  DemoMachineCommandOptions,
+  DemoMachineOptions,
+} from "./contract/options.js";
 import type { CommandStatusBuffer } from "./contract/command-status.js";
 import type { DemoMachineCommandCoreService } from "./internal/command-core.js";
 import { DemoMachineCommandCore } from "./internal/command-core.js";
@@ -131,7 +134,10 @@ export class DemoMachineCommands extends Context.Service<
       const withInput =
         <Tag extends DemoMachineCommand["_tag"], Input>(tag: Tag) =>
         (input: Input, options?: DemoMachineCommandOptions) =>
-          submit({ _tag: tag, ...(input as object) } as DemoMachineCommand, options);
+          submit(
+            { _tag: tag, ...(input as object) } as DemoMachineCommand,
+            options,
+          );
 
       return DemoMachineCommands.of({
         submit,
@@ -141,10 +147,7 @@ export class DemoMachineCommands extends Context.Service<
           setMode: (targetMode, options) =>
             submit({ _tag: "MachineSetMode", targetMode }, options),
           configure: (runConfiguration, options) =>
-            submit(
-              { _tag: "MachineConfigure", runConfiguration },
-              options,
-            ),
+            submit({ _tag: "MachineConfigure", runConfiguration }, options),
           home: noInput("MachineHome"),
           start: noInput("MachineStart"),
           pause: noInput("MachinePause"),
@@ -215,7 +218,10 @@ export class DemoMachineCommands extends Context.Service<
 export const submit = (
   command: DemoMachineCommand,
   options?: DemoMachineCommandOptions,
-) => Effect.flatMap(DemoMachineCommands, (commands) => commands.submit(command, options));
+) =>
+  Effect.flatMap(DemoMachineCommands, (commands) =>
+    commands.submit(command, options),
+  );
 
 export const readCommandStatus = Effect.flatMap(
   DemoMachineCommands,

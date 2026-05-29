@@ -429,14 +429,14 @@ ClearCompleted
 
 ```ts
 type RunConfiguration = {
-  productName: string
-  targetFillVolumeMl: number
-  fillToleranceMl: number
-  pumpRateMlPerSecond: number
-  batchSize: number
-  xAxisSpeedMmPerSecond: number
-  zAxisSpeedMmPerSecond: number
-}
+  productName: string;
+  targetFillVolumeMl: number;
+  fillToleranceMl: number;
+  pumpRateMlPerSecond: number;
+  batchSize: number;
+  xAxisSpeedMmPerSecond: number;
+  zAxisSpeedMmPerSecond: number;
+};
 ```
 
 Semantics:
@@ -1170,7 +1170,7 @@ startDemoOpcuaServer({
   port: 4334,
   scenario: "Default",
   simulationSpeed: 1,
-})
+});
 ```
 
 ---
