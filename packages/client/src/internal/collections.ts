@@ -8,14 +8,3 @@ export const chunksOf = <A>(
   }
   return chunks;
 };
-
-export const keyedResults = <A extends { readonly key: string }, B>(
-  entries: ReadonlyArray<A>,
-  results: ReadonlyArray<B>,
-) => {
-  const out: Record<string, B> = {};
-  for (let index = 0; index < entries.length; index++) {
-    out[entries[index]!.key] = results[index]!;
-  }
-  return out;
-};

@@ -27,6 +27,108 @@ describe("keyed batch APIs", () => {
     expect(result.calls.calls).toHaveLength(0);
   });
 
+  it("validates option shapes consistently across batch operations", async () => {
+    const A = Opcua.variable({
+      nodeId: "ns=1;s=Batch.Options.A",
+      access: "readWrite",
+    });
+    const Echo = Opcua.method({
+      objectId: "ns=1;s=Object",
+      methodId: "ns=1;s=Method",
+      input: { Value: Opcua.arg({ codec: Opcua.schema(Schema.Number) }) },
+      output: { Value: Opcua.arg({ codec: Opcua.schema(Schema.Number) }) },
+    });
+
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* makeFakeSession();
+
+          const topLevel = [
+            yield* fake.session
+              .readMany({ a: A } as const, { nope: true } as never)
+              .pipe(Effect.flip),
+            yield* fake.session
+              .writeMany({ a: [A, 1] } as const, { nope: true } as never)
+              .pipe(Effect.flip),
+            yield* fake.session
+              .callMany(
+                { a: [Echo, { Value: 1 }] } as const,
+                { nope: true } as never,
+              )
+              .pipe(Effect.flip),
+          ];
+
+          const serviceKey = [
+            yield* fake.session
+              .readMany(
+                { a: A } as const,
+                { validation: "none", service: { nope: 1 } } as never,
+              )
+              .pipe(Effect.flip),
+            yield* fake.session
+              .writeMany(
+                { a: [A, 1] } as const,
+                { service: { nope: 1 } } as never,
+              )
+              .pipe(Effect.flip),
+            yield* fake.session
+              .callMany(
+                { a: [Echo, { Value: 1 }] } as const,
+                { service: { nope: 1 } } as never,
+              )
+              .pipe(Effect.flip),
+          ];
+
+          const serviceValue = [
+            yield* fake.session
+              .readMany(
+                { a: A } as const,
+                {
+                  validation: "none",
+                  service: { maxConcurrentRequests: 0 },
+                } as never,
+              )
+              .pipe(Effect.flip),
+            yield* fake.session
+              .writeMany(
+                { a: [A, 1] } as const,
+                { service: { maxConcurrentRequests: 0 } } as never,
+              )
+              .pipe(Effect.flip),
+            yield* fake.session
+              .callMany(
+                { a: [Echo, { Value: 1 }] } as const,
+                { service: { maxConcurrentRequests: 0 } } as never,
+              )
+              .pipe(Effect.flip),
+          ];
+
+          return { topLevel, serviceKey, serviceValue, calls: fake.calls };
+        }),
+      ),
+    );
+
+    expect(configurationCauses(result.topLevel)).toEqual([
+      "unsupported option: nope",
+      "unsupported option: nope",
+      "unsupported option: nope",
+    ]);
+    expect(configurationCauses(result.serviceKey)).toEqual([
+      "unsupported service option: nope",
+      "unsupported service option: nope",
+      "unsupported service option: nope",
+    ]);
+    expect(configurationCauses(result.serviceValue)).toEqual([
+      "maxConcurrentRequests must be a positive integer",
+      "maxConcurrentRequests must be a positive integer",
+      "maxConcurrentRequests must be a positive integer",
+    ]);
+    expect(result.calls.valueReads).toHaveLength(0);
+    expect(result.calls.writes).toHaveLength(0);
+    expect(result.calls.calls).toHaveLength(0);
+  });
+
   it("reads keyed definitions without validation and preserves key mapping", async () => {
     const Temperature = Opcua.variable({
       nodeId: "ns=1;s=Batch.Read.A",
@@ -272,5 +374,13 @@ describe("keyed batch APIs", () => {
   });
 });
 
-const isConfigurationError = (error: unknown) =>
-  isOpcuaError(error) && error.reason._tag === "Configuration";
+const isConfigurationError = (
+  error: unknown,
+): error is {
+  readonly reason: { readonly _tag: "Configuration"; readonly cause?: unknown };
+} => isOpcuaError(error) && error.reason._tag === "Configuration";
+
+const configurationCauses = (errors: ReadonlyArray<unknown>) =>
+  errors.map((error) =>
+    isConfigurationError(error) ? error.reason.cause : "not configuration",
+  );
