@@ -23,35 +23,29 @@ export const loadConfig = (
     const loaded = yield* Effect.tryPromise({
       try: () => unrun({ path: resolved }),
       catch: (cause) =>
-        codegenError(
-          { _tag: "ConfigLoadFailed", path: resolved },
-          [
-            {
-              severity: "error",
-              code: "config.loadFailed",
-              message: `Failed to load config at ${resolved}`,
-              file: resolved,
-              cause,
-            },
-          ],
-        ),
+        codegenError({ _tag: "ConfigLoadFailed", path: resolved }, [
+          {
+            severity: "error",
+            code: "config.loadFailed",
+            message: `Failed to load config at ${resolved}`,
+            file: resolved,
+            cause,
+          },
+        ]),
     });
     const module = loaded.module as unknown;
     const exportedConfig =
       isRecord(module) && "default" in module ? module.default : module;
     if (exportedConfig === undefined) {
       return yield* Effect.fail(
-        codegenError(
-          { _tag: "ConfigLoadFailed", path: resolved },
-          [
-            {
-              severity: "error",
-              code: "config.loadFailed",
-              message: "Config module must have a default export",
-              file: resolved,
-            },
-          ],
-        ),
+        codegenError({ _tag: "ConfigLoadFailed", path: resolved }, [
+          {
+            severity: "error",
+            code: "config.loadFailed",
+            message: "Config module must have a default export",
+            file: resolved,
+          },
+        ]),
       );
     }
     return yield* normalizeConfig(exportedConfig);
@@ -65,12 +59,13 @@ export const normalizeConfig = (
       return yield* Effect.fail(invalidConfig("Config must be an object"));
     }
     const unsupported = unsupportedKeys(config, [
-      "connection",
+      "endpointUrl",
+      "clientOptions",
+      "userIdentity",
       "outputDir",
       "roots",
       "exclude",
       "discovery",
-      "naming",
       "diagnostics",
     ]);
     if (unsupported.length > 0) {
@@ -79,17 +74,9 @@ export const normalizeConfig = (
       );
     }
 
-    const connection = config.connection;
-    if (!isRecord(connection)) {
-      return yield* Effect.fail(
-        invalidConfig("Missing connection.endpointUrl"),
-      );
-    }
-    const endpointUrl = connection.endpointUrl;
+    const endpointUrl = config.endpointUrl;
     if (typeof endpointUrl !== "string" || endpointUrl.trim() === "") {
-      return yield* Effect.fail(
-        invalidConfig("Missing connection.endpointUrl"),
-      );
+      return yield* Effect.fail(invalidConfig("Missing endpointUrl"));
     }
 
     const outputDir = config.outputDir;
@@ -103,20 +90,6 @@ export const normalizeConfig = (
       );
     }
     const roots = yield* Effect.forEach(config.roots, normalizeRoot);
-    const naming = normalizeNaming(config.naming);
-    if (naming instanceof Error) {
-      return yield* Effect.fail(invalidConfig(naming.message));
-    }
-    if (roots.length > 1 && naming.rootStripping) {
-      const missing = roots.find((root) => !root.exportPrefix);
-      if (missing) {
-        return yield* Effect.fail(
-          invalidConfig(
-            "Multiple root configs with rootStripping enabled must provide exportPrefix",
-          ),
-        );
-      }
-    }
 
     const excludeInput = config.exclude ?? [];
     if (!Array.isArray(excludeInput)) {
@@ -133,20 +106,17 @@ export const normalizeConfig = (
     }
 
     return {
-      connection: {
-        endpointUrl,
-        clientOptions: connection.clientOptions as
-          | NormalizedCodegenConfig["connection"]["clientOptions"]
-          | undefined,
-        userIdentity: connection.userIdentity as
-          | NormalizedCodegenConfig["connection"]["userIdentity"]
-          | undefined,
-      },
+      endpointUrl,
+      clientOptions: config.clientOptions as
+        | NormalizedCodegenConfig["clientOptions"]
+        | undefined,
+      userIdentity: config.userIdentity as
+        | NormalizedCodegenConfig["userIdentity"]
+        | undefined,
       outputDir,
       roots,
       exclude,
       discovery,
-      naming,
       diagnostics,
     };
   });
@@ -158,11 +128,20 @@ const normalizeRoot = (
     if (!isRecord(root)) {
       return yield* Effect.fail(invalidConfig("Each root must be an object"));
     }
+    const unsupported = unsupportedKeys(root, [
+      "path",
+      "nodeId",
+      "exportPrefix",
+    ]);
+    if (unsupported.length > 0) {
+      return yield* Effect.fail(
+        invalidConfig(`Unsupported root keys: ${unsupported.join(", ")}`),
+      );
+    }
     const value = root as RootConfig;
     const descriptors = [
       value.path !== undefined,
       value.nodeId !== undefined,
-      value.browsePath !== undefined,
     ].filter(Boolean).length;
     if (descriptors !== 1) {
       return yield* Effect.fail(
@@ -180,26 +159,21 @@ const normalizeRoot = (
     }
     if (value.path !== undefined) {
       const path = normalizePath(value.path, "root.path");
-      if (path instanceof Error) return yield* Effect.fail(invalidConfig(path.message));
+      if (path instanceof Error)
+        return yield* Effect.fail(invalidConfig(path.message));
       return { path, exportPrefix: value.exportPrefix };
-    }
-    if (value.browsePath !== undefined) {
-      if (
-        typeof value.browsePath !== "string" ||
-        value.browsePath.trim() === ""
-      ) {
-        return yield* Effect.fail(
-          invalidConfig("root.browsePath must be a non-empty string"),
-        );
-      }
-      return {
-        path: splitLegacyBrowsePath(value.browsePath),
-        exportPrefix: value.exportPrefix,
-      };
     }
     if (typeof value.nodeId !== "string" || value.nodeId.trim() === "") {
       return yield* Effect.fail(
         invalidConfig("root.nodeId must be a non-empty string"),
+      );
+    }
+    if (
+      typeof value.exportPrefix !== "string" ||
+      value.exportPrefix.trim() === ""
+    ) {
+      return yield* Effect.fail(
+        invalidConfig("root.exportPrefix is required for nodeId roots"),
       );
     }
     return { nodeId: value.nodeId, exportPrefix: value.exportPrefix };
@@ -214,52 +188,29 @@ const normalizeExcludeRule = (
         invalidConfig("Each exclude rule must be an object"),
       );
     }
+    const unsupported = unsupportedKeys(rule, ["path", "mode"]);
+    if (unsupported.length > 0) {
+      return yield* Effect.fail(
+        invalidConfig(`Unsupported exclude keys: ${unsupported.join(", ")}`),
+      );
+    }
     const value = rule as ExcludeRuleConfig;
     if (value.mode !== "prune" && value.mode !== "omit") {
       return yield* Effect.fail(
         invalidConfig('Each exclude rule must specify mode "prune" or "omit"'),
       );
     }
-    const descriptors = [
-      value.path !== undefined,
-      value.pathPattern !== undefined,
-      value.browsePath !== undefined,
-    ].filter(Boolean).length;
-    if (descriptors !== 1) {
+    if (value.path === undefined) {
       return yield* Effect.fail(
-        invalidConfig(
-          "Each exclude rule must specify exactly one of path or pathPattern",
-        ),
+        invalidConfig("Each exclude rule must specify path"),
       );
     }
-    if (value.path !== undefined) {
-      const path = normalizePath(value.path, "exclude.path");
-      if (path instanceof Error) return yield* Effect.fail(invalidConfig(path.message));
-      return { _tag: "Path", path, mode: value.mode };
-    }
-    if (value.pathPattern !== undefined) {
-      const pathPattern = normalizePathPattern(value.pathPattern);
-      if (pathPattern instanceof Error) {
-        return yield* Effect.fail(invalidConfig(pathPattern.message));
-      }
-      return { _tag: "PathPattern", pathPattern, mode: value.mode };
-    }
-    const browsePath = value.browsePath;
-    if (typeof browsePath === "string") {
-      if (browsePath.trim() === "") {
-        return yield* Effect.fail(
-          invalidConfig("exclude browsePath strings must not be empty"),
-        );
-      }
-      return {
-        _tag: "Path",
-        path: splitLegacyBrowsePath(browsePath),
-        mode: value.mode,
-      };
-    }
-    return yield* Effect.fail(
-      invalidConfig("exclude RegExp browsePath is no longer supported"),
-    );
+    const path = normalizeExcludePath(value.path);
+    if (path instanceof Error)
+      return yield* Effect.fail(invalidConfig(path.message));
+    return path.some((segment) => segment instanceof RegExp || segment === "**")
+      ? { _tag: "PathPattern", pathPattern: path, mode: value.mode }
+      : { _tag: "Path", path: path as readonly string[], mode: value.mode };
   });
 
 const normalizeDiscovery = (
@@ -267,60 +218,52 @@ const normalizeDiscovery = (
 ): NormalizedCodegenConfig["discovery"] | Error => {
   if (value === undefined) {
     return {
-      rootBase: "objectsFolder",
-      includeVariableChildren: false,
       onBrowseFailure: "warn",
     };
   }
   if (!isRecord(value)) return new Error("discovery must be an object");
-  const rootBase = value.rootBase ?? "objectsFolder";
-  if (rootBase !== "objectsFolder") {
-    return new Error('discovery.rootBase must be "objectsFolder"');
-  }
-  const includeVariableChildren = value.includeVariableChildren ?? false;
-  if (typeof includeVariableChildren !== "boolean") {
-    return new Error("discovery.includeVariableChildren must be a boolean");
+  const unsupported = unsupportedKeys(value, ["onBrowseFailure"]);
+  if (unsupported.length > 0) {
+    return new Error(`Unsupported discovery keys: ${unsupported.join(", ")}`);
   }
   const onBrowseFailure = value.onBrowseFailure ?? "warn";
   if (onBrowseFailure !== "warn" && onBrowseFailure !== "fail") {
     return new Error('discovery.onBrowseFailure must be "warn" or "fail"');
   }
-  return { rootBase, includeVariableChildren, onBrowseFailure };
-};
-
-const normalizeNaming = (
-  value: unknown,
-): NormalizedCodegenConfig["naming"] | Error => {
-  if (value === undefined) {
-    return { rootStripping: true, case: "pascal" as const };
-  }
-  if (!isRecord(value)) return new Error("naming must be an object");
-  const rootStripping = value.rootStripping ?? true;
-  if (typeof rootStripping !== "boolean") {
-    return new Error("naming.rootStripping must be a boolean");
-  }
-  const casing = value.case ?? "pascal";
-  if (casing !== "pascal") {
-    return new Error('naming.case must be "pascal"');
-  }
-  return { rootStripping, case: "pascal" };
+  return { onBrowseFailure };
 };
 
 const normalizeDiagnostics = (
   value: unknown,
 ): NormalizedCodegenConfig["diagnostics"] | Error => {
   if (value === undefined) {
-    return { warningsAsErrors: false };
+    return { warningsAsErrors: false, unsupportedTypes: "error" };
   }
   if (!isRecord(value)) return new Error("diagnostics must be an object");
+  const unsupported = unsupportedKeys(value, [
+    "warningsAsErrors",
+    "unsupportedTypes",
+  ]);
+  if (unsupported.length > 0) {
+    return new Error(`Unsupported diagnostics keys: ${unsupported.join(", ")}`);
+  }
   const warningsAsErrors = value.warningsAsErrors ?? false;
   if (typeof warningsAsErrors !== "boolean") {
     return new Error("diagnostics.warningsAsErrors must be a boolean");
   }
-  return { warningsAsErrors };
+  const unsupportedTypes = value.unsupportedTypes ?? "error";
+  if (unsupportedTypes !== "error" && unsupportedTypes !== "warn-dynamic") {
+    return new Error(
+      'diagnostics.unsupportedTypes must be "error" or "warn-dynamic"',
+    );
+  }
+  return { warningsAsErrors, unsupportedTypes };
 };
 
-const normalizePath = (value: unknown, label: string): readonly string[] | Error => {
+const normalizePath = (
+  value: unknown,
+  label: string,
+): readonly string[] | Error => {
   if (!Array.isArray(value) || value.length === 0) {
     return new Error(`${label} must be a non-empty segment array`);
   }
@@ -334,29 +277,25 @@ const normalizePath = (value: unknown, label: string): readonly string[] | Error
   return [...value];
 };
 
-const normalizePathPattern = (
+const normalizeExcludePath = (
   value: unknown,
 ): readonly PathPatternSegment[] | Error => {
   if (!Array.isArray(value) || value.length === 0) {
-    return new Error("exclude.pathPattern must be a non-empty segment array");
+    return new Error("exclude.path must be a non-empty segment array");
   }
   if (
     !value.every(
       (segment) =>
-        segment === "**" ||
         segment instanceof RegExp ||
         (typeof segment === "string" && segment.trim() !== ""),
     )
   ) {
     return new Error(
-      'exclude.pathPattern segments must be non-empty strings, RegExp, or "**"',
+      'exclude.path segments must be non-empty strings, RegExp, or "**"',
     );
   }
   return [...value];
 };
-
-const splitLegacyBrowsePath = (browsePath: string) =>
-  browsePath.split(".").filter((segment) => segment.length > 0);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);

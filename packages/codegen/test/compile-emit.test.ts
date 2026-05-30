@@ -5,6 +5,7 @@ import { compile } from "../src/compile.js";
 import { normalizeConfig } from "../src/config.js";
 import { emit } from "../src/emit.js";
 import type {
+  CodegenConfig,
   DiscoveredNode,
   DiscoveryModel,
   NodeKey,
@@ -104,7 +105,7 @@ describe("compile and emit", () => {
       "message: Schema.optional(Schema.String)",
     );
     expect(files["variables.ts"]).toContain(
-      "Submit: Opcua.variable({\n    nodeId: NodeIds.Commands.Submit,\n    codec: Structures.CommandPayload,\n    access: \"readWrite\",",
+      'Submit: Opcua.variable({\n    nodeId: NodeIds.Commands.Submit,\n    codec: Structures.CommandPayload,\n    access: "readWrite",',
     );
   });
 
@@ -170,16 +171,153 @@ describe("compile and emit", () => {
         expect.objectContaining({ nodeId: "ns=2;s=PLC.Revision" }),
       ]),
     );
+
+    const files = Object.fromEntries(
+      emit(model).map((file) => [file.path, file.contents]),
+    );
+    expect(files["variables.ts"]).toContain(
+      "export const Revision = Opcua.variable({",
+    );
+    expect(files["variables.ts"]).not.toContain("}) as const;");
+  });
+
+  it("fails on unsupported variable data types by default", async () => {
+    await expect(
+      compileFixture([
+        objectNode({
+          key: "root",
+          nodeId: "ns=2;s=PLC",
+          browseName: "PLC",
+          path: ["PLC"],
+        }),
+        variableNode({
+          key: "unknown",
+          nodeId: "ns=2;s=PLC.Unknown",
+          browseName: "Unknown",
+          path: ["PLC", "Unknown"],
+          dataTypeNodeId: "ns=2;i=9001",
+        }),
+      ]),
+    ).rejects.toMatchObject({
+      _tag: "CodegenError",
+      issues: expect.arrayContaining([
+        expect.objectContaining({
+          code: "datatype.definitionMissing",
+          severity: "error",
+        }),
+      ]),
+    });
+  });
+
+  it("allows explicit dynamic fallback for unsupported variable data types", async () => {
+    const model = await compileFixture(
+      [
+        objectNode({
+          key: "root",
+          nodeId: "ns=2;s=PLC",
+          browseName: "PLC",
+          path: ["PLC"],
+        }),
+        variableNode({
+          key: "unknown",
+          nodeId: "ns=2;s=PLC.Unknown",
+          browseName: "Unknown",
+          path: ["PLC", "Unknown"],
+          dataTypeNodeId: "ns=2;i=9001",
+        }),
+      ],
+      { diagnostics: { unsupportedTypes: "warn-dynamic" } },
+    );
+
+    expect(model.variables).toMatchObject([
+      {
+        generatedPath: ["Unknown"],
+        codec: { _tag: "Dynamic" },
+      },
+    ]);
+    expect(model.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "datatype.definitionMissing",
+          severity: "warning",
+        }),
+      ]),
+    );
+  });
+
+  it("fails when a generated variable path is both branch and leaf", async () => {
+    await expect(
+      compileFixture([
+        objectNode({
+          key: "root",
+          nodeId: "ns=2;s=PLC",
+          browseName: "PLC",
+          path: ["PLC"],
+        }),
+        variableNode({
+          key: "parent",
+          nodeId: "ns=2;s=PLC.Commands",
+          browseName: "Commands",
+          path: ["PLC", "Commands"],
+          dataTypeNodeId: "i=1",
+        }),
+        variableNode({
+          key: "child",
+          nodeId: "ns=2;s=PLC.Commands.Submit",
+          browseName: "Submit",
+          path: ["PLC", "Commands", "Submit"],
+          dataTypeNodeId: "i=1",
+        }),
+      ]),
+    ).rejects.toMatchObject({
+      _tag: "CodegenError",
+      issues: expect.arrayContaining([
+        expect.objectContaining({
+          code: "path.branchLeafCollision",
+        }),
+      ]),
+    });
+  });
+
+  it("uses user access level as the effective generated access", async () => {
+    const model = await compileFixture([
+      objectNode({
+        key: "root",
+        nodeId: "ns=2;s=PLC",
+        browseName: "PLC",
+        path: ["PLC"],
+      }),
+      variableNode({
+        key: "restricted",
+        nodeId: "ns=2;s=PLC.Restricted",
+        browseName: "Restricted",
+        path: ["PLC", "Restricted"],
+        dataTypeNodeId: "i=1",
+        accessLevel: { readable: true, writable: true },
+        userAccessLevel: { readable: true, writable: false },
+      }),
+    ]);
+
+    expect(model.variables).toMatchObject([
+      {
+        generatedPath: ["Restricted"],
+        access: "read",
+      },
+    ]);
   });
 });
 
-const compileFixture = async (nodes: readonly DiscoveredNode[]) =>
+const compileFixture = async (
+  nodes: readonly DiscoveredNode[],
+  configOverrides: Partial<CodegenConfig> = {},
+) =>
   Effect.runPromise(
     Effect.gen(function* () {
       const config = yield* normalizeConfig({
-        connection: { endpointUrl: "opc.tcp://fixture.invalid:4840" },
+        endpointUrl: "opc.tcp://fixture.invalid:4840",
         outputDir: "/tmp/effect-opcua-codegen-fixture",
         roots: [{ path: ["PLC"] }],
+        ...configOverrides,
       });
       return yield* compile(config, {
         roots: [{ rootIndex: 0, nodeId: "ns=2;s=PLC", path: ["PLC"] }],

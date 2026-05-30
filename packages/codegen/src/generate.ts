@@ -1,15 +1,13 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { Effect, Layer, Scope } from "effect";
-import { OpcuaClient, OpcuaSession } from "@effect-opcua/client";
+import { Effect, Scope } from "effect";
 import type { OpcuaError } from "@effect-opcua/client/OpcuaError";
 
-import { compile } from "./compile.js";
 import { normalizeConfig } from "./config.js";
-import { enforceIssuePolicy, issue, sortIssues } from "./diagnostics.js";
-import { discover } from "./discover.js";
-import { emit, generatedHeader } from "./emit.js";
+import { issue, sortIssues } from "./diagnostics.js";
+import { generatedHeader } from "./emit.js";
 import { codegenError } from "./errors.js";
+import { planFromServer } from "./plan.js";
 import type {
   CheckResult,
   CodegenConfig,
@@ -51,16 +49,14 @@ export const generateNormalized = (
   Scope.Scope
 > =>
   Effect.gen(function* () {
-    const model = yield* buildModel(config);
-    const policyIssues = yield* enforceIssuePolicy(
-      config.diagnostics.warningsAsErrors,
-      model.issues,
+    const plan = yield* planFromServer(config);
+    const writeResult = yield* writeGeneratedFiles(
+      config.outputDir,
+      plan.files,
     );
-    const files = emit(model);
-    const writeResult = yield* writeGeneratedFiles(config.outputDir, files);
-    const issues = sortIssues([...policyIssues, ...writeResult.issues]);
+    const issues = sortIssues([...plan.issues, ...writeResult.issues]);
     return {
-      files,
+      files: plan.files,
       issues,
       writtenFiles: writeResult.writtenFiles,
     };
@@ -74,45 +70,17 @@ export const checkNormalized = (
   Scope.Scope
 > =>
   Effect.gen(function* () {
-    const model = yield* buildModel(config);
-    const policyIssues = yield* enforceIssuePolicy(
-      config.diagnostics.warningsAsErrors,
-      model.issues,
-    );
-    const files = emit(model);
-    const checked = yield* checkGeneratedFiles(config.outputDir, files);
-    const issues = sortIssues([...policyIssues, ...checked.issues]);
+    const plan = yield* planFromServer(config);
+    const checked = yield* checkGeneratedFiles(config.outputDir, plan.files);
+    const issues = sortIssues([...plan.issues, ...checked.issues]);
     return {
-      files,
+      files: plan.files,
       issues,
       staleFiles: checked.staleFiles,
       missingFiles: checked.missingFiles,
       ok: checked.staleFiles.length === 0 && checked.missingFiles.length === 0,
     };
   });
-
-const buildModel = (
-  config: NormalizedCodegenConfig,
-): Effect.Effect<
-  import("./types.js").CodegenModel,
-  import("./errors.js").CodegenError | OpcuaError,
-  Scope.Scope
-> => {
-  const layer = OpcuaSession.layer({
-    userIdentity: config.connection.userIdentity,
-  }).pipe(
-    Layer.provideMerge(
-      OpcuaClient.layer({
-        endpointUrl: config.connection.endpointUrl,
-        clientOptions: config.connection.clientOptions,
-      }),
-    ),
-  );
-  return Effect.gen(function* () {
-    const discovery = yield* discover(config);
-    return yield* compile(config, discovery);
-  }).pipe(Effect.provide(layer));
-};
 
 export const writeGeneratedFiles = (
   outputDir: string,
@@ -130,18 +98,15 @@ export const writeGeneratedFiles = (
       yield* Effect.tryPromise({
         try: () => writeFile(path, file.contents, "utf8"),
         catch: (cause) =>
-          codegenError(
-            { _tag: "Filesystem" },
-            [
-              {
-                severity: "error",
-                code: "file.writeFailed",
-                message: `Failed to write ${path}`,
-                file: path,
-                cause,
-              },
-            ],
-          ),
+          codegenError({ _tag: "Filesystem" }, [
+            {
+              severity: "error",
+              code: "file.writeFailed",
+              message: `Failed to write ${path}`,
+              file: path,
+              cause,
+            },
+          ]),
       });
       writtenFiles.push(path);
       issues.push(
@@ -185,18 +150,15 @@ const mkdirEffect = (path: string) =>
   Effect.tryPromise({
     try: () => mkdir(path, { recursive: true }),
     catch: (cause) =>
-      codegenError(
-        { _tag: "Filesystem" },
-        [
-          {
-            severity: "error",
-            code: "file.mkdirFailed",
-            message: `Failed to create directory ${path}`,
-            file: path,
-            cause,
-          },
-        ],
-      ),
+      codegenError({ _tag: "Filesystem" }, [
+        {
+          severity: "error",
+          code: "file.mkdirFailed",
+          message: `Failed to create directory ${path}`,
+          file: path,
+          cause,
+        },
+      ]),
   });
 
 const assertGeneratedOwnership = (path: string) =>
@@ -204,17 +166,14 @@ const assertGeneratedOwnership = (path: string) =>
     const existing = yield* readExistingFile(path);
     if (existing !== undefined && !existing.startsWith(generatedHeader)) {
       return yield* Effect.fail(
-        codegenError(
-          { _tag: "OutputOwnershipViolation" },
-          [
-            {
-              severity: "error",
-              code: "file.ownershipViolation",
-              message: `Refusing to overwrite non-generated file ${path}`,
-              file: path,
-            },
-          ],
-        ),
+        codegenError({ _tag: "OutputOwnershipViolation" }, [
+          {
+            severity: "error",
+            code: "file.ownershipViolation",
+            message: `Refusing to overwrite non-generated file ${path}`,
+            file: path,
+          },
+        ]),
       );
     }
   });
@@ -230,18 +189,15 @@ const readExistingFile = (path: string) =>
       }
     },
     catch: (cause) =>
-      codegenError(
-        { _tag: "Filesystem" },
-        [
-          {
-            severity: "error",
-            code: "file.readFailed",
-            message: `Failed to read ${path}`,
-            file: path,
-            cause,
-          },
-        ],
-      ),
+      codegenError({ _tag: "Filesystem" }, [
+        {
+          severity: "error",
+          code: "file.readFailed",
+          message: `Failed to read ${path}`,
+          file: path,
+          cause,
+        },
+      ]),
   });
 
 const isNodeError = (cause: unknown): cause is NodeJS.ErrnoException =>

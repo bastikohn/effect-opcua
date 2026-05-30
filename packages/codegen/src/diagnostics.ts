@@ -1,48 +1,25 @@
 import { Effect } from "effect";
 
 import { codegenError } from "./errors.js";
+import { issueDefinitions, type CodegenIssueCode } from "./issue-codes.js";
 import type { CodegenIssue } from "./types.js";
 
-const warningCodes = new Set([
-  "browse.failure",
-  "branch.pruned",
-  "node.omitted",
-  "node.multiPath",
-  "variable.writeOnlySkipped",
-  "codec.dynamicFallback",
-  "codec.unsupportedArrayRank",
-  "datatype.definitionMissing",
-  "datatype.definitionUnsupported",
-  "datatype.definitionFailure",
-  "datatype.unionUnsupported",
-  "enum.emptyName",
-  "enum.nameCollision",
-  "enum.memberEmptyName",
-  "enum.memberNameCollision",
-  "structure.emptyName",
-  "structure.nameCollision",
-  "structure.fieldEmptyName",
-  "structure.fieldNameCollision",
-  "structure.unsupportedField",
-  "structure.recursiveField",
-]);
-
 export const issue = (
-  code: string,
+  code: CodegenIssueCode,
   input: Omit<CodegenIssue, "severity" | "code"> & {
     readonly severity?: CodegenIssue["severity"];
   },
 ): CodegenIssue => {
   const { severity, ...rest } = input;
   return {
-    severity: severity ?? (warningCodes.has(code) ? "warning" : "info"),
+    severity: severity ?? issueDefinitions[code].severity,
     code,
     ...rest,
   };
 };
 
 export const errorIssue = (
-  code: string,
+  code: CodegenIssueCode,
   input: Omit<CodegenIssue, "severity" | "code">,
 ): CodegenIssue => issue(code, { ...input, severity: "error" });
 
@@ -71,7 +48,7 @@ export const enforceIssuePolicy = (
   const promoted = warningsAsErrors
     ? issues.map((item) =>
         item.severity === "warning"
-          ? ({ ...item, severity: "error" as const })
+          ? { ...item, severity: "error" as const }
           : item,
       )
     : issues;

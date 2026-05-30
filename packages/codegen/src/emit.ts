@@ -84,12 +84,7 @@ const emitTree = (node: TreeNode, depth: number): string => {
 
 const emitEnums = (enums: readonly EnumDefinition[]) => {
   if (enums.length === 0) return emitEmptyModule();
-  const lines = [
-    generatedHeader,
-    "",
-    'import { Schema } from "effect";',
-    "",
-  ];
+  const lines = [generatedHeader, "", 'import { Schema } from "effect";', ""];
   for (const item of [...enums].sort((left, right) =>
     left.name.localeCompare(right.name),
   )) {
@@ -121,10 +116,16 @@ const emitStructures = (structures: readonly StructureDefinition[]) => {
     'import { Opcua } from "@effect-opcua/client";',
     'import { Schema } from "effect";',
     "",
-    'import * as Enums from "./enums.js";',
     'import * as NodeIds from "./nodeIds.js";',
-    "",
   ];
+  if (
+    structures.some((structure) =>
+      structure.fields.some((field) => schemaUsesEnum(field.schema)),
+    )
+  ) {
+    lines.push('import * as Enums from "./enums.js";');
+  }
+  lines.push("");
   for (const item of structures) {
     lines.push(`export const ${item.name}Schema = Schema.Struct({`);
     for (const field of item.fields) {
@@ -154,20 +155,29 @@ const emitVariables = (variables: readonly VariableDefinition[]) => {
     generatedHeader,
     "",
     'import { Opcua } from "@effect-opcua/client";',
-    'import { Schema } from "effect";',
-    "",
-    'import * as Enums from "./enums.js";',
     'import * as NodeIds from "./nodeIds.js";',
-    'import * as Structures from "./structures.js";',
-    "",
   ];
+  if (variables.some((variable) => codecUsesSchema(variable.codec))) {
+    lines.push('import { Schema } from "effect";');
+  }
+  if (variables.some((variable) => codecUsesEnum(variable.codec))) {
+    lines.push('import * as Enums from "./enums.js";');
+  }
+  if (variables.some((variable) => codecUsesStructure(variable.codec))) {
+    lines.push('import * as Structures from "./structures.js";');
+  }
+  lines.push("");
   if (variables.length === 0) {
     lines.push("export {};", "");
     return lines.join("\n");
   }
   const root = variableTree(variables);
   for (const [key, child] of [...root.children.entries()].sort(keySort)) {
-    lines.push(`export const ${key} = ${emitVariableTree(child, 0)} as const;`);
+    const assertion =
+      child.variable && child.children.size === 0 ? "" : " as const";
+    lines.push(
+      `export const ${key} = ${emitVariableTree(child, 0)}${assertion};`,
+    );
     lines.push("");
   }
   return lines.join("\n");
@@ -248,6 +258,28 @@ const emitFieldSchema = (schema: SchemaExpression): string => {
   }
 };
 
+const schemaUsesEnum = (schema: SchemaExpression): boolean => {
+  switch (schema._tag) {
+    case "Enum":
+      return true;
+    case "Array":
+      return schemaUsesEnum(schema.item);
+    default:
+      return false;
+  }
+};
+
+const codecUsesSchema = (codec: VariableCodecExpression): boolean =>
+  codec._tag === "Schema" ||
+  codec._tag === "SchemaArray" ||
+  codec._tag === "EnumArray";
+
+const codecUsesEnum = (codec: VariableCodecExpression): boolean =>
+  codec._tag === "Enum" || codec._tag === "EnumArray";
+
+const codecUsesStructure = (codec: VariableCodecExpression): boolean =>
+  codec._tag === "Structure" || codec._tag === "StructureArray";
+
 const emitEmptyModule = () =>
   [generatedHeader, "", "export {};", ""].join("\n");
 
@@ -263,7 +295,10 @@ const emitIndex = () =>
   ].join("\n");
 
 const pathSort = <
-  T extends { readonly generatedPath: readonly string[]; readonly path?: readonly string[] },
+  T extends {
+    readonly generatedPath: readonly string[];
+    readonly path?: readonly string[];
+  },
 >(
   left: T,
   right: T,

@@ -22,12 +22,10 @@ dot.
 import { defineConfig } from "@effect-opcua/codegen";
 
 export default defineConfig({
-  connection: {
-    endpointUrl: "opc.tcp://localhost:4840",
-    clientOptions: { endpointMustExist: false },
-    // Optional, for servers that require a session login.
-    // userIdentity: { type: 1, userName: "user", password: "secret" },
-  },
+  endpointUrl: "opc.tcp://localhost:4840",
+  clientOptions: { endpointMustExist: false },
+  // Optional, for servers that require a session login.
+  // userIdentity: { type: 1, userName: "user", password: "secret" },
   outputDir: "src/generated",
   roots: [{ path: ["DemoFillingCell"] }],
   exclude: [
@@ -36,7 +34,7 @@ export default defineConfig({
       mode: "prune",
     },
     {
-      pathPattern: ["DemoFillingCell", "**", /^InterfaceVersion/],
+      path: ["DemoFillingCell", "**", /^InterfaceVersion/],
       mode: "omit",
     },
   ],
@@ -44,10 +42,8 @@ export default defineConfig({
 ```
 
 `mode: "prune"` removes a node and its children. `mode: "omit"` removes the
-matched node from output but still allows browsing through it.
-
-Legacy `browsePath: "A.B.C"` strings are still accepted, but new configs should
-use `path: ["A", "B", "C"]` so each OPC UA browse-name segment is explicit.
+matched node from output but still allows browsing through it. Exclude paths use
+literal segments unless a segment is a `RegExp` or `"**"` wildcard.
 
 ## Run
 
@@ -77,8 +73,9 @@ alphanumeric separators are removed, so `Axis_ManualControl1` becomes
 
 If two siblings generate the same key, codegen fails with a diagnostic instead
 of silently choosing one. If a variable references a custom data type without a
-usable definition, codegen emits a warning and falls back to a dynamic or scalar
-codec where possible.
+usable definition, codegen fails by default instead of broadening the generated
+contract. Use `diagnostics.unsupportedTypes: "warn-dynamic"` for exploration
+against incomplete servers.
 
 ## Enum And Structure Scope
 
@@ -90,9 +87,9 @@ metadata there. Codegen does not dump every DataType under `Types`.
 
 If a server does not expose supported metadata for a referenced type, codegen
 does not infer it from sample values, encoding nodes, or legacy
-DataTypeDictionary nodes. Unsupported structure fields become `Schema.Unknown`.
-Unsupported variable types use `Opcua.dynamic()`. Unions are reported and use the
-same broad fallbacks.
+DataTypeDictionary nodes. In `warn-dynamic` mode, unsupported structure fields
+become `Schema.Unknown` and unsupported variable types use `Opcua.dynamic()`.
+Unions are reported and use the same broad fallbacks.
 
 Methods, manual codec overrides, namespace-URI-stable NodeId emission, and
 manifest-backed output ownership are intentionally deferred.

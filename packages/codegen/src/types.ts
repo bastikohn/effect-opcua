@@ -3,23 +3,19 @@ import type {
   UserIdentityInfo,
 } from "@effect-opcua/client/node-opcua";
 import type { OpcuaDataTypeDefinitionResult } from "@effect-opcua/client/OpcuaSession";
+import type { CodegenIssueCode, CodegenIssueSeverity } from "./issue-codes.js";
 
 export type CodegenConfig = {
-  readonly connection?: {
-    readonly endpointUrl?: string;
-    readonly clientOptions?: OPCUAClientOptions;
-    readonly userIdentity?: UserIdentityInfo;
-  };
-  readonly outputDir?: string;
-  readonly roots?: readonly RootConfig[];
+  readonly endpointUrl: string;
+  readonly clientOptions?: OPCUAClientOptions;
+  readonly userIdentity?: UserIdentityInfo;
+  readonly outputDir: string;
+  readonly roots: readonly RootConfig[];
   readonly exclude?: readonly ExcludeRuleConfig[];
   readonly discovery?: DiscoveryConfig;
-  readonly naming?: {
-    readonly rootStripping?: boolean;
-    readonly case?: "pascal";
-  };
   readonly diagnostics?: {
     readonly warningsAsErrors?: boolean;
+    readonly unsupportedTypes?: "error" | "warn-dynamic";
   };
 };
 
@@ -27,70 +23,38 @@ export type RootConfig =
   | {
       readonly path: readonly string[];
       readonly nodeId?: never;
-      readonly browsePath?: never;
       readonly exportPrefix?: string;
     }
   | {
       readonly path?: never;
       readonly nodeId: string;
-      readonly browsePath?: never;
-      readonly exportPrefix?: string;
-    }
-  | {
-      readonly path?: never;
-      readonly nodeId?: never;
-      readonly browsePath: string;
-      readonly exportPrefix?: string;
+      readonly exportPrefix: string;
     };
 
-export type PathPatternSegment = string | RegExp | "**";
+export type PathPatternSegment = string | RegExp;
 
-export type ExcludeRuleConfig =
-  | {
-      readonly path: readonly string[];
-      readonly pathPattern?: never;
-      readonly browsePath?: never;
-      readonly mode?: "prune" | "omit";
-    }
-  | {
-      readonly path?: never;
-      readonly pathPattern: readonly PathPatternSegment[];
-      readonly browsePath?: never;
-      readonly mode?: "prune" | "omit";
-    }
-  | {
-      readonly path?: never;
-      readonly pathPattern?: never;
-      readonly browsePath: string | RegExp;
-      readonly mode?: "prune" | "omit";
-    };
+export type ExcludeRuleConfig = {
+  readonly path: readonly PathPatternSegment[];
+  readonly mode: "prune" | "omit";
+};
 
 export type DiscoveryConfig = {
-  readonly rootBase?: "objectsFolder";
-  readonly includeVariableChildren?: boolean;
   readonly onBrowseFailure?: "warn" | "fail";
 };
 
 export type NormalizedCodegenConfig = {
-  readonly connection: {
-    readonly endpointUrl: string;
-    readonly clientOptions?: OPCUAClientOptions;
-    readonly userIdentity?: UserIdentityInfo;
-  };
+  readonly endpointUrl: string;
+  readonly clientOptions?: OPCUAClientOptions;
+  readonly userIdentity?: UserIdentityInfo;
   readonly outputDir: string;
   readonly roots: readonly NormalizedRootConfig[];
   readonly exclude: readonly NormalizedExcludeRule[];
   readonly discovery: {
-    readonly rootBase: "objectsFolder";
-    readonly includeVariableChildren: boolean;
     readonly onBrowseFailure: "warn" | "fail";
-  };
-  readonly naming: {
-    readonly rootStripping: boolean;
-    readonly case: "pascal";
   };
   readonly diagnostics: {
     readonly warningsAsErrors: boolean;
+    readonly unsupportedTypes: "error" | "warn-dynamic";
   };
 };
 
@@ -103,7 +67,7 @@ export type NormalizedRootConfig =
   | {
       readonly path?: never;
       readonly nodeId: string;
-      readonly exportPrefix?: string;
+      readonly exportPrefix: string;
     };
 
 export type NormalizedExcludeRule =
@@ -119,8 +83,8 @@ export type NormalizedExcludeRule =
     };
 
 export type CodegenIssue = {
-  readonly severity: "info" | "warning" | "error";
-  readonly code: string;
+  readonly severity: CodegenIssueSeverity;
+  readonly code: CodegenIssueCode;
   readonly message: string;
   readonly nodeId?: string;
   readonly path?: readonly string[];
@@ -225,6 +189,12 @@ export type CodegenModel = {
   readonly variables: readonly VariableDefinition[];
   readonly enums: readonly EnumDefinition[];
   readonly structures: readonly StructureDefinition[];
+  readonly issues: readonly CodegenIssue[];
+};
+
+export type CodegenPlan = {
+  readonly model: CodegenModel;
+  readonly files: readonly GeneratedFile[];
   readonly issues: readonly CodegenIssue[];
 };
 

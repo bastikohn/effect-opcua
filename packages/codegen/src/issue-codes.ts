@@ -1,0 +1,47 @@
+export type CodegenIssueSeverity = "info" | "warning" | "error";
+
+export const issueDefinitions = {
+  "browse.ambiguousPath": { severity: "error" },
+  "browse.failure": { severity: "warning" },
+  "branch.pruned": { severity: "warning" },
+  "codec.dynamicFallback": { severity: "warning" },
+  "codec.unsupportedArrayRank": { severity: "warning" },
+  "config.invalid": { severity: "error" },
+  "config.loadFailed": { severity: "error" },
+  "datatype.definitionFailure": { severity: "warning" },
+  "datatype.definitionMissing": { severity: "warning" },
+  "datatype.definitionUnsupported": { severity: "warning" },
+  "datatype.unionUnsupported": { severity: "warning" },
+  "enum.emptyName": { severity: "warning" },
+  "enum.memberEmptyName": { severity: "warning" },
+  "enum.memberNameCollision": { severity: "warning" },
+  "enum.nameCollision": { severity: "warning" },
+  "file.checked": { severity: "info" },
+  "file.mkdirFailed": { severity: "error" },
+  "file.ownershipViolation": { severity: "error" },
+  "file.readFailed": { severity: "error" },
+  "file.writeFailed": { severity: "error" },
+  "file.written": { severity: "info" },
+  "metadata.readFailed": { severity: "error" },
+  "node.multiPath": { severity: "warning" },
+  "node.omitted": { severity: "warning" },
+  "path.branchLeafCollision": { severity: "error" },
+  "path.emptyGeneratedKey": { severity: "error" },
+  "path.generatedKeyCollision": { severity: "error" },
+  "path.generatedPathCollision": { severity: "error" },
+  "path.topLevelExportCollision": { severity: "error" },
+  "root.resolutionFailed": { severity: "error" },
+  "structure.emptyName": { severity: "warning" },
+  "structure.fieldEmptyName": { severity: "warning" },
+  "structure.fieldNameCollision": { severity: "warning" },
+  "structure.nameCollision": { severity: "warning" },
+  "structure.recursiveField": { severity: "warning" },
+  "structure.unsupportedField": { severity: "warning" },
+  "variable.notReadableSkipped": { severity: "warning" },
+  "variable.writeOnlySkipped": { severity: "warning" },
+} as const satisfies Record<
+  string,
+  { readonly severity: CodegenIssueSeverity }
+>;
+
+export type CodegenIssueCode = keyof typeof issueDefinitions;

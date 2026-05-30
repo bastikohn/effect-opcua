@@ -108,16 +108,13 @@ export const discover = (
       const duplicate = duplicateBrowseName(children);
       if (duplicate) {
         return yield* Effect.fail(
-          codegenError(
-            { _tag: "DiscoveryFailed" },
-            [
-              errorIssue("browse.ambiguousPath", {
-                message: "Multiple children have the same BrowseName segment",
-                path: [...current.path, duplicate.name],
-                cause: { candidates: duplicate.candidates },
-              }),
-            ],
-          ),
+          codegenError({ _tag: "DiscoveryFailed" }, [
+            errorIssue("browse.ambiguousPath", {
+              message: "Multiple children have the same BrowseName segment",
+              path: [...current.path, duplicate.name],
+              cause: { candidates: duplicate.candidates },
+            }),
+          ]),
         );
       }
       const metadataByNodeId = yield* readChildMetadata(
@@ -178,7 +175,7 @@ export const discover = (
           );
         }
 
-        if (shouldBrowseChildren(config, child.nodeClass)) {
+        if (shouldBrowseChildren(child.nodeClass)) {
           queue.push({
             nodeId: targetNodeId,
             parentNodeId: current.nodeId,
@@ -230,7 +227,10 @@ const resolveRoot = (
       )
     : resolvePathRoot(
         session,
-        root as Extract<NormalizedRootConfig, { readonly path: readonly string[] }>,
+        root as Extract<
+          NormalizedRootConfig,
+          { readonly path: readonly string[] }
+        >,
         rootIndex,
       );
 
@@ -262,17 +262,14 @@ const resolvePathRoot = (
       const result = yield* session.browseChildren(currentNodeId);
       if (result._tag === "NonGoodStatus") {
         return yield* Effect.fail(
-          codegenError(
-            { _tag: "DiscoveryFailed" },
-            [
-              errorIssue("root.resolutionFailed", {
-                message: `Could not browse ${currentNodeId} while resolving ${displayPath(root.path)}`,
-                path: root.path,
-                nodeId: currentNodeId,
-                cause: result.status,
-              }),
-            ],
-          ),
+          codegenError({ _tag: "DiscoveryFailed" }, [
+            errorIssue("root.resolutionFailed", {
+              message: `Could not browse ${currentNodeId} while resolving ${displayPath(root.path)}`,
+              path: root.path,
+              nodeId: currentNodeId,
+              cause: result.status,
+            }),
+          ]),
         );
       }
       const matches = selectedChildReferences(result.references).filter(
@@ -280,29 +277,23 @@ const resolvePathRoot = (
       );
       if (matches.length === 0) {
         return yield* Effect.fail(
-          codegenError(
-            { _tag: "DiscoveryFailed" },
-            [
-              errorIssue("root.resolutionFailed", {
-                message: `Missing root path segment ${segment}`,
-                path: [...resolvedSegments, segment],
-              }),
-            ],
-          ),
+          codegenError({ _tag: "DiscoveryFailed" }, [
+            errorIssue("root.resolutionFailed", {
+              message: `Missing root path segment ${segment}`,
+              path: [...resolvedSegments, segment],
+            }),
+          ]),
         );
       }
       if (matches.length > 1) {
         return yield* Effect.fail(
-          codegenError(
-            { _tag: "DiscoveryFailed" },
-            [
-              errorIssue("browse.ambiguousPath", {
-                message: "Multiple children match the root path segment",
-                path: [...resolvedSegments, segment],
-                cause: { candidates: matches.map((match) => match.nodeId.text) },
-              }),
-            ],
-          ),
+          codegenError({ _tag: "DiscoveryFailed" }, [
+            errorIssue("browse.ambiguousPath", {
+              message: "Multiple children match the root path segment",
+              path: [...resolvedSegments, segment],
+              cause: { candidates: matches.map((match) => match.nodeId.text) },
+            }),
+          ]),
         );
       }
       currentNodeId = matches[0]!.nodeId.text;
@@ -387,16 +378,13 @@ const readChildMetadata = (
     const failed = results.find((result) => result._tag === "Failure");
     if (failed?._tag === "Failure") {
       return yield* Effect.fail(
-        codegenError(
-          { _tag: "DiscoveryFailed" },
-          [
-            errorIssue("metadata.readFailed", {
-              message: `Could not read metadata for ${failed.nodeId}`,
-              nodeId: failed.nodeId,
-              cause: failed.reason,
-            }),
-          ],
-        ),
+        codegenError({ _tag: "DiscoveryFailed" }, [
+          errorIssue("metadata.readFailed", {
+            message: `Could not read metadata for ${failed.nodeId}`,
+            nodeId: failed.nodeId,
+            cause: failed.reason,
+          }),
+        ]),
       );
     }
 
@@ -527,12 +515,8 @@ const normalizeNodeClass = (
   }
 };
 
-const shouldBrowseChildren = (
-  config: NormalizedCodegenConfig,
-  nodeClass: string | undefined,
-) =>
-  nodeClass === "Object" ||
-  (config.discovery.includeVariableChildren && nodeClass === "Variable");
+const shouldBrowseChildren = (nodeClass: string | undefined) =>
+  nodeClass === "Object";
 
 const discoverDataTypeDefinitions = (
   session: OpcuaSession.OpcuaSession,
@@ -617,12 +601,28 @@ const relativeLength = (item: {
 const finalizeNodes = (nodes: ReadonlyMap<NodeKey, NodeDraft>) => {
   const entries: Array<readonly [NodeKey, DiscoveredNode]> = [];
   for (const [key, node] of nodes) {
-    const { rootSegmentCount: _, ...finalNode } = node;
     entries.push([
       key,
       {
-        ...finalNode,
+        key: node.key,
+        nodeId: node.nodeId,
+        parsedNodeId: node.parsedNodeId,
+        namespaceIndex: node.namespaceIndex,
+        namespaceUri: node.namespaceUri,
+        browseName: node.browseName,
+        browseNameNamespaceIndex: node.browseNameNamespaceIndex,
+        path: node.path,
         allPaths: uniquePaths(node.allPaths),
+        nodeClass: node.nodeClass,
+        displayName: node.displayName,
+        description: node.description,
+        dataTypeNodeId: node.dataTypeNodeId,
+        valueRank: node.valueRank,
+        arrayDimensions: node.arrayDimensions,
+        accessLevel: node.accessLevel,
+        userAccessLevel: node.userAccessLevel,
+        parentNodeId: node.parentNodeId,
+        rootIndex: node.rootIndex,
       },
     ]);
   }

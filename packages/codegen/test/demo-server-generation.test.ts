@@ -41,10 +41,8 @@ describe("codegen prototype", () => {
     const result = await Effect.runPromise(
       Effect.scoped(
         generate({
-          connection: {
-            endpointUrl: demo.endpointUrl,
-            clientOptions: { endpointMustExist: false },
-          },
+          endpointUrl: demo.endpointUrl,
+          clientOptions: { endpointMustExist: false },
           outputDir,
           roots: [{ path: ["DemoFillingCell"] }],
           exclude: [
@@ -57,7 +55,7 @@ describe("codegen prototype", () => {
               mode: "prune",
             },
             {
-              pathPattern: [
+              path: [
                 "DemoFillingCell",
                 "**",
                 /^InterfaceVersion(Major|Minor|Patch)$/,
@@ -79,10 +77,7 @@ describe("codegen prototype", () => {
 
     const nodeIds = await readFile(join(outputDir, "nodeIds.ts"), "utf8");
     const enums = await readFile(join(outputDir, "enums.ts"), "utf8");
-    const structures = await readFile(
-      join(outputDir, "structures.ts"),
-      "utf8",
-    );
+    const structures = await readFile(join(outputDir, "structures.ts"), "utf8");
     const variables = await readFile(join(outputDir, "variables.ts"), "utf8");
     const index = await readFile(join(outputDir, "index.ts"), "utf8");
 
@@ -99,7 +94,9 @@ describe("codegen prototype", () => {
     expect(variables).toContain("codec: Opcua.schema(Schema.Number)");
     expect(variables).toContain("SubmitRequest: Opcua.variable");
     expect(variables).toContain("codec: Structures.GlobalCommandSubmitRequest");
-    expect(variables).toContain("codec: Opcua.schema(Enums.MachineStateSchema)");
+    expect(variables).toContain(
+      "codec: Opcua.schema(Enums.MachineStateSchema)",
+    );
     expect(variables).toContain('access: "readWrite"');
     expect(variables).not.toContain("PayloadBrowsePath");
     expect(variables).not.toContain("OperatorFeedback");
@@ -114,10 +111,10 @@ describe("codegen prototype", () => {
     expect(structures).toContain(
       "export const GlobalCommandSubmitRequest = Opcua.structure({",
     );
+    expect(structures).toContain("commandKind: Enums.GlobalCommandKindSchema");
     expect(structures).toContain(
-      "commandKind: Enums.GlobalCommandKindSchema",
+      "entries: Schema.Array(CommandStatusEntrySchema)",
     );
-    expect(structures).toContain("entries: Schema.Array(CommandStatusEntrySchema)");
 
     expect(index).toContain('export * as NodeIds from "./nodeIds.js";');
     expect(index).toContain('export * as Enums from "./enums.js";');
