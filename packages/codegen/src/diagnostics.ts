@@ -53,7 +53,7 @@ export const enforceIssuePolicy = (
       )
     : issues;
   return promoted.some((item) => item.severity === "error")
-    ? Effect.fail(codegenError({ _tag: "IssuePolicyViolation" }, promoted))
+    ? Effect.fail(codegenError({ _tag: "Compile" }, promoted))
     : Effect.succeed(sortIssues(promoted));
 };
 

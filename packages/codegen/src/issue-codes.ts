@@ -3,7 +3,7 @@ export type CodegenIssueSeverity = "info" | "warning" | "error";
 export const issueDefinitions = {
   "browse.ambiguousPath": { severity: "error" },
   "browse.failure": { severity: "warning" },
-  "branch.pruned": { severity: "warning" },
+  "branch.pruned": { severity: "info" },
   "codec.dynamicFallback": { severity: "warning" },
   "codec.unsupportedArrayRank": { severity: "warning" },
   "config.invalid": { severity: "error" },
@@ -24,7 +24,7 @@ export const issueDefinitions = {
   "file.written": { severity: "info" },
   "metadata.readFailed": { severity: "error" },
   "node.multiPath": { severity: "warning" },
-  "node.omitted": { severity: "warning" },
+  "node.omitted": { severity: "info" },
   "path.branchLeafCollision": { severity: "error" },
   "path.emptyGeneratedKey": { severity: "error" },
   "path.generatedKeyCollision": { severity: "error" },
@@ -37,8 +37,7 @@ export const issueDefinitions = {
   "structure.nameCollision": { severity: "warning" },
   "structure.recursiveField": { severity: "warning" },
   "structure.unsupportedField": { severity: "warning" },
-  "variable.notReadableSkipped": { severity: "warning" },
-  "variable.writeOnlySkipped": { severity: "warning" },
+  "variable.notAccessibleSkipped": { severity: "warning" },
 } as const satisfies Record<
   string,
   { readonly severity: CodegenIssueSeverity }

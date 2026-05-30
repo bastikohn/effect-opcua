@@ -6,12 +6,14 @@ import { codegenError, invalidConfig } from "./errors.js";
 import type {
   CodegenConfig,
   ExcludeRuleConfig,
-  NormalizedCodegenConfig,
-  NormalizedExcludeRule,
-  NormalizedRootConfig,
   PathPatternSegment,
   RootConfig,
 } from "./types.js";
+import type {
+  NormalizedCodegenConfig,
+  NormalizedExcludeRule,
+  NormalizedRootConfig,
+} from "./internal/types.js";
 
 export const defineConfig = (config: CodegenConfig): CodegenConfig => config;
 
@@ -23,7 +25,7 @@ export const loadConfig = (
     const loaded = yield* Effect.tryPromise({
       try: () => unrun({ path: resolved }),
       catch: (cause) =>
-        codegenError({ _tag: "ConfigLoadFailed", path: resolved }, [
+        codegenError({ _tag: "Config", path: resolved }, [
           {
             severity: "error",
             code: "config.loadFailed",
@@ -38,7 +40,7 @@ export const loadConfig = (
       isRecord(module) && "default" in module ? module.default : module;
     if (exportedConfig === undefined) {
       return yield* Effect.fail(
-        codegenError({ _tag: "ConfigLoadFailed", path: resolved }, [
+        codegenError({ _tag: "Config", path: resolved }, [
           {
             severity: "error",
             code: "config.loadFailed",
@@ -237,12 +239,12 @@ const normalizeDiagnostics = (
   value: unknown,
 ): NormalizedCodegenConfig["diagnostics"] | Error => {
   if (value === undefined) {
-    return { warningsAsErrors: false, unsupportedTypes: "error" };
+    return { warningsAsErrors: false, typeFallback: "fail" };
   }
   if (!isRecord(value)) return new Error("diagnostics must be an object");
   const unsupported = unsupportedKeys(value, [
     "warningsAsErrors",
-    "unsupportedTypes",
+    "typeFallback",
   ]);
   if (unsupported.length > 0) {
     return new Error(`Unsupported diagnostics keys: ${unsupported.join(", ")}`);
@@ -251,13 +253,11 @@ const normalizeDiagnostics = (
   if (typeof warningsAsErrors !== "boolean") {
     return new Error("diagnostics.warningsAsErrors must be a boolean");
   }
-  const unsupportedTypes = value.unsupportedTypes ?? "error";
-  if (unsupportedTypes !== "error" && unsupportedTypes !== "warn-dynamic") {
-    return new Error(
-      'diagnostics.unsupportedTypes must be "error" or "warn-dynamic"',
-    );
+  const typeFallback = value.typeFallback ?? "fail";
+  if (typeFallback !== "fail" && typeFallback !== "dynamic") {
+    return new Error('diagnostics.typeFallback must be "fail" or "dynamic"');
   }
-  return { warningsAsErrors, unsupportedTypes };
+  return { warningsAsErrors, typeFallback };
 };
 
 const normalizePath = (

@@ -8,14 +8,10 @@ export class CodegenError extends Data.TaggedError("CodegenError")<{
 }> {}
 
 export type CodegenErrorReason =
-  | { readonly _tag: "InvalidConfig" }
-  | { readonly _tag: "ConfigLoadFailed"; readonly path: string }
-  | { readonly _tag: "DiscoveryFailed" }
-  | { readonly _tag: "CompileFailed" }
-  | { readonly _tag: "EmitFailed" }
-  | { readonly _tag: "OutputOwnershipViolation" }
-  | { readonly _tag: "Filesystem" }
-  | { readonly _tag: "IssuePolicyViolation" };
+  | { readonly _tag: "Config"; readonly path?: string }
+  | { readonly _tag: "Discovery" }
+  | { readonly _tag: "Compile" }
+  | { readonly _tag: "Output" };
 
 export const codegenError = (
   reason: CodegenErrorReason,
@@ -23,7 +19,7 @@ export const codegenError = (
 ) => new CodegenError({ reason, issues });
 
 export const invalidConfig = (message: string, cause?: unknown) =>
-  codegenError({ _tag: "InvalidConfig" }, [
+  codegenError({ _tag: "Config" }, [
     {
       severity: "error",
       code: "config.invalid",

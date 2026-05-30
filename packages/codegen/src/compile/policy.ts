@@ -1,6 +1,6 @@
-import type { NormalizedCodegenConfig } from "../types.js";
+import type { NormalizedCodegenConfig } from "../internal/types.js";
 
-export const unsupportedTypeSeverity = (
+export const typeFallbackSeverity = (
   config: NormalizedCodegenConfig,
 ): "error" | "warning" =>
-  config.diagnostics.unsupportedTypes === "error" ? "error" : "warning";
+  config.diagnostics.typeFallback === "fail" ? "error" : "warning";

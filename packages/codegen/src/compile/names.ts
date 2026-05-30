@@ -1,10 +1,10 @@
 import { errorIssue } from "../diagnostics.js";
+import type { CodegenIssue } from "../types.js";
 import type {
-  CodegenIssue,
   DiscoveredNode,
   DiscoveryModel,
   GeneratedPath,
-} from "../types.js";
+} from "../internal/types.js";
 
 export type SurfaceNode = GeneratedPath & {
   readonly node: DiscoveredNode;

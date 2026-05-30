@@ -5,12 +5,15 @@
     "plugins": [],
     "verbatimModuleSyntax": false,
     "paths": {
+      "@effect-opcua/codegen": ["packages/codegen/src/index.ts"],
       "@effect-opcua/client": ["packages/client/src/index.ts"],
       "@effect-opcua/client/node-opcua": ["packages/client/src/node-opcua.ts"],
       "@effect-opcua/client/*": ["packages/client/src/*.ts"]
     }
   },
   "include": [
+    "packages/codegen/src",
+    "packages/codegen/test/**/*.tst.ts",
     "packages/client/src",
     "packages/client/test/**/*.tst.ts",
     "examples/demo-client/src",

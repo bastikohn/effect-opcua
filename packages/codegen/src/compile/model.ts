@@ -1,12 +1,12 @@
 import { errorIssue } from "../diagnostics.js";
+import type { CodegenIssue } from "../types.js";
 import type {
-  CodegenIssue,
   CodegenModel,
   DataTypeNodeIdDefinition,
   SchemaExpression,
   StructureDefinition,
   VariableDefinition,
-} from "../types.js";
+} from "../internal/types.js";
 import { displayPath, pathKey } from "./names.js";
 import type { TypeGraph } from "./type-graph.js";
 

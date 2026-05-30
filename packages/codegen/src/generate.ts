@@ -1,21 +1,27 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { Effect, Scope } from "effect";
+import { Effect, Layer, Scope } from "effect";
+import { OpcuaClient, OpcuaSession } from "@effect-opcua/client";
 import type { OpcuaError } from "@effect-opcua/client/OpcuaError";
 
+import { compile } from "./compile.js";
 import { normalizeConfig } from "./config.js";
-import { issue, sortIssues } from "./diagnostics.js";
-import { generatedHeader } from "./emit.js";
+import { enforceIssuePolicy, issue, sortIssues } from "./diagnostics.js";
+import { discover } from "./discover.js";
+import { emit, generatedHeader } from "./emit.js";
 import { codegenError } from "./errors.js";
-import { planFromServer } from "./plan.js";
 import type {
   CheckResult,
   CodegenConfig,
   CodegenIssue,
   GenerateResult,
+} from "./types.js";
+import type {
+  CodegenPlan,
+  DiscoveryModel,
   GeneratedFile,
   NormalizedCodegenConfig,
-} from "./types.js";
+} from "./internal/types.js";
 
 export const generate = (
   config: CodegenConfig,
@@ -26,7 +32,7 @@ export const generate = (
 > =>
   Effect.gen(function* () {
     const normalized = yield* normalizeConfig(config);
-    return yield* generateNormalized(normalized);
+    return yield* generateFromNormalizedConfig(normalized);
   });
 
 export const check = (
@@ -38,10 +44,10 @@ export const check = (
 > =>
   Effect.gen(function* () {
     const normalized = yield* normalizeConfig(config);
-    return yield* checkNormalized(normalized);
+    return yield* checkFromNormalizedConfig(normalized);
   });
 
-export const generateNormalized = (
+export const generateFromNormalizedConfig = (
   config: NormalizedCodegenConfig,
 ): Effect.Effect<
   GenerateResult,
@@ -56,13 +62,12 @@ export const generateNormalized = (
     );
     const issues = sortIssues([...plan.issues, ...writeResult.issues]);
     return {
-      files: plan.files,
       issues,
       writtenFiles: writeResult.writtenFiles,
     };
   });
 
-export const checkNormalized = (
+export const checkFromNormalizedConfig = (
   config: NormalizedCodegenConfig,
 ): Effect.Effect<
   CheckResult,
@@ -74,7 +79,6 @@ export const checkNormalized = (
     const checked = yield* checkGeneratedFiles(config.outputDir, plan.files);
     const issues = sortIssues([...plan.issues, ...checked.issues]);
     return {
-      files: plan.files,
       issues,
       staleFiles: checked.staleFiles,
       missingFiles: checked.missingFiles,
@@ -82,7 +86,7 @@ export const checkNormalized = (
     };
   });
 
-export const writeGeneratedFiles = (
+const writeGeneratedFiles = (
   outputDir: string,
   files: readonly GeneratedFile[],
 ) =>
@@ -98,7 +102,7 @@ export const writeGeneratedFiles = (
       yield* Effect.tryPromise({
         try: () => writeFile(path, file.contents, "utf8"),
         catch: (cause) =>
-          codegenError({ _tag: "Filesystem" }, [
+          codegenError({ _tag: "Output" }, [
             {
               severity: "error",
               code: "file.writeFailed",
@@ -128,6 +132,7 @@ const checkGeneratedFiles = (
     const staleFiles: string[] = [];
     const missingFiles: string[] = [];
     const issues: CodegenIssue[] = [];
+    const expectedPaths = new Set(files.map((file) => file.path));
     for (const file of files) {
       const path = join(absoluteOutputDir, file.path);
       const existing = yield* readExistingFile(path);
@@ -143,14 +148,71 @@ const checkGeneratedFiles = (
         }),
       );
     }
+    for (const file of yield* obsoleteGeneratedFiles(
+      absoluteOutputDir,
+      expectedPaths,
+    )) {
+      staleFiles.push(file);
+    }
     return { staleFiles, missingFiles, issues };
+  });
+
+export const planFromDiscovery = (
+  config: NormalizedCodegenConfig,
+  discovery: DiscoveryModel,
+): Effect.Effect<CodegenPlan, import("./errors.js").CodegenError> =>
+  Effect.gen(function* () {
+    const model = yield* compile(config, discovery);
+    const issues = yield* enforceIssuePolicy(
+      config.diagnostics.warningsAsErrors,
+      model.issues,
+    );
+    return {
+      model,
+      files: emit(model),
+      issues,
+    };
+  });
+
+export const discoverFromServer = (
+  config: NormalizedCodegenConfig,
+): Effect.Effect<
+  DiscoveryModel,
+  import("./errors.js").CodegenError | OpcuaError,
+  Scope.Scope
+> =>
+  discover(config).pipe(
+    Effect.provide(
+      OpcuaSession.layer({
+        userIdentity: config.userIdentity,
+      }).pipe(
+        Layer.provideMerge(
+          OpcuaClient.layer({
+            endpointUrl: config.endpointUrl,
+            clientOptions: config.clientOptions,
+          }),
+        ),
+      ),
+    ),
+  );
+
+export const planFromServer = (
+  config: NormalizedCodegenConfig,
+): Effect.Effect<
+  CodegenPlan,
+  import("./errors.js").CodegenError | OpcuaError,
+  Scope.Scope
+> =>
+  Effect.gen(function* () {
+    const discovery = yield* discoverFromServer(config);
+    return yield* planFromDiscovery(config, discovery);
   });
 
 const mkdirEffect = (path: string) =>
   Effect.tryPromise({
     try: () => mkdir(path, { recursive: true }),
     catch: (cause) =>
-      codegenError({ _tag: "Filesystem" }, [
+      codegenError({ _tag: "Output" }, [
         {
           severity: "error",
           code: "file.mkdirFailed",
@@ -166,7 +228,7 @@ const assertGeneratedOwnership = (path: string) =>
     const existing = yield* readExistingFile(path);
     if (existing !== undefined && !existing.startsWith(generatedHeader)) {
       return yield* Effect.fail(
-        codegenError({ _tag: "OutputOwnershipViolation" }, [
+        codegenError({ _tag: "Output" }, [
           {
             severity: "error",
             code: "file.ownershipViolation",
@@ -176,6 +238,41 @@ const assertGeneratedOwnership = (path: string) =>
         ]),
       );
     }
+  });
+
+const obsoleteGeneratedFiles = (
+  outputDir: string,
+  expectedPaths: ReadonlySet<string>,
+) =>
+  Effect.gen(function* () {
+    const entries = yield* Effect.tryPromise({
+      try: async () => {
+        try {
+          return await readdir(outputDir, { withFileTypes: true });
+        } catch (cause) {
+          if (isNodeError(cause) && cause.code === "ENOENT") return [];
+          throw cause;
+        }
+      },
+      catch: (cause) =>
+        codegenError({ _tag: "Output" }, [
+          {
+            severity: "error",
+            code: "file.readFailed",
+            message: `Failed to read directory ${outputDir}`,
+            file: outputDir,
+            cause,
+          },
+        ]),
+    });
+    const stale: string[] = [];
+    for (const entry of entries) {
+      if (!entry.isFile() || expectedPaths.has(entry.name)) continue;
+      const path = join(outputDir, entry.name);
+      const existing = yield* readExistingFile(path);
+      if (existing?.startsWith(generatedHeader)) stale.push(path);
+    }
+    return stale;
   });
 
 const readExistingFile = (path: string) =>
@@ -189,7 +286,7 @@ const readExistingFile = (path: string) =>
       }
     },
     catch: (cause) =>
-      codegenError({ _tag: "Filesystem" }, [
+      codegenError({ _tag: "Output" }, [
         {
           severity: "error",
           code: "file.readFailed",
@@ -202,8 +299,3 @@ const readExistingFile = (path: string) =>
 
 const isNodeError = (cause: unknown): cause is NodeJS.ErrnoException =>
   typeof cause === "object" && cause !== null && "code" in cause;
-
-export const generateOpcuaClient = generate;
-export const checkOpcuaClientGenerated = check;
-export const generateOpcuaClientNormalized = generateNormalized;
-export const checkOpcuaClientGeneratedNormalized = checkNormalized;

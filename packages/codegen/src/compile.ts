@@ -9,12 +9,12 @@ import {
   dataTypeResultMap,
 } from "./compile/type-graph.js";
 import { compileVariables } from "./compile/variables.js";
+import type { CodegenIssue } from "./types.js";
 import type {
-  CodegenIssue,
   CodegenModel,
   DiscoveryModel,
   NormalizedCodegenConfig,
-} from "./types.js";
+} from "./internal/types.js";
 
 export const compile = (
   config: NormalizedCodegenConfig,
@@ -54,9 +54,7 @@ export const compile = (
     );
   });
 
-export const normalizeToIr = compile;
-
 const failOnFatalIssues = (issues: readonly CodegenIssue[]) =>
   issues.some((item) => item.severity === "error")
-    ? Effect.fail(codegenError({ _tag: "CompileFailed" }, sortIssues(issues)))
+    ? Effect.fail(codegenError({ _tag: "Compile" }, sortIssues(issues)))
     : Effect.void;

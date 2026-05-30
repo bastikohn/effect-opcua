@@ -1,15 +1,23 @@
+import { readFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 
 import { compile } from "../src/compile.js";
 import { normalizeConfig } from "../src/config.js";
+import { issue } from "../src/diagnostics.js";
 import { emit } from "../src/emit.js";
+import { planFromDiscovery } from "../src/generate.js";
+import type { CodegenConfig } from "../src/types.js";
 import type {
-  CodegenConfig,
   DiscoveredNode,
   DiscoveryModel,
+  GeneratedFile,
   NodeKey,
-} from "../src/types.js";
+} from "../src/internal/types.js";
+
+const goldenRoot = resolve(fileURLToPath(new URL("golden", import.meta.url)));
 
 describe("compile and emit", () => {
   it("keeps browse path segments intact and emits reachable enums and structures", async () => {
@@ -325,7 +333,7 @@ describe("compile and emit", () => {
           dataTypeNodeId: "ns=2;i=9001",
         }),
       ],
-      { diagnostics: { unsupportedTypes: "warn-dynamic" } },
+      { diagnostics: { typeFallback: "dynamic" } },
     );
 
     expect(model.variables).toMatchObject([
@@ -339,6 +347,57 @@ describe("compile and emit", () => {
         expect.objectContaining({
           code: "datatype.definitionMissing",
           severity: "warning",
+        }),
+      ]),
+    );
+  });
+
+  it("does not promote intentional excludes when warningsAsErrors is enabled", async () => {
+    const root = objectNode({
+      key: "root",
+      nodeId: "ns=2;s=PLC",
+      browseName: "PLC",
+      path: ["PLC"],
+    });
+    const config = await Effect.runPromise(
+      normalizeConfig({
+        endpointUrl: "opc.tcp://fixture.invalid:4840",
+        outputDir: "/tmp/effect-opcua-codegen-fixture",
+        roots: [{ path: ["PLC"] }],
+        diagnostics: { warningsAsErrors: true },
+      }),
+    );
+
+    const plan = await Effect.runPromise(
+      planFromDiscovery(config, {
+        roots: [{ rootIndex: 0, nodeId: root.nodeId, path: root.path }],
+        nodes: new Map([[root.key, root]]),
+        references: [],
+        dataTypeDefinitions: [],
+        issues: [
+          issue("branch.pruned", {
+            message: "Pruned PLC / Hidden",
+            path: ["PLC", "Hidden"],
+            nodeId: "ns=2;s=PLC.Hidden",
+          }),
+          issue("node.omitted", {
+            message: "Omitted PLC / Hidden / Version",
+            path: ["PLC", "Hidden", "Version"],
+            nodeId: "ns=2;s=PLC.Hidden.Version",
+          }),
+        ],
+      } satisfies DiscoveryModel),
+    );
+
+    expect(plan.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "branch.pruned",
+          severity: "info",
+        }),
+        expect.objectContaining({
+          code: "node.omitted",
+          severity: "info",
         }),
       ]),
     );
@@ -377,7 +436,6 @@ describe("compile and emit", () => {
       ]),
     });
   });
-
   it("uses user access level as the effective generated access", async () => {
     const model = await compileFixture([
       objectNode({
@@ -404,7 +462,61 @@ describe("compile and emit", () => {
       },
     ]);
   });
+
+  it("emits write-only variables", async () => {
+    const model = await compileFixture([
+      objectNode({
+        key: "root",
+        nodeId: "ns=2;s=PLC",
+        browseName: "PLC",
+        path: ["PLC"],
+      }),
+      variableNode({
+        key: "request",
+        nodeId: "ns=2;s=PLC.Commands.Request",
+        browseName: "Request",
+        path: ["PLC", "Commands", "Request"],
+        dataTypeNodeId: "i=12",
+        accessLevel: { readable: false, writable: true },
+      }),
+    ]);
+
+    expect(model.variables).toMatchObject([
+      {
+        generatedPath: ["Commands", "Request"],
+        access: "write",
+      },
+    ]);
+    expect(model.issues).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "variable.notAccessibleSkipped" }),
+      ]),
+    );
+
+    const files = Object.fromEntries(
+      emit(model).map((file) => [file.path, file.contents]),
+    );
+    expect(files["variables.ts"]).toContain(
+      'Request: Opcua.variable({\n    nodeId: NodeIds.Commands.Request,\n    codec: Opcua.schema(Schema.String),\n    access: "write",',
+    );
+    await expectFilesToMatchGolden(emit(model), "write-only");
+  });
 });
+
+const expectFilesToMatchGolden = async (
+  files: readonly GeneratedFile[],
+  fixtureName: string,
+) => {
+  for (const file of files) {
+    const expected = await readFile(
+      join(goldenRoot, fixtureName, file.path),
+      "utf8",
+    );
+    expect(normalizeNewlines(file.contents)).toBe(normalizeNewlines(expected));
+  }
+};
+
+const normalizeNewlines = (value: string) => value.replace(/\r\n/g, "\n");
 
 const compileFixture = async (
   nodes: readonly DiscoveredNode[],

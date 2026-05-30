@@ -1,13 +1,13 @@
 import type { OpcuaDataTypeDefinitionResult } from "@effect-opcua/client/OpcuaSession";
 
 import { issue } from "../diagnostics.js";
+import type { CodegenIssue } from "../types.js";
 import type {
-  CodegenIssue,
   DiscoveredNode,
   NormalizedCodegenConfig,
   VariableCodecExpression,
   VariableDefinition,
-} from "../types.js";
+} from "../internal/types.js";
 import {
   isDynamicScalarDataType,
   isUnsupportedArrayRank,
@@ -15,7 +15,7 @@ import {
 } from "./builtin-types.js";
 import { displayPath } from "./names.js";
 import type { SurfaceNode } from "./names.js";
-import { unsupportedTypeSeverity } from "./policy.js";
+import { typeFallbackSeverity } from "./policy.js";
 import type { TypeGraph } from "./type-graph.js";
 
 export const compileVariables = (
@@ -71,7 +71,7 @@ const variableCodec = (
 } => {
   const dataTypeNodeId = node.dataTypeNodeId;
   const isArray = node.valueRank === 1;
-  const unsupportedSeverity = unsupportedTypeSeverity(config);
+  const unsupportedSeverity = typeFallbackSeverity(config);
   if (isUnsupportedArrayRank(node.valueRank)) {
     return {
       codec: { _tag: "Dynamic" },
@@ -150,26 +150,30 @@ const variableCodec = (
 const variableAccess = (
   node: DiscoveredNode,
 ):
-  | { readonly _tag: "Emit"; readonly value: "read" | "readWrite" }
+  | {
+      readonly _tag: "Emit";
+      readonly value: VariableDefinition["access"];
+    }
   | {
       readonly _tag: "Skip";
-      readonly label: "write-only" | "not-readable";
-      readonly issueCode:
-        | "variable.writeOnlySkipped"
-        | "variable.notReadableSkipped";
+      readonly label: "not-accessible";
+      readonly issueCode: "variable.notAccessibleSkipped";
     } => {
   const effective = node.userAccessLevel ?? node.accessLevel;
-  if (effective && !effective.readable) {
+  if (effective && !effective.readable && !effective.writable) {
     return {
       _tag: "Skip",
-      label: effective.writable ? "write-only" : "not-readable",
-      issueCode: effective.writable
-        ? "variable.writeOnlySkipped"
-        : "variable.notReadableSkipped",
+      label: "not-accessible",
+      issueCode: "variable.notAccessibleSkipped",
     };
   }
   return {
     _tag: "Emit",
-    value: effective?.writable ? "readWrite" : "read",
+    value:
+      effective?.writable === true
+        ? effective.readable
+          ? "readWrite"
+          : "write"
+        : "read",
   };
 };

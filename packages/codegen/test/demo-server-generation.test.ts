@@ -14,6 +14,17 @@ import { generate } from "../src/generate.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
+const demoClientGeneratedDir = join(
+  repoRoot,
+  "examples/demo-client/src/generated",
+);
+const generatedFiles = [
+  "nodeIds.ts",
+  "enums.ts",
+  "structures.ts",
+  "variables.ts",
+  "index.ts",
+] as const;
 
 vi.setConfig({ testTimeout: 120_000 });
 
@@ -68,11 +79,7 @@ describe("codegen prototype", () => {
     );
 
     expect(result.writtenFiles.map((file) => file.split("/").at(-1))).toEqual([
-      "nodeIds.ts",
-      "enums.ts",
-      "structures.ts",
-      "variables.ts",
-      "index.ts",
+      ...generatedFiles,
     ]);
 
     const nodeIds = await readFile(join(outputDir, "nodeIds.ts"), "utf8");
@@ -122,6 +129,8 @@ describe("codegen prototype", () => {
     expect(index).toContain('export * as Variables from "./variables.js";');
     expect(index).not.toContain("Methods");
 
+    await expectGeneratedFilesEqual(outputDir, demoClientGeneratedDir);
+
     await writeFile(
       join(tempDir, "index.ts"),
       'export * from "./generated/index.js";\n',
@@ -170,3 +179,16 @@ describe("codegen prototype", () => {
     }
   });
 });
+
+const expectGeneratedFilesEqual = async (
+  actualDir: string,
+  expectedDir: string,
+) => {
+  for (const file of generatedFiles) {
+    const actual = await readFile(join(actualDir, file), "utf8");
+    const expected = await readFile(join(expectedDir, file), "utf8");
+    expect(normalizeNewlines(actual)).toBe(normalizeNewlines(expected));
+  }
+};
+
+const normalizeNewlines = (value: string) => value.replace(/\r\n/g, "\n");

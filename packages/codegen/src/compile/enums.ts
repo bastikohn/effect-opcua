@@ -1,14 +1,12 @@
 import type { OpcuaDataTypeDefinition } from "@effect-opcua/client/OpcuaSession";
 
 import { issue } from "../diagnostics.js";
+import type { CodegenIssue } from "../types.js";
 import type {
-  CodegenIssue,
   EnumDefinition,
   EnumMemberDefinition,
-  NormalizedCodegenConfig,
-} from "../types.js";
+} from "../internal/types.js";
 import { sanitizePascal } from "./names.js";
-import { unsupportedTypeSeverity } from "./policy.js";
 
 export type EnumGraph = {
   readonly enums: ReadonlyMap<string, EnumDefinition>;
@@ -17,15 +15,12 @@ export type EnumGraph = {
 };
 
 export const compileEnums = (
-  config: NormalizedCodegenConfig,
   definitions: ReadonlyMap<string, OpcuaDataTypeDefinition>,
 ): EnumGraph => {
   const issues: CodegenIssue[] = [];
   const enums = new Map<string, EnumDefinition>();
   const invalidEnums = new Set<string>();
   const names = new Map<string, string[]>();
-  const unsupportedSeverity = unsupportedTypeSeverity(config);
-
   for (const [nodeId, definition] of definitions) {
     if (definition._tag !== "Enum") continue;
     const name = sanitizePascal(definition.name);
@@ -33,7 +28,7 @@ export const compileEnums = (
       invalidEnums.add(nodeId);
       issues.push(
         issue("enum.emptyName", {
-          severity: unsupportedSeverity,
+          severity: "error",
           message: `Enum ${nodeId} has no usable generated name`,
           nodeId,
         }),
@@ -48,7 +43,7 @@ export const compileEnums = (
       for (const nodeId of nodeIds) invalidEnums.add(nodeId);
       issues.push(
         issue("enum.nameCollision", {
-          severity: unsupportedSeverity,
+          severity: "error",
           message: `Multiple enum DataTypes generate ${name}`,
           generatedPath: [name],
           cause: { candidates: nodeIds },
@@ -87,7 +82,7 @@ export const compileEnums = (
       invalidEnums.add(nodeId);
       issues.push(
         issue("enum.memberNameCollision", {
-          severity: unsupportedSeverity,
+          severity: "error",
           message: `Enum ${name} has colliding generated member ${collision[0]}`,
           nodeId,
           generatedPath: [name, collision[0]],

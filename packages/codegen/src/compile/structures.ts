@@ -4,21 +4,21 @@ import type {
 } from "@effect-opcua/client/OpcuaSession";
 
 import { issue } from "../diagnostics.js";
+import type { CodegenIssue } from "../types.js";
 import type {
-  CodegenIssue,
   EnumDefinition,
   NormalizedCodegenConfig,
   SchemaExpression,
   StructureDefinition,
   StructureFieldDefinition,
-} from "../types.js";
+} from "../internal/types.js";
 import {
   isDynamicScalarDataType,
   isUnsupportedArrayRank,
   scalarSchema,
 } from "./builtin-types.js";
 import { nodeOpcuaFieldName, sanitizeCamel, sanitizePascal } from "./names.js";
-import { unsupportedTypeSeverity } from "./policy.js";
+import { typeFallbackSeverity } from "./policy.js";
 
 export type StructureGraph = {
   readonly structures: ReadonlyMap<string, StructureDefinition>;
@@ -33,7 +33,7 @@ export const compileStructures = (
   invalidEnums: ReadonlySet<string>,
 ): StructureGraph => {
   const issues: CodegenIssue[] = [];
-  const unsupportedSeverity = unsupportedTypeSeverity(config);
+  const unsupportedSeverity = typeFallbackSeverity(config);
   const rawStructures = new Map<string, OpcuaStructureDefinition>();
   const invalidStructures = new Set<string>();
   const structureNames = new Map<string, string>();
@@ -47,7 +47,7 @@ export const compileStructures = (
       invalidStructures.add(nodeId);
       issues.push(
         issue("structure.emptyName", {
-          severity: unsupportedSeverity,
+          severity: "error",
           message: `Structure ${nodeId} has no usable generated name`,
           nodeId,
         }),
@@ -63,7 +63,7 @@ export const compileStructures = (
       for (const nodeId of nodeIds) invalidStructures.add(nodeId);
       issues.push(
         issue("structure.nameCollision", {
-          severity: unsupportedSeverity,
+          severity: "error",
           message: `Multiple structure DataTypes generate ${name}`,
           generatedPath: [name],
           cause: { candidates: nodeIds },
@@ -129,7 +129,7 @@ export const compileStructures = (
       invalidStructures.add(nodeId);
       issues.push(
         issue("structure.fieldNameCollision", {
-          severity: unsupportedSeverity,
+          severity: "error",
           message: `Structure ${name} has colliding generated field ${collision[0]}`,
           nodeId,
           generatedPath: [name, collision[0]],

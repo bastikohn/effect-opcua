@@ -2,7 +2,10 @@
 import { Effect } from "effect";
 
 import { loadConfig } from "./config.js";
-import { checkNormalized, generateNormalized } from "./generate.js";
+import {
+  checkFromNormalizedConfig,
+  generateFromNormalizedConfig,
+} from "./generate.js";
 import { displayPath } from "./diagnostics.js";
 import type { CodegenIssue } from "./types.js";
 
@@ -22,8 +25,8 @@ const main = async () => {
   const effect = Effect.gen(function* () {
     const config = yield* loadConfig(options.configPath);
     return options.check
-      ? yield* checkNormalized(config)
-      : yield* generateNormalized(config);
+      ? yield* checkFromNormalizedConfig(config)
+      : yield* generateFromNormalizedConfig(config);
   });
 
   try {
@@ -37,9 +40,7 @@ const main = async () => {
         process.exitCode = 1;
         return;
       }
-      process.stdout.write(
-        `Generated output is up to date (${result.files.length} files checked).\n`,
-      );
+      process.stdout.write("Generated output is up to date.\n");
       return;
     }
     process.stdout.write(`Generated ${result.writtenFiles.length} files.\n`);

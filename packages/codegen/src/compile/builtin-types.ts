@@ -1,4 +1,4 @@
-import type { ScalarSchema } from "../types.js";
+import type { ScalarSchema } from "../internal/types.js";
 
 const numericDataTypeNodeIds = new Set([
   "i=2",

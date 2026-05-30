@@ -5,8 +5,8 @@ import type { OpcuaNodeMetadata } from "@effect-opcua/client/OpcuaSession";
 
 import { errorIssue, issue, sortIssues } from "./diagnostics.js";
 import { codegenError } from "./errors.js";
+import type { CodegenIssue, PathPatternSegment } from "./types.js";
 import type {
-  CodegenIssue,
   DiscoveredNode,
   DiscoveredReference,
   DiscoveredRoot,
@@ -15,7 +15,7 @@ import type {
   NormalizedCodegenConfig,
   NormalizedExcludeRule,
   NormalizedRootConfig,
-} from "./types.js";
+} from "./internal/types.js";
 
 type TraversalItem = {
   readonly nodeId: string;
@@ -29,6 +29,11 @@ type NodeDraft = Omit<DiscoveredNode, "path" | "allPaths"> & {
   path: readonly string[];
   allPaths: readonly (readonly string[])[];
   rootSegmentCount: number;
+};
+
+type MetadataTargetReference = {
+  readonly nodeId: { readonly text: string };
+  readonly browseName?: { readonly name?: string };
 };
 
 const objectsFolderNodeId = "i=85";
@@ -97,7 +102,7 @@ export const discover = (
         });
         if (browseIssue.severity === "error") {
           return yield* Effect.fail(
-            codegenError({ _tag: "DiscoveryFailed" }, [browseIssue]),
+            codegenError({ _tag: "Discovery" }, [browseIssue]),
           );
         }
         issues.push(browseIssue);
@@ -108,7 +113,7 @@ export const discover = (
       const duplicate = duplicateBrowseName(children);
       if (duplicate) {
         return yield* Effect.fail(
-          codegenError({ _tag: "DiscoveryFailed" }, [
+          codegenError({ _tag: "Discovery" }, [
             errorIssue("browse.ambiguousPath", {
               message: "Multiple children have the same BrowseName segment",
               path: [...current.path, duplicate.name],
@@ -262,7 +267,7 @@ const resolvePathRoot = (
       const result = yield* session.browseChildren(currentNodeId);
       if (result._tag === "NonGoodStatus") {
         return yield* Effect.fail(
-          codegenError({ _tag: "DiscoveryFailed" }, [
+          codegenError({ _tag: "Discovery" }, [
             errorIssue("root.resolutionFailed", {
               message: `Could not browse ${currentNodeId} while resolving ${displayPath(root.path)}`,
               path: root.path,
@@ -277,7 +282,7 @@ const resolvePathRoot = (
       );
       if (matches.length === 0) {
         return yield* Effect.fail(
-          codegenError({ _tag: "DiscoveryFailed" }, [
+          codegenError({ _tag: "Discovery" }, [
             errorIssue("root.resolutionFailed", {
               message: `Missing root path segment ${segment}`,
               path: [...resolvedSegments, segment],
@@ -287,7 +292,7 @@ const resolvePathRoot = (
       }
       if (matches.length > 1) {
         return yield* Effect.fail(
-          codegenError({ _tag: "DiscoveryFailed" }, [
+          codegenError({ _tag: "Discovery" }, [
             errorIssue("browse.ambiguousPath", {
               message: "Multiple children match the root path segment",
               path: [...resolvedSegments, segment],
@@ -361,15 +366,11 @@ const readChildMetadata = (
   parentPath: readonly string[],
 ) =>
   Effect.gen(function* () {
-    const metadataTargets = children.flatMap((child) => {
-      const browseName = child.browseName?.name;
-      const targetNodeId = child.nodeId.text;
-      if (!browseName || !targetNodeId) return [];
-      const childPath = [...parentPath, browseName];
-      return matchingExclude(exclude, childPath)?.mode === "omit"
-        ? []
-        : [targetNodeId];
-    });
+    const metadataTargets = metadataTargetNodeIds(
+      children,
+      exclude,
+      parentPath,
+    );
     if (metadataTargets.length === 0) {
       return new Map<string, OpcuaNodeMetadata>();
     }
@@ -378,7 +379,7 @@ const readChildMetadata = (
     const failed = results.find((result) => result._tag === "Failure");
     if (failed?._tag === "Failure") {
       return yield* Effect.fail(
-        codegenError({ _tag: "DiscoveryFailed" }, [
+        codegenError({ _tag: "Discovery" }, [
           errorIssue("metadata.readFailed", {
             message: `Could not read metadata for ${failed.nodeId}`,
             nodeId: failed.nodeId,
@@ -397,8 +398,21 @@ const readChildMetadata = (
     );
   });
 
+export const metadataTargetNodeIds = (
+  children: readonly MetadataTargetReference[],
+  exclude: readonly NormalizedExcludeRule[],
+  parentPath: readonly string[],
+) =>
+  children.flatMap((child) => {
+    const browseName = child.browseName?.name;
+    const targetNodeId = child.nodeId.text;
+    if (!browseName || !targetNodeId) return [];
+    const childPath = [...parentPath, browseName];
+    return matchingExclude(exclude, childPath) ? [] : [targetNodeId];
+  });
+
 const matchPathPattern = (
-  pattern: readonly import("./types.js").PathPatternSegment[],
+  pattern: readonly PathPatternSegment[],
   path: readonly string[],
 ): boolean => {
   const match = (patternIndex: number, pathIndex: number): boolean => {
@@ -420,7 +434,7 @@ const matchPathPattern = (
 };
 
 const segmentMatches = (
-  pattern: Exclude<import("./types.js").PathPatternSegment, "**">,
+  pattern: Exclude<PathPatternSegment, "**">,
   segment: string,
 ) => (pattern instanceof RegExp ? pattern.test(segment) : pattern === segment);
 
@@ -650,5 +664,3 @@ const displayPath = (path: readonly string[]) => path.join(" / ");
 
 const normalizeNamespaceZeroNodeId = (nodeId: string) =>
   nodeId.startsWith("ns=0;") ? nodeId.slice("ns=0;".length) : nodeId;
-
-export const discoverAddressSpace = discover;

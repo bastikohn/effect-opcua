@@ -38,6 +38,8 @@ export default defineConfig({
       mode: "omit",
     },
   ],
+  // Optional for exploratory runs against incomplete servers. Defaults to fail.
+  diagnostics: { typeFallback: "fail" },
 });
 ```
 
@@ -74,8 +76,30 @@ alphanumeric separators are removed, so `Axis_ManualControl1` becomes
 If two siblings generate the same key, codegen fails with a diagnostic instead
 of silently choosing one. If a variable references a custom data type without a
 usable definition, codegen fails by default instead of broadening the generated
-contract. Use `diagnostics.unsupportedTypes: "warn-dynamic"` for exploration
-against incomplete servers.
+contract. Use `diagnostics.typeFallback: "dynamic"` for exploration against
+incomplete servers.
+
+## Generated Usage
+
+Prefer generated `Variables` for client operations; `NodeIds` are mainly an
+escape hatch for low-level cases.
+
+```ts
+import { OpcuaSession } from "@effect-opcua/client";
+import { Variables } from "./generated/index.js";
+
+yield * OpcuaSession.read(Variables.Filling.Tank.LevelMl);
+yield * OpcuaSession.write(Variables.Commands.SubmitRequest, request);
+yield *
+  OpcuaSession.readMany({
+    level: Variables.Filling.Tank.LevelMl,
+    state: Variables.State.MachineState,
+  });
+yield *
+  OpcuaSession.writeMany({
+    submit: [Variables.Commands.SubmitRequest, request],
+  });
+```
 
 ## Enum And Structure Scope
 
@@ -87,7 +111,7 @@ metadata there. Codegen does not dump every DataType under `Types`.
 
 If a server does not expose supported metadata for a referenced type, codegen
 does not infer it from sample values, encoding nodes, or legacy
-DataTypeDictionary nodes. In `warn-dynamic` mode, unsupported structure fields
+DataTypeDictionary nodes. In dynamic fallback mode, unsupported structure fields
 become `Schema.Unknown` and unsupported variable types use `Opcua.dynamic()`.
 Unions are reported and use the same broad fallbacks.
 

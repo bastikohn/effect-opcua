@@ -4,16 +4,16 @@ import type {
 } from "@effect-opcua/client/OpcuaSession";
 
 import { issue } from "../diagnostics.js";
+import type { CodegenIssue } from "../types.js";
 import type {
-  CodegenIssue,
   EnumDefinition,
   NormalizedCodegenConfig,
   StructureDefinition,
-} from "../types.js";
+} from "../internal/types.js";
 import { requiresDataTypeDefinition } from "./builtin-types.js";
 import { compileEnums } from "./enums.js";
 import type { SurfaceNode } from "./names.js";
-import { unsupportedTypeSeverity } from "./policy.js";
+import { typeFallbackSeverity } from "./policy.js";
 import { compileStructures } from "./structures.js";
 
 export type TypeGraph = {
@@ -36,7 +36,7 @@ export const compileReachableTypes = (
     dataTypeResults,
     issues,
   );
-  const enumGraph = compileEnums(config, rawDefinitions);
+  const enumGraph = compileEnums(rawDefinitions);
   const structureGraph = compileStructures(
     config,
     rawDefinitions,
@@ -62,7 +62,7 @@ const reachableDefinitions = (
   dataTypeResults: ReadonlyMap<string, OpcuaDataTypeDefinitionResult>,
   issues: CodegenIssue[],
 ): ReadonlyMap<string, OpcuaDataTypeDefinition> => {
-  const unsupportedSeverity = unsupportedTypeSeverity(config);
+  const unsupportedSeverity = typeFallbackSeverity(config);
   const queue = variableNodes
     .flatMap((item) =>
       item.node.dataTypeNodeId !== undefined ? [item.node.dataTypeNodeId] : [],
