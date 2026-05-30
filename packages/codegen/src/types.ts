@@ -238,6 +238,7 @@ export type StructureDefinition = {
 
 export type StructureFieldDefinition = {
   readonly name: string;
+  readonly encodedName: string;
   readonly originalName: string;
   readonly schema: SchemaExpression;
   readonly optional: boolean;

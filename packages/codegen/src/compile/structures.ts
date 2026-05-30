@@ -17,7 +17,7 @@ import {
   isUnsupportedArrayRank,
   scalarSchema,
 } from "./builtin-types.js";
-import { sanitizeCamel, sanitizePascal } from "./names.js";
+import { nodeOpcuaFieldName, sanitizeCamel, sanitizePascal } from "./names.js";
 import { unsupportedTypeSeverity } from "./policy.js";
 
 export type StructureGraph = {
@@ -165,6 +165,7 @@ export const compileStructures = (
         }
         return {
           name: fieldName,
+          encodedName: nodeOpcuaFieldName(field.name),
           originalName: field.name,
           optional: field.isOptional === true,
           schema: recursive

@@ -109,6 +109,105 @@ describe("compile and emit", () => {
     );
   });
 
+  it("lower-camelizes structure field names and preserves encoded keys", async () => {
+    const model = await compileFixture(
+      [
+        objectNode({
+          key: "root",
+          nodeId: "ns=2;s=PLC",
+          browseName: "PLC",
+          path: ["PLC"],
+        }),
+        variableNode({
+          key: "sample",
+          nodeId: "ns=2;s=PLC.Sample",
+          browseName: "Sample",
+          path: ["PLC", "Sample"],
+          dataTypeNodeId: "ns=2;i=5001",
+        }),
+      ],
+      {},
+      {
+        dataTypeDefinitions: [
+          {
+            _tag: "Success",
+            dataTypeNodeId: "ns=2;i=5001",
+            definition: {
+              _tag: "Structure",
+              dataTypeNodeId: "ns=2;i=5001",
+              name: "Widget.Payload",
+              structureType: "Structure",
+              fields: [
+                { name: "NOVA", dataTypeNodeId: "i=1", valueRank: -1 },
+                {
+                  name: "OrbitLAMP",
+                  dataTypeNodeId: "i=1",
+                  valueRank: -1,
+                },
+                {
+                  name: "QUASARbeamCounter",
+                  dataTypeNodeId: "i=1",
+                  valueRank: -1,
+                },
+                {
+                  name: "PLUTOsignalAtCrater",
+                  dataTypeNodeId: "i=1",
+                  valueRank: -1,
+                },
+                { name: "NoodleFLAG", dataTypeNodeId: "i=1", valueRank: -1 },
+                { name: "READY", dataTypeNodeId: "i=1", valueRank: -1 },
+                {
+                  name: "CLOUD",
+                  dataTypeNodeId: "i=1",
+                  valueRank: -1,
+                },
+              ],
+            },
+          },
+        ],
+      },
+    );
+
+    expect(model.structures).toMatchObject([
+      {
+        name: "WidgetPayload",
+        fields: [
+          { name: "nova", encodedName: "NOVA" },
+          { name: "orbitLamp", encodedName: "orbitLAMP" },
+          {
+            name: "quasarbeamCounter",
+            encodedName: "quASARbeamCounter",
+          },
+          {
+            name: "plutosignalAtCrater",
+            encodedName: "plUTOsignalAtCrater",
+          },
+          { name: "noodleFlag", encodedName: "noodleFLAG" },
+          { name: "ready", encodedName: "READY" },
+          { name: "cloud", encodedName: "CLOUD" },
+        ],
+      },
+    ]);
+
+    const files = Object.fromEntries(
+      emit(model).map((file) => [file.path, file.contents]),
+    );
+    expect(files["structures.ts"]).toContain("nova: Schema.Boolean");
+    expect(files["structures.ts"]).toContain("orbitLamp: Schema.Boolean");
+    expect(files["structures.ts"]).toContain(
+      "quasarbeamCounter: Schema.Boolean",
+    );
+    expect(files["structures.ts"]).toContain(
+      "plutosignalAtCrater: Schema.Boolean",
+    );
+    expect(files["structures.ts"]).toContain("noodleFlag: Schema.Boolean");
+    expect(files["structures.ts"]).toContain("ready: Schema.Boolean");
+    expect(files["structures.ts"]).toContain("cloud: Schema.Boolean");
+    expect(files["structures.ts"]).toContain(
+      'Schema.encodeKeys({\n    nova: "NOVA",\n    orbitLamp: "orbitLAMP",\n    quasarbeamCounter: "quASARbeamCounter",\n    plutosignalAtCrater: "plUTOsignalAtCrater",\n    noodleFlag: "noodleFLAG",\n    ready: "READY",\n    cloud: "CLOUD",\n  })',
+    );
+  });
+
   it("fails on sibling browse names with colliding generated keys", async () => {
     await expect(
       compileFixture([
@@ -310,6 +409,9 @@ describe("compile and emit", () => {
 const compileFixture = async (
   nodes: readonly DiscoveredNode[],
   configOverrides: Partial<CodegenConfig> = {},
+  discoveryOverrides: Partial<
+    Pick<DiscoveryModel, "dataTypeDefinitions" | "issues">
+  > = {},
 ) =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -323,7 +425,7 @@ const compileFixture = async (
         roots: [{ rootIndex: 0, nodeId: "ns=2;s=PLC", path: ["PLC"] }],
         nodes: new Map(nodes.map((node) => [node.key, node])),
         references: [],
-        dataTypeDefinitions: [
+        dataTypeDefinitions: discoveryOverrides.dataTypeDefinitions ?? [
           {
             _tag: "Success",
             dataTypeNodeId: "ns=2;i=3001",
@@ -361,7 +463,7 @@ const compileFixture = async (
             },
           },
         ],
-        issues: [],
+        issues: discoveryOverrides.issues ?? [],
       } satisfies DiscoveryModel);
     }),
   );

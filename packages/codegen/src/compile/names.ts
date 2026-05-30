@@ -71,11 +71,25 @@ export const sanitizePascal = (value: string): string | undefined => {
 };
 
 export const sanitizeCamel = (value: string): string | undefined => {
-  const pascal = sanitizePascal(value);
-  if (!pascal) return undefined;
-  return pascal.startsWith("_")
-    ? pascal
-    : `${pascal.charAt(0).toLowerCase()}${pascal.slice(1)}`;
+  const parts = identifierWords(value);
+  if (parts.length === 0) return undefined;
+  const joined = parts
+    .map((part, index) =>
+      index === 0 ? part.toLowerCase() : capitalize(part.toLowerCase()),
+    )
+    .join("");
+  return /^[0-9]/.test(joined) ? `_${joined}` : joined;
+};
+
+export const nodeOpcuaFieldName = (value: string): string => {
+  if (value.length >= 2 && isAllUpperAlpha(value)) return value;
+  if (value.includes("_"))
+    return value.split("_").map(nodeOpcuaFieldName).join("_");
+  let result = `${value.charAt(0).toLowerCase()}${value.slice(1)}`;
+  if (result.length > 3 && isUpper(value[1] ?? "") && isUpper(value[2] ?? "")) {
+    result = `${value.slice(0, 2).toLowerCase()}${value.slice(2)}`;
+  }
+  return result;
 };
 
 export const pathKey = (path: readonly string[]) => path.join(".");
@@ -112,3 +126,21 @@ const groupByParent = (items: readonly SurfaceNode[]) => {
 
 const capitalize = (word: string) =>
   word.length === 0 ? word : `${word.charAt(0).toUpperCase()}${word.slice(1)}`;
+
+const identifierWords = (value: string): readonly string[] =>
+  (value.match(/[A-Za-z0-9]+/g) ?? []).flatMap(splitIdentifierPart);
+
+const splitIdentifierPart = (part: string): readonly string[] =>
+  part.replace(/([a-z0-9])([A-Z])/g, "$1 $2").match(/[A-Za-z0-9]+/g) ?? [];
+
+const isAllUpperAlpha = (value: string) => {
+  let alpha = 0;
+  for (const char of value) {
+    if (isLower(char)) return false;
+    if (isUpper(char)) alpha++;
+  }
+  return alpha > 0;
+};
+
+const isLower = (char: string) => char >= "a" && char <= "z";
+const isUpper = (char: string) => char >= "A" && char <= "Z";

@@ -136,7 +136,22 @@ const emitStructures = (structures: readonly StructureDefinition[]) => {
         },`,
       );
     }
-    lines.push("});");
+    const encodedKeys = item.fields.filter(
+      (field) => field.name !== field.encodedName,
+    );
+    if (encodedKeys.length === 0) {
+      lines.push("});");
+    } else {
+      lines.push("}).pipe(");
+      lines.push(`${indent(1)}Schema.encodeKeys({`);
+      for (const field of encodedKeys) {
+        lines.push(
+          `${indent(2)}${field.name}: ${JSON.stringify(field.encodedName)},`,
+        );
+      }
+      lines.push(`${indent(1)}}),`);
+      lines.push(");");
+    }
     lines.push("");
     lines.push(`export type ${item.name} = typeof ${item.name}Schema.Type;`);
     lines.push("");
