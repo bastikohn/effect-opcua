@@ -36,32 +36,46 @@ export const Diagnostics = {
     Filling: {
       PumpFault: "ns=1;s=DemoFillingCell.Diagnostics.Faults.Filling.PumpFault",
       TankEmpty: "ns=1;s=DemoFillingCell.Diagnostics.Faults.Filling.TankEmpty",
-      ValveFault: "ns=1;s=DemoFillingCell.Diagnostics.Faults.Filling.ValveFault",
+      ValveFault:
+        "ns=1;s=DemoFillingCell.Diagnostics.Faults.Filling.ValveFault",
     },
     Inspection: {
-      SensorFault: "ns=1;s=DemoFillingCell.Diagnostics.Faults.Inspection.SensorFault",
+      SensorFault:
+        "ns=1;s=DemoFillingCell.Diagnostics.Faults.Inspection.SensorFault",
     },
     Motion: {
-      XAxisNotHomed: "ns=1;s=DemoFillingCell.Diagnostics.Faults.Motion.XAxisNotHomed",
-      XAxisPositionError: "ns=1;s=DemoFillingCell.Diagnostics.Faults.Motion.XAxisPositionError",
-      ZAxisNotHomed: "ns=1;s=DemoFillingCell.Diagnostics.Faults.Motion.ZAxisNotHomed",
-      ZAxisPositionError: "ns=1;s=DemoFillingCell.Diagnostics.Faults.Motion.ZAxisPositionError",
+      XAxisNotHomed:
+        "ns=1;s=DemoFillingCell.Diagnostics.Faults.Motion.XAxisNotHomed",
+      XAxisPositionError:
+        "ns=1;s=DemoFillingCell.Diagnostics.Faults.Motion.XAxisPositionError",
+      ZAxisNotHomed:
+        "ns=1;s=DemoFillingCell.Diagnostics.Faults.Motion.ZAxisNotHomed",
+      ZAxisPositionError:
+        "ns=1;s=DemoFillingCell.Diagnostics.Faults.Motion.ZAxisPositionError",
     },
     PartHandling: {
-      ClampFailedToClose: "ns=1;s=DemoFillingCell.Diagnostics.Faults.PartHandling.ClampFailedToClose",
+      ClampFailedToClose:
+        "ns=1;s=DemoFillingCell.Diagnostics.Faults.PartHandling.ClampFailedToClose",
     },
   },
   Summary: {
-    ActiveFaultCount: "ns=1;s=DemoFillingCell.Diagnostics.Summary.ActiveFaultCount",
-    ActiveWarningCount: "ns=1;s=DemoFillingCell.Diagnostics.Summary.ActiveWarningCount",
-    HighestSeverity: "ns=1;s=DemoFillingCell.Diagnostics.Summary.HighestSeverity",
-    PrimaryFaultCode: "ns=1;s=DemoFillingCell.Diagnostics.Summary.PrimaryFaultCode",
+    ActiveFaultCount:
+      "ns=1;s=DemoFillingCell.Diagnostics.Summary.ActiveFaultCount",
+    ActiveWarningCount:
+      "ns=1;s=DemoFillingCell.Diagnostics.Summary.ActiveWarningCount",
+    HighestSeverity:
+      "ns=1;s=DemoFillingCell.Diagnostics.Summary.HighestSeverity",
+    PrimaryFaultCode:
+      "ns=1;s=DemoFillingCell.Diagnostics.Summary.PrimaryFaultCode",
   },
   Warnings: {
     CycleTimeHigh: "ns=1;s=DemoFillingCell.Diagnostics.Warnings.CycleTimeHigh",
-    FillLevelDrift: "ns=1;s=DemoFillingCell.Diagnostics.Warnings.FillLevelDrift",
-    InspectionRejectRateHigh: "ns=1;s=DemoFillingCell.Diagnostics.Warnings.InspectionRejectRateHigh",
-    MaintenanceRecommended: "ns=1;s=DemoFillingCell.Diagnostics.Warnings.MaintenanceRecommended",
+    FillLevelDrift:
+      "ns=1;s=DemoFillingCell.Diagnostics.Warnings.FillLevelDrift",
+    InspectionRejectRateHigh:
+      "ns=1;s=DemoFillingCell.Diagnostics.Warnings.InspectionRejectRateHigh",
+    MaintenanceRecommended:
+      "ns=1;s=DemoFillingCell.Diagnostics.Warnings.MaintenanceRecommended",
     TankLow: "ns=1;s=DemoFillingCell.Diagnostics.Warnings.TankLow",
   },
 } as const;
@@ -83,7 +97,8 @@ export const Filling = {
     EmptyThresholdMl: "ns=1;s=DemoFillingCell.Filling.Tank.EmptyThresholdMl",
     LevelMl: "ns=1;s=DemoFillingCell.Filling.Tank.LevelMl",
     LowLevel: "ns=1;s=DemoFillingCell.Filling.Tank.LowLevel",
-    LowLevelThresholdMl: "ns=1;s=DemoFillingCell.Filling.Tank.LowLevelThresholdMl",
+    LowLevelThresholdMl:
+      "ns=1;s=DemoFillingCell.Filling.Tank.LowLevelThresholdMl",
   },
 } as const;
 export const Inspection = {
@@ -96,50 +111,67 @@ export const Inspection = {
 export const Motion = {
   XAxis: {
     ActualPositionMm: "ns=1;s=DemoFillingCell.Motion.XAxis.ActualPositionMm",
-    ActualVelocityMmPerSecond: "ns=1;s=DemoFillingCell.Motion.XAxis.ActualVelocityMmPerSecond",
+    ActualVelocityMmPerSecond:
+      "ns=1;s=DemoFillingCell.Motion.XAxis.ActualVelocityMmPerSecond",
     AtFill: "ns=1;s=DemoFillingCell.Motion.XAxis.AtFill",
     AtHome: "ns=1;s=DemoFillingCell.Motion.XAxis.AtHome",
     AtInspect: "ns=1;s=DemoFillingCell.Motion.XAxis.AtInspect",
     AtLoad: "ns=1;s=DemoFillingCell.Motion.XAxis.AtLoad",
     AtUnload: "ns=1;s=DemoFillingCell.Motion.XAxis.AtUnload",
-    CommandedVelocityMmPerSecond: "ns=1;s=DemoFillingCell.Motion.XAxis.CommandedVelocityMmPerSecond",
+    CommandedVelocityMmPerSecond:
+      "ns=1;s=DemoFillingCell.Motion.XAxis.CommandedVelocityMmPerSecond",
     CurrentTarget: "ns=1;s=DemoFillingCell.Motion.XAxis.CurrentTarget",
     Enabled: "ns=1;s=DemoFillingCell.Motion.XAxis.Enabled",
     FaultCode: "ns=1;s=DemoFillingCell.Motion.XAxis.FaultCode",
     Homed: "ns=1;s=DemoFillingCell.Motion.XAxis.Homed",
-    NegativeLimitActive: "ns=1;s=DemoFillingCell.Motion.XAxis.NegativeLimitActive",
-    PositiveLimitActive: "ns=1;s=DemoFillingCell.Motion.XAxis.PositiveLimitActive",
+    NegativeLimitActive:
+      "ns=1;s=DemoFillingCell.Motion.XAxis.NegativeLimitActive",
+    PositiveLimitActive:
+      "ns=1;s=DemoFillingCell.Motion.XAxis.PositiveLimitActive",
     State: "ns=1;s=DemoFillingCell.Motion.XAxis.State",
     TargetPositionMm: "ns=1;s=DemoFillingCell.Motion.XAxis.TargetPositionMm",
     Targets: {
-      FillPositionMm: "ns=1;s=DemoFillingCell.Motion.XAxis.Targets.FillPositionMm",
-      HomePositionMm: "ns=1;s=DemoFillingCell.Motion.XAxis.Targets.HomePositionMm",
-      InspectPositionMm: "ns=1;s=DemoFillingCell.Motion.XAxis.Targets.InspectPositionMm",
-      LoadPositionMm: "ns=1;s=DemoFillingCell.Motion.XAxis.Targets.LoadPositionMm",
-      UnloadPositionMm: "ns=1;s=DemoFillingCell.Motion.XAxis.Targets.UnloadPositionMm",
+      FillPositionMm:
+        "ns=1;s=DemoFillingCell.Motion.XAxis.Targets.FillPositionMm",
+      HomePositionMm:
+        "ns=1;s=DemoFillingCell.Motion.XAxis.Targets.HomePositionMm",
+      InspectPositionMm:
+        "ns=1;s=DemoFillingCell.Motion.XAxis.Targets.InspectPositionMm",
+      LoadPositionMm:
+        "ns=1;s=DemoFillingCell.Motion.XAxis.Targets.LoadPositionMm",
+      UnloadPositionMm:
+        "ns=1;s=DemoFillingCell.Motion.XAxis.Targets.UnloadPositionMm",
     },
   },
   ZAxis: {
     ActualPositionMm: "ns=1;s=DemoFillingCell.Motion.ZAxis.ActualPositionMm",
-    ActualVelocityMmPerSecond: "ns=1;s=DemoFillingCell.Motion.ZAxis.ActualVelocityMmPerSecond",
+    ActualVelocityMmPerSecond:
+      "ns=1;s=DemoFillingCell.Motion.ZAxis.ActualVelocityMmPerSecond",
     AtFill: "ns=1;s=DemoFillingCell.Motion.ZAxis.AtFill",
     AtHome: "ns=1;s=DemoFillingCell.Motion.ZAxis.AtHome",
     AtMaintenance: "ns=1;s=DemoFillingCell.Motion.ZAxis.AtMaintenance",
     AtSafe: "ns=1;s=DemoFillingCell.Motion.ZAxis.AtSafe",
-    CommandedVelocityMmPerSecond: "ns=1;s=DemoFillingCell.Motion.ZAxis.CommandedVelocityMmPerSecond",
+    CommandedVelocityMmPerSecond:
+      "ns=1;s=DemoFillingCell.Motion.ZAxis.CommandedVelocityMmPerSecond",
     CurrentTarget: "ns=1;s=DemoFillingCell.Motion.ZAxis.CurrentTarget",
     Enabled: "ns=1;s=DemoFillingCell.Motion.ZAxis.Enabled",
     FaultCode: "ns=1;s=DemoFillingCell.Motion.ZAxis.FaultCode",
     Homed: "ns=1;s=DemoFillingCell.Motion.ZAxis.Homed",
-    NegativeLimitActive: "ns=1;s=DemoFillingCell.Motion.ZAxis.NegativeLimitActive",
-    PositiveLimitActive: "ns=1;s=DemoFillingCell.Motion.ZAxis.PositiveLimitActive",
+    NegativeLimitActive:
+      "ns=1;s=DemoFillingCell.Motion.ZAxis.NegativeLimitActive",
+    PositiveLimitActive:
+      "ns=1;s=DemoFillingCell.Motion.ZAxis.PositiveLimitActive",
     State: "ns=1;s=DemoFillingCell.Motion.ZAxis.State",
     TargetPositionMm: "ns=1;s=DemoFillingCell.Motion.ZAxis.TargetPositionMm",
     Targets: {
-      FillPositionMm: "ns=1;s=DemoFillingCell.Motion.ZAxis.Targets.FillPositionMm",
-      HomePositionMm: "ns=1;s=DemoFillingCell.Motion.ZAxis.Targets.HomePositionMm",
-      MaintenancePositionMm: "ns=1;s=DemoFillingCell.Motion.ZAxis.Targets.MaintenancePositionMm",
-      SafePositionMm: "ns=1;s=DemoFillingCell.Motion.ZAxis.Targets.SafePositionMm",
+      FillPositionMm:
+        "ns=1;s=DemoFillingCell.Motion.ZAxis.Targets.FillPositionMm",
+      HomePositionMm:
+        "ns=1;s=DemoFillingCell.Motion.ZAxis.Targets.HomePositionMm",
+      MaintenancePositionMm:
+        "ns=1;s=DemoFillingCell.Motion.ZAxis.Targets.MaintenancePositionMm",
+      SafePositionMm:
+        "ns=1;s=DemoFillingCell.Motion.ZAxis.Targets.SafePositionMm",
     },
   },
 } as const;
@@ -164,17 +196,22 @@ export const Production = {
   CurrentPart: {
     FillVolumeMl: "ns=1;s=DemoFillingCell.Production.CurrentPart.FillVolumeMl",
     Index: "ns=1;s=DemoFillingCell.Production.CurrentPart.Index",
-    InspectionResult: "ns=1;s=DemoFillingCell.Production.CurrentPart.InspectionResult",
+    InspectionResult:
+      "ns=1;s=DemoFillingCell.Production.CurrentPart.InspectionResult",
     RejectReason: "ns=1;s=DemoFillingCell.Production.CurrentPart.RejectReason",
   },
   Lifetime: {
-    TotalCompletedCount: "ns=1;s=DemoFillingCell.Production.Lifetime.TotalCompletedCount",
+    TotalCompletedCount:
+      "ns=1;s=DemoFillingCell.Production.Lifetime.TotalCompletedCount",
     TotalGoodCount: "ns=1;s=DemoFillingCell.Production.Lifetime.TotalGoodCount",
-    TotalRejectedCount: "ns=1;s=DemoFillingCell.Production.Lifetime.TotalRejectedCount",
+    TotalRejectedCount:
+      "ns=1;s=DemoFillingCell.Production.Lifetime.TotalRejectedCount",
   },
   Timing: {
-    AverageCycleTimeMs: "ns=1;s=DemoFillingCell.Production.Timing.AverageCycleTimeMs",
-    BatchElapsedTimeMs: "ns=1;s=DemoFillingCell.Production.Timing.BatchElapsedTimeMs",
+    AverageCycleTimeMs:
+      "ns=1;s=DemoFillingCell.Production.Timing.AverageCycleTimeMs",
+    BatchElapsedTimeMs:
+      "ns=1;s=DemoFillingCell.Production.Timing.BatchElapsedTimeMs",
     LastCycleTimeMs: "ns=1;s=DemoFillingCell.Production.Timing.LastCycleTimeMs",
   },
 } as const;
@@ -182,12 +219,18 @@ export const Safety = {
   EmergencyStopState: "ns=1;s=DemoFillingCell.Safety.EmergencyStopState",
   GuardDoorState: "ns=1;s=DemoFillingCell.Safety.GuardDoorState",
   Reset: {
-    MachineResetBlockedMessage: "ns=1;s=DemoFillingCell.Safety.Reset.MachineResetBlockedMessage",
-    MachineResetBlockedReasonCode: "ns=1;s=DemoFillingCell.Safety.Reset.MachineResetBlockedReasonCode",
-    MachineResetPossible: "ns=1;s=DemoFillingCell.Safety.Reset.MachineResetPossible",
-    SafetyResetAcknowledgePossible: "ns=1;s=DemoFillingCell.Safety.Reset.SafetyResetAcknowledgePossible",
-    SafetyResetBlockedMessage: "ns=1;s=DemoFillingCell.Safety.Reset.SafetyResetBlockedMessage",
-    SafetyResetBlockedReasonCode: "ns=1;s=DemoFillingCell.Safety.Reset.SafetyResetBlockedReasonCode",
+    MachineResetBlockedMessage:
+      "ns=1;s=DemoFillingCell.Safety.Reset.MachineResetBlockedMessage",
+    MachineResetBlockedReasonCode:
+      "ns=1;s=DemoFillingCell.Safety.Reset.MachineResetBlockedReasonCode",
+    MachineResetPossible:
+      "ns=1;s=DemoFillingCell.Safety.Reset.MachineResetPossible",
+    SafetyResetAcknowledgePossible:
+      "ns=1;s=DemoFillingCell.Safety.Reset.SafetyResetAcknowledgePossible",
+    SafetyResetBlockedMessage:
+      "ns=1;s=DemoFillingCell.Safety.Reset.SafetyResetBlockedMessage",
+    SafetyResetBlockedReasonCode:
+      "ns=1;s=DemoFillingCell.Safety.Reset.SafetyResetBlockedReasonCode",
   },
   ResetRequired: "ns=1;s=DemoFillingCell.Safety.ResetRequired",
   SafetyCircuitState: "ns=1;s=DemoFillingCell.Safety.SafetyCircuitState",
@@ -197,13 +240,19 @@ export const State = {
   Busy: "ns=1;s=DemoFillingCell.State.Busy",
   Configuration: {
     BatchSize: "ns=1;s=DemoFillingCell.State.Configuration.BatchSize",
-    ConfigurationValid: "ns=1;s=DemoFillingCell.State.Configuration.ConfigurationValid",
-    FillToleranceMl: "ns=1;s=DemoFillingCell.State.Configuration.FillToleranceMl",
+    ConfigurationValid:
+      "ns=1;s=DemoFillingCell.State.Configuration.ConfigurationValid",
+    FillToleranceMl:
+      "ns=1;s=DemoFillingCell.State.Configuration.FillToleranceMl",
     ProductName: "ns=1;s=DemoFillingCell.State.Configuration.ProductName",
-    PumpRateMlPerSecond: "ns=1;s=DemoFillingCell.State.Configuration.PumpRateMlPerSecond",
-    TargetFillVolumeMl: "ns=1;s=DemoFillingCell.State.Configuration.TargetFillVolumeMl",
-    XAxisSpeedMmPerSecond: "ns=1;s=DemoFillingCell.State.Configuration.XAxisSpeedMmPerSecond",
-    ZAxisSpeedMmPerSecond: "ns=1;s=DemoFillingCell.State.Configuration.ZAxisSpeedMmPerSecond",
+    PumpRateMlPerSecond:
+      "ns=1;s=DemoFillingCell.State.Configuration.PumpRateMlPerSecond",
+    TargetFillVolumeMl:
+      "ns=1;s=DemoFillingCell.State.Configuration.TargetFillVolumeMl",
+    XAxisSpeedMmPerSecond:
+      "ns=1;s=DemoFillingCell.State.Configuration.XAxisSpeedMmPerSecond",
+    ZAxisSpeedMmPerSecond:
+      "ns=1;s=DemoFillingCell.State.Configuration.ZAxisSpeedMmPerSecond",
   },
   ConfigurationValid: "ns=1;s=DemoFillingCell.State.ConfigurationValid",
   CyclePhase: "ns=1;s=DemoFillingCell.State.CyclePhase",

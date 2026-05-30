@@ -23,14 +23,11 @@ export const codegenError = (
 ) => new CodegenError({ reason, issues });
 
 export const invalidConfig = (message: string, cause?: unknown) =>
-  codegenError(
-    { _tag: "InvalidConfig" },
-    [
-      {
-        severity: "error",
-        code: "config.invalid",
-        message,
-        cause,
-      },
-    ],
-  );
+  codegenError({ _tag: "InvalidConfig" }, [
+    {
+      severity: "error",
+      code: "config.invalid",
+      message,
+      cause,
+    },
+  ]);

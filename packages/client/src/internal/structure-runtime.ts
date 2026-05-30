@@ -1,8 +1,10 @@
 import {
   DataType,
+  DataTypeExtractStrategy,
   Variant,
   VariantArrayType,
   coerceNodeId,
+  getExtraDataTypeManager,
   sameNodeId,
   type ClientSession,
   type ExtensionObject,
@@ -160,7 +162,8 @@ const makeInitializeOnce = (session: ClientSession) =>
   Effect.runSync(
     Effect.cached(
       Effect.tryPromise({
-        try: () => session.extractNamespaceDataType(),
+        try: () =>
+          getExtraDataTypeManager(session, DataTypeExtractStrategy.Both),
         catch: (cause) =>
           serviceError({
             operation: "structure.extractNamespaceDataType",

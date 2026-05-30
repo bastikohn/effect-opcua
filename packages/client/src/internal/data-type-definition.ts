@@ -1,11 +1,16 @@
 import {
   AttributeIds,
   BrowseDirection,
+  DataTypeExtractStrategy,
   ReferenceTypeIds,
   StatusCodes,
   coerceNodeId,
+  convertStructureTypeSchemaToStructureDefinition,
+  getExtraDataTypeManager,
+  sameNodeId,
   type ClientSession,
   type DataValue,
+  type NodeId,
 } from "node-opcua";
 import { Effect } from "effect";
 
@@ -13,6 +18,10 @@ import type { NodeIdString } from "./capabilities.js";
 import type { MetadataService, OpcuaNodeMetadataResult } from "./metadata.js";
 import { isGood, normalizeStatusCode } from "./normalize.js";
 import { serviceError, type OpcuaError } from "../OpcuaError.js";
+
+type DynamicStructureSchema = Parameters<
+  typeof convertStructureTypeSchemaToStructureDefinition
+>[0];
 
 export type OpcuaDataTypeDefinitionResult =
   | {
@@ -79,9 +88,10 @@ export const readDataTypeDefinition = (
   metadata: MetadataService,
   dataTypeNodeId: NodeIdString,
 ): Effect.Effect<OpcuaDataTypeDefinitionResult, OpcuaError> =>
-  Effect.map(readManyDataTypeDefinitions(session, metadata, [dataTypeNodeId]), (
-    results,
-  ) => results[0]!);
+  Effect.map(
+    readManyDataTypeDefinitions(session, metadata, [dataTypeNodeId]),
+    (results) => results[0]!,
+  );
 
 export const readManyDataTypeDefinitions = (
   session: ClientSession,
@@ -91,6 +101,7 @@ export const readManyDataTypeDefinitions = (
   Effect.gen(function* () {
     if (dataTypeNodeIds.length === 0) return [];
     const metadataResults = yield* metadata.nodes(dataTypeNodeIds);
+    let dynamicManager: Promise<unknown> | undefined;
     const nodesToRead = dataTypeNodeIds.map((nodeId) => ({
       nodeId: coerceNodeId(nodeId),
       attributeId: AttributeIds.DataTypeDefinition,
@@ -120,16 +131,143 @@ export const readManyDataTypeDefinitions = (
             metadataResults[index],
             values[index],
           );
+          const name = dataTypeName(dataTypeNodeId, metadataResults[index]);
+          if (isEmptyStructureResult(result)) {
+            return yield* readDynamicDataTypeDefinition(
+              () =>
+                (dynamicManager ??= getExtraDataTypeManager(
+                  session,
+                  DataTypeExtractStrategy.Both,
+                )),
+              dataTypeNodeId,
+              name,
+            ).pipe(
+              Effect.map(
+                (fallback) =>
+                  fallback ?? {
+                    _tag: "Unsupported" as const,
+                    dataTypeNodeId,
+                    reason: "Structure DataTypeDefinition has no fields",
+                  },
+              ),
+            );
+          }
           if (result._tag !== "Missing") return result;
-          return yield* readEnumPropertyDefinition(
+          const enumFallback = yield* readEnumPropertyDefinition(
             session,
             dataTypeNodeId,
-            dataTypeName(dataTypeNodeId, metadataResults[index]),
+            name,
+          );
+          if (enumFallback) return enumFallback;
+          return yield* readDynamicDataTypeDefinition(
+            () =>
+              (dynamicManager ??= getExtraDataTypeManager(
+                session,
+                DataTypeExtractStrategy.Both,
+              )),
+            dataTypeNodeId,
+            name,
           ).pipe(Effect.map((fallback) => fallback ?? result));
         }),
       { concurrency: 1 },
     );
   });
+
+const isEmptyStructureResult = (result: OpcuaDataTypeDefinitionResult) =>
+  result._tag === "Success" &&
+  result.definition._tag === "Structure" &&
+  result.definition.fields.length === 0;
+
+const readDynamicDataTypeDefinition = (
+  getDynamicManager: () => Promise<unknown>,
+  dataTypeNodeId: string,
+  name: string,
+): Effect.Effect<OpcuaDataTypeDefinitionResult | undefined> =>
+  Effect.promise(async () => {
+    try {
+      const manager = await getDynamicManager();
+      const definition = normalizeDynamicDefinition(
+        manager,
+        dataTypeNodeId,
+        name,
+      );
+      return definition
+        ? {
+            _tag: "Success" as const,
+            dataTypeNodeId,
+            definition,
+          }
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  });
+
+const normalizeDynamicDefinition = (
+  manager: unknown,
+  dataTypeNodeId: string,
+  name: string,
+): OpcuaDataTypeDefinition | undefined => {
+  const nodeId = coerceNodeId(dataTypeNodeId);
+  const structureInfo = dynamicStructureInfo(manager, nodeId);
+  if (structureInfo) {
+    const raw = convertStructureTypeSchemaToStructureDefinition(
+      structureInfo.schema,
+    );
+    const definition = normalizeRawDefinition(dataTypeNodeId, name, raw);
+    return definition._tag === "Structure" && definition.fields.length > 0
+      ? definition
+      : undefined;
+  }
+  return dynamicEnumDefinition(manager, nodeId, dataTypeNodeId, name);
+};
+
+const dynamicStructureInfo = (
+  manager: unknown,
+  dataTypeNodeId: NodeId,
+): { readonly schema: DynamicStructureSchema } | undefined => {
+  if (!isRecord(manager)) return undefined;
+  const getStructureInfoForDataType = manager.getStructureInfoForDataType;
+  if (typeof getStructureInfoForDataType !== "function") return undefined;
+  const info = getStructureInfoForDataType.call(manager, dataTypeNodeId);
+  if (!isRecord(info) || !("schema" in info)) return undefined;
+  return info as { readonly schema: DynamicStructureSchema };
+};
+
+const dynamicEnumDefinition = (
+  manager: unknown,
+  nodeId: NodeId,
+  dataTypeNodeId: string,
+  name: string,
+): OpcuaEnumDefinition | undefined => {
+  if (!isRecord(manager)) return undefined;
+  const getDataTypeFactory = manager.getDataTypeFactory;
+  if (typeof getDataTypeFactory !== "function") return undefined;
+  const factory = getDataTypeFactory.call(manager, nodeId.namespace);
+  if (!isRecord(factory)) return undefined;
+  const getEnumIterator = factory.getEnumIterator;
+  if (typeof getEnumIterator !== "function") return undefined;
+  for (const rawEnum of getEnumIterator.call(factory) as Iterable<unknown>) {
+    if (!isRecord(rawEnum)) continue;
+    const rawNodeId = rawEnum.dataTypeNodeId;
+    if (
+      !isRecord(rawNodeId) ||
+      typeof rawNodeId.toString !== "function" ||
+      !sameNodeId(coerceNodeId(rawNodeId.toString()), nodeId)
+    ) {
+      continue;
+    }
+    const fields = enumFieldsFromMap(rawEnum.enumValues);
+    if (fields.length === 0) return undefined;
+    return {
+      _tag: "Enum",
+      dataTypeNodeId,
+      name,
+      fields,
+    };
+  }
+  return undefined;
+};
 
 const readEnumPropertyDefinition = (
   session: ClientSession,
@@ -254,9 +392,14 @@ const normalizeRawDefinition = (
   dataTypeNodeId: string,
   name: string,
   raw: unknown,
-): OpcuaDataTypeDefinition | { readonly _tag: "Unsupported"; readonly reason: string } => {
+):
+  | OpcuaDataTypeDefinition
+  | { readonly _tag: "Unsupported"; readonly reason: string } => {
   if (!isRecord(raw)) {
-    return { _tag: "Unsupported", reason: "DataTypeDefinition is not an object" };
+    return {
+      _tag: "Unsupported",
+      reason: "DataTypeDefinition is not an object",
+    };
   }
   if ("structureType" in raw) {
     return {
@@ -277,7 +420,10 @@ const normalizeRawDefinition = (
       fields: arrayValue(raw.fields).map((field) => normalizeEnumField(field)),
     };
   }
-  return { _tag: "Unsupported", reason: "Unsupported DataTypeDefinition shape" };
+  return {
+    _tag: "Unsupported",
+    reason: "Unsupported DataTypeDefinition shape",
+  };
 };
 
 const normalizeStructureField = (raw: unknown): OpcuaStructureField => {
@@ -299,6 +445,18 @@ const normalizeEnumField = (raw: unknown): OpcuaEnumField => {
     value: int64Number(raw.value),
     description: localizedText(raw.description),
   };
+};
+
+const enumFieldsFromMap = (raw: unknown): readonly OpcuaEnumField[] => {
+  if (Array.isArray(raw)) {
+    return raw.map((name, value) => ({ name: stringValue(name), value }));
+  }
+  if (!isRecord(raw)) return [];
+  return Object.entries(raw).flatMap(([name, value]) =>
+    Number.isNaN(Number(name)) && typeof value === "number"
+      ? [{ name, value }]
+      : [],
+  );
 };
 
 const normalizeEnumValues = (raw: unknown): readonly OpcuaEnumField[] => {

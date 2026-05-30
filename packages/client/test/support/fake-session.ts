@@ -66,8 +66,12 @@ export type FakeSessionOptions = {
   }) => CallMethodResult;
   readonly dataTypeSuperTypes?: Readonly<Record<string, string | NodeId>>;
   readonly dataTypeDefinitions?: Readonly<Record<string, unknown>>;
-  readonly dataTypeEnumValues?: Readonly<Record<string, ReadonlyArray<unknown>>>;
-  readonly dataTypeEnumStrings?: Readonly<Record<string, ReadonlyArray<unknown>>>;
+  readonly dataTypeEnumValues?: Readonly<
+    Record<string, ReadonlyArray<unknown>>
+  >;
+  readonly dataTypeEnumStrings?: Readonly<
+    Record<string, ReadonlyArray<unknown>>
+  >;
   readonly onWrite?: (
     nodesToWrite: ReadonlyArray<WriteValueOptions>,
   ) => ReadonlyArray<StatusCode> | void;
@@ -137,8 +141,13 @@ export const makeFakeSession = (options: FakeSessionOptions = {}) =>
           ...(nodeId in (options.dataTypeEnumValues ?? {})
             ? [
                 {
-                  browseName: { name: "EnumValues", toString: () => "EnumValues" },
-                  nodeId: coerceNodeId(enumPropertyNodeId(nodeId, "EnumValues")),
+                  browseName: {
+                    name: "EnumValues",
+                    toString: () => "EnumValues",
+                  },
+                  nodeId: coerceNodeId(
+                    enumPropertyNodeId(nodeId, "EnumValues"),
+                  ),
                   nodeClass: NodeClass.Variable,
                 },
               ]
@@ -146,8 +155,13 @@ export const makeFakeSession = (options: FakeSessionOptions = {}) =>
           ...(nodeId in (options.dataTypeEnumStrings ?? {})
             ? [
                 {
-                  browseName: { name: "EnumStrings", toString: () => "EnumStrings" },
-                  nodeId: coerceNodeId(enumPropertyNodeId(nodeId, "EnumStrings")),
+                  browseName: {
+                    name: "EnumStrings",
+                    toString: () => "EnumStrings",
+                  },
+                  nodeId: coerceNodeId(
+                    enumPropertyNodeId(nodeId, "EnumStrings"),
+                  ),
                   nodeClass: NodeClass.Variable,
                 },
               ]
@@ -178,6 +192,7 @@ export const makeFakeSession = (options: FakeSessionOptions = {}) =>
         dataType: NodeId,
         value: Record<string, unknown>,
       ) => fakeExtensionObject(dataType, value),
+      $$extraDataTypeManager: {},
       extractNamespaceDataType: async () => undefined,
     }) as unknown as ClientSession & EventEmitter;
 
@@ -204,7 +219,7 @@ const readValueBatch = (
               "urn:effect-opcua:test",
             ],
           },
-      }) as unknown as DataValue,
+        }) as unknown as DataValue,
     );
   }
   if (batch.every((node) => enumPropertyValue(options, node) !== undefined)) {

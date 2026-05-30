@@ -69,9 +69,7 @@ describe("Demo client", () => {
     };
 
     expect(raw).type.toBe<Generated.Structures.CommandStatusBuffer>();
-    expect<typeof Generated.Variables.Commands>().type.toHaveProperty(
-      "Status",
-    );
+    expect<typeof Generated.Variables.Commands>().type.toHaveProperty("Status");
     expect<typeof Root>().type.not.toHaveProperty("Variables");
   });
 });

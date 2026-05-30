@@ -109,9 +109,9 @@ const candidatesFromCause = (cause: unknown): readonly string[] => {
     "candidates" in cause &&
     Array.isArray((cause as { readonly candidates?: unknown }).candidates)
   ) {
-    return (cause as { readonly candidates: readonly unknown[] }).candidates.map(
-      String,
-    );
+    return (
+      cause as { readonly candidates: readonly unknown[] }
+    ).candidates.map(String);
   }
   return [];
 };

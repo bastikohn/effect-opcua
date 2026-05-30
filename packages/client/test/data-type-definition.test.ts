@@ -140,6 +140,68 @@ describe("data type definitions", () => {
     });
   });
 
+  it("falls back to dynamic structure extraction for empty and missing definitions", async () => {
+    const results = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* makeFakeSession({
+            nodeMetadata: {
+              "ns=1;i=7001": { browseName: "Legacy.Payload" },
+              "ns=1;i=7002": { browseName: "Siemens.Empty104" },
+            },
+            dataTypeDefinitions: {
+              "ns=1;i=7002": {
+                structureType: 0,
+                fields: [],
+              },
+            },
+          });
+          (
+            fake.raw as unknown as { $$extraDataTypeManager?: unknown }
+          ).$$extraDataTypeManager = dynamicStructureManager([
+            "ns=1;i=7001",
+            "ns=1;i=7002",
+          ]);
+          return yield* fake.session.readManyDataTypeDefinitions([
+            "ns=1;i=7001",
+            "ns=1;i=7002",
+          ]);
+        }),
+      ),
+    );
+
+    expect(results).toMatchObject([
+      {
+        _tag: "Success",
+        definition: {
+          _tag: "Structure",
+          name: "Legacy.Payload",
+          fields: [
+            {
+              name: "Enabled",
+              dataTypeNodeId: "ns=0;i=1",
+              valueRank: -1,
+            },
+          ],
+        },
+      },
+      {
+        _tag: "Success",
+        definition: {
+          _tag: "Structure",
+          name: "Siemens.Empty104",
+          fields: [
+            {
+              name: "Enabled",
+              dataTypeNodeId: "ns=0;i=1",
+              valueRank: -1,
+            },
+          ],
+        },
+      },
+    ]);
+  });
+
   it("falls back to EnumValues and EnumStrings properties for enum definitions", async () => {
     const results = await Effect.runPromise(
       Effect.scoped(
@@ -200,4 +262,27 @@ describe("data type definitions", () => {
       },
     ]);
   });
+});
+
+const dynamicStructureManager = (dataTypeNodeIds: readonly string[]) => ({
+  getStructureInfoForDataType: (nodeId: { readonly toString: () => string }) =>
+    dataTypeNodeIds.includes(nodeId.toString())
+      ? {
+          schema: {
+            name: "DynamicPayload",
+            baseType: "ExtensionObject",
+            dataTypeNodeId: coerceNodeId(nodeId.toString()),
+            fields: [
+              {
+                name: "enabled",
+                originalName: "Enabled",
+                fieldType: "Boolean",
+                category: "basic",
+                isArray: false,
+              },
+            ],
+            getBaseSchema: () => null,
+          },
+        }
+      : null,
 });

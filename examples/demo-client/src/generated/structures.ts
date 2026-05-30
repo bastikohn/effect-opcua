@@ -72,7 +72,8 @@ export const GlobalCommandSubmitRequestSchema = Schema.Struct({
   axisSelection: Enums.AxisSelectionSchema,
 });
 
-export type GlobalCommandSubmitRequest = typeof GlobalCommandSubmitRequestSchema.Type;
+export type GlobalCommandSubmitRequest =
+  typeof GlobalCommandSubmitRequestSchema.Type;
 
 export const GlobalCommandSubmitRequest = Opcua.structure({
   name: "GlobalCommandSubmitRequest",

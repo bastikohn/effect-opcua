@@ -302,11 +302,7 @@ function positionSpec<
     | "ManualMoveZAxisToPosition"
     | "MaintenanceMoveXAxisToPosition"
     | "MaintenanceMoveZAxisToPosition",
->(
-  tag: Tag,
-  kind: Enums.GlobalCommandKind,
-  domain: "manual" | "maintenance",
-) {
+>(tag: Tag, kind: Enums.GlobalCommandKind, domain: "manual" | "maintenance") {
   return spec(tag, {
     kind,
     domain,
@@ -329,11 +325,7 @@ function jogSpec<
     | "MaintenanceJogXNegative"
     | "MaintenanceJogZPositive"
     | "MaintenanceJogZNegative",
->(
-  tag: Tag,
-  kind: Enums.GlobalCommandKind,
-  domain: "manual" | "maintenance",
-) {
+>(tag: Tag, kind: Enums.GlobalCommandKind, domain: "manual" | "maintenance") {
   return spec(tag, {
     kind,
     domain,

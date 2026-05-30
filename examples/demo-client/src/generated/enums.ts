@@ -147,7 +147,8 @@ export const DiagnosticSeverity = {
   Safety: 3,
 } as const;
 
-export type DiagnosticSeverity = (typeof DiagnosticSeverity)[keyof typeof DiagnosticSeverity];
+export type DiagnosticSeverity =
+  (typeof DiagnosticSeverity)[keyof typeof DiagnosticSeverity];
 
 export const DiagnosticSeveritySchema = Schema.Literals([
   DiagnosticSeverity.None,
@@ -162,7 +163,8 @@ export const EmergencyStopState = {
   Pressed: 2,
 } as const;
 
-export type EmergencyStopState = (typeof EmergencyStopState)[keyof typeof EmergencyStopState];
+export type EmergencyStopState =
+  (typeof EmergencyStopState)[keyof typeof EmergencyStopState];
 
 export const EmergencyStopStateSchema = Schema.Literals([
   EmergencyStopState.Unknown,
@@ -226,7 +228,8 @@ export const GlobalCommandKind = {
   MaintenanceClearClampFault: 323,
 } as const;
 
-export type GlobalCommandKind = (typeof GlobalCommandKind)[keyof typeof GlobalCommandKind];
+export type GlobalCommandKind =
+  (typeof GlobalCommandKind)[keyof typeof GlobalCommandKind];
 
 export const GlobalCommandKindSchema = Schema.Literals([
   GlobalCommandKind.None,
@@ -290,7 +293,8 @@ export const GuardDoorState = {
   Open: 2,
 } as const;
 
-export type GuardDoorState = (typeof GuardDoorState)[keyof typeof GuardDoorState];
+export type GuardDoorState =
+  (typeof GuardDoorState)[keyof typeof GuardDoorState];
 
 export const GuardDoorStateSchema = Schema.Literals([
   GuardDoorState.Unknown,
@@ -304,7 +308,8 @@ export const InspectionResult = {
   Fail: 2,
 } as const;
 
-export type InspectionResult = (typeof InspectionResult)[keyof typeof InspectionResult];
+export type InspectionResult =
+  (typeof InspectionResult)[keyof typeof InspectionResult];
 
 export const InspectionResultSchema = Schema.Literals([
   InspectionResult.NotInspected,
@@ -349,7 +354,8 @@ export const NozzleValveState = {
   Faulted: 3,
 } as const;
 
-export type NozzleValveState = (typeof NozzleValveState)[keyof typeof NozzleValveState];
+export type NozzleValveState =
+  (typeof NozzleValveState)[keyof typeof NozzleValveState];
 
 export const NozzleValveStateSchema = Schema.Literals([
   NozzleValveState.Closed,
@@ -412,7 +418,8 @@ export const SafetyCircuitState = {
   Interrupted: 2,
 } as const;
 
-export type SafetyCircuitState = (typeof SafetyCircuitState)[keyof typeof SafetyCircuitState];
+export type SafetyCircuitState =
+  (typeof SafetyCircuitState)[keyof typeof SafetyCircuitState];
 
 export const SafetyCircuitStateSchema = Schema.Literals([
   SafetyCircuitState.Unknown,
@@ -426,7 +433,8 @@ export const SafetyStopReason = {
   GuardDoorOpen: 2,
 } as const;
 
-export type SafetyStopReason = (typeof SafetyStopReason)[keyof typeof SafetyStopReason];
+export type SafetyStopReason =
+  (typeof SafetyStopReason)[keyof typeof SafetyStopReason];
 
 export const SafetyStopReasonSchema = Schema.Literals([
   SafetyStopReason.None,
