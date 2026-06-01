@@ -202,6 +202,28 @@ describe("data type definitions", () => {
     ]);
   });
 
+  it("does not dynamically extract namespace-zero built-in data types", async () => {
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* makeFakeSession();
+          (
+            fake.raw as unknown as { $$extraDataTypeManager?: unknown }
+          ).$$extraDataTypeManager = dynamicStructureManager(["ns=0;i=10"]);
+          const [result] = yield* fake.session.readManyDataTypeDefinitions([
+            "i=10",
+          ]);
+          return result;
+        }),
+      ),
+    );
+
+    expect(result).toMatchObject({
+      _tag: "Missing",
+      dataTypeNodeId: "i=10",
+    });
+  });
+
   it("falls back to EnumValues and EnumStrings properties for enum definitions", async () => {
     const results = await Effect.runPromise(
       Effect.scoped(

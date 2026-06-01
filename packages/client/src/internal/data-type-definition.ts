@@ -132,7 +132,16 @@ export const readManyDataTypeDefinitions = (
             values[index],
           );
           const name = dataTypeName(dataTypeNodeId, metadataResults[index]);
+          const canReadDynamicDefinition =
+            nodesToRead[index]?.nodeId.namespace !== 0;
           if (isEmptyStructureResult(result)) {
+            if (!canReadDynamicDefinition) {
+              return {
+                _tag: "Unsupported" as const,
+                dataTypeNodeId,
+                reason: "Structure DataTypeDefinition has no fields",
+              };
+            }
             return yield* readDynamicDataTypeDefinition(
               () =>
                 (dynamicManager ??= getExtraDataTypeManager(
@@ -159,6 +168,7 @@ export const readManyDataTypeDefinitions = (
             name,
           );
           if (enumFallback) return enumFallback;
+          if (!canReadDynamicDefinition) return result;
           return yield* readDynamicDataTypeDefinition(
             () =>
               (dynamicManager ??= getExtraDataTypeManager(
