@@ -1,6 +1,5 @@
 <script lang="ts">
   import {
-    AlertTriangle,
     ChevronDown,
     ChevronRight,
     Circle,
@@ -56,6 +55,25 @@
     label: string;
     samples: MonitorSample[];
   };
+  type RecentConnectionAttempt = {
+    endpointUrl: string;
+    startNodeId: string;
+    authMode: AuthMode;
+    username: string;
+    password?: EncryptedPassword;
+    attemptedAt: string;
+  };
+  type EncryptedPassword = {
+    keyId: string;
+    iv: string;
+    ciphertext: string;
+  };
+
+  const RECENT_CONNECTIONS_STORAGE_KEY = "effect-opcua.recentConnections";
+  const RECENT_CONNECTION_OPTIONS = 20;
+  const PASSWORD_KEY_DB = "effect-opcua-passwords";
+  const PASSWORD_KEY_STORE = "keys";
+  const PASSWORD_KEY_ID = "default";
 
   let handle = $state<ClientHandle>();
   let endpointUrl = $state("opc.tcp://127.0.0.1:4840/UA/effect-opcua-demo");
@@ -63,6 +81,10 @@
   let authMode = $state<AuthMode>("Anonymous");
   let username = $state("");
   let password = $state("");
+  let savePassword = $state(false);
+  let passwordStorageAvailable = $state(false);
+  let connectionAttempts = $state<RecentConnectionAttempt[]>([]);
+  let recentConnectionsOpen = $state(false);
   let connected = $state(false);
   let connectFiber = $state<Fiber.Fiber<ReadNodeResponse, unknown>>();
   let abortingConnect = $state(false);
@@ -100,6 +122,25 @@
         : "fill-neutral-600 text-neutral-600",
   );
   const isMonitoring = $derived(monitorFiber !== undefined);
+  const recentConnections = $derived(recentConnectionOptions(connectionAttempts));
+
+  $effect(() => {
+    connectionAttempts = loadConnectionAttempts();
+  });
+
+  $effect(() => {
+    passwordStorageAvailable = isPasswordStorageAvailable();
+  });
+
+  $effect(() => {
+    const closeRecentConnections = (event: PointerEvent) => {
+      if (!(event.target instanceof Element)) return;
+      if (event.target.closest("[data-recent-connection-picker]")) return;
+      recentConnectionsOpen = false;
+    };
+    window.addEventListener("pointerdown", closeRecentConnections);
+    return () => window.removeEventListener("pointerdown", closeRecentConnections);
+  });
 
   $effect(() => {
     let cancelled = false;
@@ -127,6 +168,8 @@
   async function connect() {
     if (!handle || connectFiber) return;
     abortingConnect = false;
+    recentConnectionsOpen = false;
+    await saveConnectionAttempt();
     const fiber: Fiber.Fiber<ReadNodeResponse, unknown> = runFork(
       handle.client.Connect({
         endpointUrl,
@@ -299,6 +342,250 @@
     log("info", "Monitoring stopped");
   }
 
+  async function saveConnectionAttempt() {
+    const attempt: RecentConnectionAttempt = {
+      endpointUrl,
+      startNodeId,
+      authMode,
+      username: authMode === "UserPassword" ? username : "",
+      attemptedAt: new Date().toISOString(),
+    };
+    const previous = recentConnections.find(
+      (recent) => connectionKey(recent) === connectionKey(attempt),
+    );
+    if (
+      authMode === "UserPassword" &&
+      savePassword &&
+      password.length > 0
+    ) {
+      attempt.password = await encryptPassword(password);
+    }
+    if (savePassword) attempt.password ??= previous?.password;
+    connectionAttempts = [attempt, ...connectionAttempts];
+    persistConnectionAttempts(connectionAttempts);
+  }
+
+  function toggleRecentConnections() {
+    if (connected || connecting || recentConnections.length === 0) return;
+    recentConnectionsOpen = !recentConnectionsOpen;
+  }
+
+  async function selectRecentConnection(attempt: RecentConnectionAttempt) {
+    endpointUrl = attempt.endpointUrl;
+    startNodeId = attempt.startNodeId;
+    authMode = attempt.authMode;
+    username = attempt.username;
+    password = "";
+    savePassword = attempt.password !== undefined;
+    recentConnectionsOpen = false;
+    if (attempt.password) {
+      password = await decryptPassword(attempt.password);
+    }
+  }
+
+  function recentConnectionOptions(attempts: RecentConnectionAttempt[]) {
+    const seen = new Set<string>();
+    const options: RecentConnectionAttempt[] = [];
+    for (const attempt of attempts) {
+      const key = connectionKey(attempt);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      options.push(attempt);
+      if (options.length >= RECENT_CONNECTION_OPTIONS) break;
+    }
+    return options;
+  }
+
+  function connectionKey(attempt: RecentConnectionAttempt) {
+    return [
+      attempt.endpointUrl,
+      attempt.startNodeId,
+      attempt.authMode,
+      attempt.authMode === "UserPassword" ? attempt.username : "",
+    ].join("\u0000");
+  }
+
+  function connectionLabel(attempt: RecentConnectionAttempt) {
+    const auth =
+      attempt.authMode === "UserPassword" && attempt.username
+        ? ` as ${attempt.username}`
+        : "";
+    return `${attempt.endpointUrl} (${attempt.startNodeId})${auth}`;
+  }
+
+  function connectionDetails(attempt: RecentConnectionAttempt) {
+    const auth =
+      attempt.authMode === "UserPassword"
+        ? `User: ${attempt.username || "UserPassword"}`
+        : "Anonymous";
+    return [
+      attempt.startNodeId,
+      auth,
+      attempt.password ? "password saved" : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  }
+
+  async function encryptPassword(value: string) {
+    try {
+      const key = await passwordKey();
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const encrypted = await crypto.subtle.encrypt(
+        { name: "AES-GCM", iv },
+        key,
+        new TextEncoder().encode(value),
+      );
+      return {
+        keyId: PASSWORD_KEY_ID,
+        iv: bytesToBase64(iv),
+        ciphertext: bytesToBase64(new Uint8Array(encrypted)),
+      } satisfies EncryptedPassword;
+    } catch (error) {
+      log("error", `Could not save password: ${messageOf(error)}`);
+      return undefined;
+    }
+  }
+
+  async function decryptPassword(value: EncryptedPassword) {
+    try {
+      const decrypted = await crypto.subtle.decrypt(
+        {
+          name: "AES-GCM",
+          iv: base64ToBytes(value.iv),
+        },
+        await passwordKey(),
+        base64ToBytes(value.ciphertext),
+      );
+      return new TextDecoder().decode(decrypted);
+    } catch (error) {
+      log("error", `Could not load saved password: ${messageOf(error)}`);
+      return "";
+    }
+  }
+
+  async function passwordKey() {
+    const existing = await readPasswordKey();
+    if (existing) return existing;
+    const key = await crypto.subtle.generateKey(
+      { name: "AES-GCM", length: 256 },
+      false,
+      ["encrypt", "decrypt"],
+    );
+    await writePasswordKey(key);
+    return key;
+  }
+
+  async function readPasswordKey() {
+    return withPasswordKeyStore("readonly", (store) =>
+      store.get(PASSWORD_KEY_ID),
+    );
+  }
+
+  async function writePasswordKey(key: CryptoKey) {
+    await withPasswordKeyStore("readwrite", (store) =>
+      store.put(key, PASSWORD_KEY_ID),
+    );
+  }
+
+  async function withPasswordKeyStore<T>(
+    mode: IDBTransactionMode,
+    action: (store: IDBObjectStore) => IDBRequest<T>,
+  ) {
+    const database = await openPasswordDatabase();
+    return new Promise<T | undefined>((resolve, reject) => {
+      const transaction = database.transaction(PASSWORD_KEY_STORE, mode);
+      const request = action(transaction.objectStore(PASSWORD_KEY_STORE));
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+      transaction.onerror = () => reject(transaction.error);
+    });
+  }
+
+  async function openPasswordDatabase() {
+    return new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(PASSWORD_KEY_DB, 1);
+      request.onupgradeneeded = () => {
+        request.result.createObjectStore(PASSWORD_KEY_STORE);
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  function isPasswordStorageAvailable() {
+    return (
+      typeof window !== "undefined" &&
+      window.crypto?.subtle !== undefined &&
+      typeof indexedDB !== "undefined"
+    );
+  }
+
+  function bytesToBase64(bytes: Uint8Array) {
+    let binary = "";
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary);
+  }
+
+  function base64ToBytes(text: string) {
+    return Uint8Array.from(atob(text), (char) => char.charCodeAt(0));
+  }
+
+  function loadConnectionAttempts() {
+    const storage = connectionStorage();
+    if (!storage) return [];
+    try {
+      const text = storage.getItem(RECENT_CONNECTIONS_STORAGE_KEY);
+      const parsed = text ? (JSON.parse(text) as unknown) : [];
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter(isConnectionAttempt);
+    } catch {
+      return [];
+    }
+  }
+
+  function persistConnectionAttempts(attempts: RecentConnectionAttempt[]) {
+    const storage = connectionStorage();
+    if (!storage) return;
+    try {
+      storage.setItem(RECENT_CONNECTIONS_STORAGE_KEY, JSON.stringify(attempts));
+    } catch (error) {
+      log("error", `Could not save recent connection: ${messageOf(error)}`);
+    }
+  }
+
+  function isConnectionAttempt(value: unknown): value is RecentConnectionAttempt {
+    if (!value || typeof value !== "object") return false;
+    const attempt = value as RecentConnectionAttempt;
+    return (
+      typeof attempt.endpointUrl === "string" &&
+      typeof attempt.startNodeId === "string" &&
+      (attempt.authMode === "Anonymous" ||
+        attempt.authMode === "UserPassword") &&
+      typeof attempt.username === "string" &&
+      (attempt.password === undefined || isEncryptedPassword(attempt.password)) &&
+      typeof attempt.attemptedAt === "string"
+    );
+  }
+
+  function isEncryptedPassword(value: unknown): value is EncryptedPassword {
+    if (!value || typeof value !== "object") return false;
+    const password = value as EncryptedPassword;
+    return (
+      password.keyId === PASSWORD_KEY_ID &&
+      typeof password.iv === "string" &&
+      typeof password.ciphertext === "string"
+    );
+  }
+
+  function connectionStorage() {
+    try {
+      return typeof window === "undefined" ? undefined : window.localStorage;
+    } catch {
+      return undefined;
+    }
+  }
+
   function nodeFromRead(response: ReadNodeResponse): TreeNode {
     return {
       nodeId: response.nodeId,
@@ -341,14 +628,36 @@
 
   function displayValue(value: ReadValue | undefined) {
     if (!value) return "";
+    if (value._tag === "Value") return readableJson(value.value);
+    if (value._tag === "DecodeError") return readableJson(value.error);
+    return value.status.text;
+  }
+
+  function compactValue(value: ReadValue | undefined) {
+    if (!value) return "";
     if (value._tag === "Value") return compactJson(value.value);
     if (value._tag === "DecodeError") return compactJson(value.error);
     return value.status.text;
   }
 
+  function readableJson(value: unknown) {
+    return JSON.stringify(valueForDisplay(value), null, 2);
+  }
+
   function compactJson(value: unknown) {
-    const text = JSON.stringify(value);
+    const text = JSON.stringify(valueForDisplay(value));
     return text.length > 90 ? `${text.slice(0, 87)}...` : text;
+  }
+
+  function valueForDisplay(value: unknown) {
+    if (typeof value !== "string") return value;
+    const text = value.trim();
+    if (!text.startsWith("{") && !text.startsWith("[")) return value;
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      return value;
+    }
   }
 
   function log(level: LogRow["level"], message: string) {
@@ -405,14 +714,44 @@
 <div class="min-h-screen bg-neutral-950 text-stone-200">
   <header class="border-b border-neutral-800 bg-neutral-950">
     <form class="flex flex-wrap items-end gap-3 px-4 py-3" onsubmit={(event) => event.preventDefault()}>
-      <label class="grid min-w-72 flex-1 gap-1 text-sm text-stone-400">
-        Endpoint
-        <input
-          class="h-9 border border-neutral-700 bg-neutral-900 px-2 text-sm text-stone-100 outline-none focus:border-emerald-500"
-          bind:value={endpointUrl}
-          disabled={connected || connecting}
-        />
-      </label>
+      <div class="grid min-w-72 flex-1 gap-1 text-sm text-stone-400">
+        <label for="endpoint-url">Endpoint</label>
+        <div class="relative" data-recent-connection-picker>
+          <input
+            id="endpoint-url"
+            class="h-9 w-full border border-neutral-700 bg-neutral-900 px-2 pr-10 text-sm text-stone-100 outline-none focus:border-emerald-500"
+            bind:value={endpointUrl}
+            oninput={() => (recentConnectionsOpen = false)}
+            disabled={connected || connecting}
+          />
+          <button
+            class="absolute top-0 right-0 grid h-9 w-9 place-items-center border-l border-neutral-700 text-stone-400 hover:bg-neutral-800 hover:text-stone-100 disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-stone-400"
+            type="button"
+            onclick={toggleRecentConnections}
+            disabled={connected || connecting || recentConnections.length === 0}
+            aria-label="Recent connections"
+            aria-expanded={recentConnectionsOpen}
+            title="Recent connections"
+          >
+            <ChevronDown size={15} />
+          </button>
+          {#if recentConnectionsOpen}
+            <div class="absolute top-[calc(100%+4px)] right-0 left-0 z-30 max-h-72 overflow-auto border border-neutral-700 bg-neutral-950 shadow-lg shadow-black/25">
+              {#each recentConnections as attempt (connectionKey(attempt))}
+                <button
+                  class="grid w-full gap-0.5 border-b border-neutral-800 px-3 py-2 text-left last:border-b-0 hover:bg-neutral-900"
+                  type="button"
+                  onclick={() => selectRecentConnection(attempt)}
+                  title={connectionLabel(attempt)}
+                >
+                  <span class="truncate text-sm text-stone-100">{attempt.endpointUrl}</span>
+                  <span class="truncate text-xs text-stone-500">{connectionDetails(attempt)}</span>
+                </button>
+              {/each}
+            </div>
+          {/if}
+        </div>
+      </div>
       <label class="grid w-32 gap-1 text-sm text-stone-400">
         Start node
         <input
@@ -437,15 +776,28 @@
           Username
           <input
             class="h-9 border border-neutral-700 bg-neutral-900 px-2 text-sm text-stone-100 outline-none focus:border-emerald-500"
+            autocomplete="username"
             bind:value={username}
             disabled={connected || connecting}
           />
         </label>
-        <label class="grid w-40 gap-1 text-sm text-stone-400">
-          Password
+        <label class="grid w-44 gap-1 text-sm text-stone-400">
+          <span class="flex items-center justify-between gap-3">
+            Password
+            <span class="flex items-center gap-1.5 text-xs text-stone-500">
+              <input
+                class="h-3.5 w-3.5 accent-emerald-600"
+                type="checkbox"
+                bind:checked={savePassword}
+                disabled={connected || connecting || !passwordStorageAvailable}
+              />
+              Save
+            </span>
+          </span>
           <input
             class="h-9 border border-neutral-700 bg-neutral-900 px-2 text-sm text-stone-100 outline-none focus:border-emerald-500"
             type="password"
+            autocomplete="current-password"
             bind:value={password}
             disabled={connected || connecting}
           />
@@ -492,9 +844,9 @@
     </form>
   </header>
 
-  <main class="grid min-h-[calc(100vh-8rem)] grid-cols-1 overflow-auto lg:min-h-[calc(100vh-65px)] lg:grid-cols-[300px_minmax(420px,1fr)] lg:grid-rows-[minmax(420px,1fr)_minmax(280px,auto)_220px] lg:overflow-hidden xl:grid-cols-[320px_minmax(420px,1fr)_380px] xl:grid-rows-[minmax(0,1fr)_240px]">
-    <aside class="min-h-80 border-b border-neutral-800 bg-neutral-950 lg:col-start-1 lg:row-start-1 lg:row-end-4 lg:border-r lg:border-b-0 xl:row-end-3">
-      <div class="flex h-10 items-center justify-between border-b border-neutral-800 px-3">
+  <main class="grid min-h-[calc(100vh-8rem)] grid-cols-1 overflow-auto lg:h-[calc(100vh-65px)] lg:min-h-0 lg:grid-cols-[300px_minmax(420px,1fr)] lg:grid-rows-[minmax(0,1fr)_minmax(0,280px)_220px] lg:overflow-hidden xl:grid-cols-[320px_minmax(420px,1fr)_380px] xl:grid-rows-[minmax(0,1fr)_240px]">
+    <aside class="min-h-80 border-b border-neutral-800 bg-neutral-950 lg:col-start-1 lg:row-start-1 lg:row-end-4 lg:flex lg:min-h-0 lg:flex-col lg:overflow-hidden lg:border-r lg:border-b-0 xl:row-end-3">
+      <div class="flex h-10 shrink-0 items-center justify-between border-b border-neutral-800 px-3">
         <div class="text-sm font-medium text-stone-200">Address Space</div>
         <button
           class="grid h-7 w-7 place-items-center border border-neutral-800 bg-neutral-900 text-stone-300 hover:bg-neutral-800 disabled:opacity-50"
@@ -506,7 +858,7 @@
           <RefreshCw size={15} />
         </button>
       </div>
-      <div class="h-[calc(100%-40px)] overflow-auto p-2">
+      <div class="p-2 lg:min-h-0 lg:flex-1 lg:overflow-auto">
         {#if tree.length === 0}
           <div class="px-2 py-6 text-sm text-stone-500">No session</div>
         {:else}
@@ -517,7 +869,7 @@
       </div>
     </aside>
 
-    <section class="min-h-[420px] min-w-0 overflow-auto border-b border-neutral-800 lg:col-start-2 lg:row-start-1 xl:col-start-2 xl:row-start-1 xl:border-r">
+    <section class="min-h-[420px] min-w-0 overflow-auto border-b border-neutral-800 lg:col-start-2 lg:row-start-1 lg:min-h-0 xl:col-start-2 xl:row-start-1 xl:border-r">
       <div class="flex h-10 items-center justify-between border-b border-neutral-800 px-4">
         <div class="min-w-0 truncate text-sm font-medium text-stone-200">
           {selected?.metadata.displayName ?? selected?.metadata.browseName ?? selectedNodeId}
@@ -569,34 +921,26 @@
             <pre class="max-h-48 overflow-auto bg-neutral-900 p-3 text-xs leading-5 text-stone-200">{displayValue(latestValue) || selected.valueError?.message || ""}</pre>
           </div>
 
-          <div class="grid gap-2 border border-neutral-800 p-3">
-            <div class="flex items-center justify-between">
+          {#if canWrite}
+            <div class="grid gap-2 border border-neutral-800 p-3">
               <div class="text-sm font-medium text-stone-200">Write</div>
-              {#if !canWrite}
-                <div class="flex items-center gap-1 text-xs text-amber-400">
-                  <AlertTriangle size={14} />
-                  Read only
-                </div>
-              {/if}
+              <textarea
+                class="min-h-28 resize-y border border-neutral-700 bg-neutral-900 p-2 font-mono text-xs text-stone-100 outline-none focus:border-emerald-500"
+                bind:value={writeText}
+              ></textarea>
+              <div class="flex justify-end">
+                <button
+                  class="flex h-8 items-center gap-2 border border-neutral-700 bg-neutral-900 px-3 text-sm text-stone-100 hover:bg-neutral-800"
+                  type="button"
+                  onclick={writeSelected}
+                  title="Write value"
+                >
+                  <Send size={15} />
+                  Write
+                </button>
+              </div>
             </div>
-            <textarea
-              class="min-h-28 resize-y border border-neutral-700 bg-neutral-900 p-2 font-mono text-xs text-stone-100 outline-none focus:border-emerald-500 disabled:opacity-60"
-              bind:value={writeText}
-              disabled={!canWrite}
-            ></textarea>
-            <div class="flex justify-end">
-              <button
-                class="flex h-8 items-center gap-2 border border-neutral-700 bg-neutral-900 px-3 text-sm text-stone-100 hover:bg-neutral-800 disabled:opacity-50"
-                type="button"
-                onclick={writeSelected}
-                disabled={!canWrite}
-                title="Write value"
-              >
-                <Send size={15} />
-                Write
-              </button>
-            </div>
-          </div>
+          {/if}
 
           {#if selected.dataTypeDefinition}
             <div class="border border-neutral-800">
@@ -614,7 +958,7 @@
       {/if}
     </section>
 
-    <aside class="min-h-80 overflow-auto border-b border-neutral-800 bg-neutral-950 lg:col-start-2 lg:row-start-2 xl:col-start-3 xl:row-start-1">
+    <aside class="min-h-80 overflow-auto border-b border-neutral-800 bg-neutral-950 lg:col-start-2 lg:row-start-2 lg:min-h-0 xl:col-start-3 xl:row-start-1">
       <div class="flex h-10 items-center justify-between border-b border-neutral-800 px-3">
         <div class="text-sm font-medium text-stone-200">Monitored Variables</div>
         <div class="flex items-center gap-2">
@@ -652,7 +996,7 @@
               <svg class="h-8 flex-1 border border-neutral-800 bg-neutral-900" viewBox="0 0 100 32" preserveAspectRatio="none" aria-hidden="true">
                 <polyline points={sparkline(row.samples)} fill="none" stroke="#10b981" stroke-width="2" vector-effect="non-scaling-stroke" />
               </svg>
-              <div class="w-28 truncate text-right font-mono text-xs text-stone-300">{displayValue(row.samples.at(-1)?.sample)}</div>
+              <div class="w-28 truncate text-right font-mono text-xs text-stone-300">{compactValue(row.samples.at(-1)?.sample)}</div>
             </div>
           </div>
         {:else}
@@ -661,12 +1005,12 @@
       </div>
     </aside>
 
-    <section class="min-h-52 border-t border-neutral-800 bg-neutral-950 lg:col-start-2 lg:row-start-3 xl:col-start-2 xl:col-end-4 xl:row-start-2">
-      <div class="flex h-10 items-center gap-2 border-b border-neutral-800 px-3">
+    <section class="min-h-52 border-t border-neutral-800 bg-neutral-950 lg:col-start-2 lg:row-start-3 lg:flex lg:min-h-0 lg:flex-col lg:overflow-hidden xl:col-start-2 xl:col-end-4 xl:row-start-2">
+      <div class="flex h-10 shrink-0 items-center gap-2 border-b border-neutral-800 px-3">
         <Terminal size={15} class="text-stone-400" />
         <div class="text-sm font-medium text-stone-200">Operation Log</div>
       </div>
-      <div class="h-[200px] overflow-auto">
+      <div class="h-[200px] overflow-auto lg:h-auto lg:flex-1">
         {#each logs as row (row.id)}
           <div class="grid grid-cols-[82px_58px_minmax(0,1fr)] gap-2 border-b border-neutral-900 px-3 py-1.5 text-xs">
             <div class="font-mono text-stone-500">{row.time}</div>
