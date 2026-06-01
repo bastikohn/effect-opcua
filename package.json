@@ -23,6 +23,7 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
+      "esbuild",
       "msgpackr-extract"
     ]
   },
