@@ -6,7 +6,7 @@ import { Effect, Layer, Scope } from "effect";
 import {
   startDemoOpcuaServer,
   type DemoOpcuaServer,
-} from "../../demo-server/src/index.js";
+} from "../../server/src/index.js";
 import { OpcuaClient, OpcuaSession } from "@effect-opcua/client";
 import { DemoMachine } from "../src/DemoMachine.js";
 

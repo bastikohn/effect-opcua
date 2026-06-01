@@ -1,4 +1,4 @@
-import { createConfig } from "../../tsdown.shared.js";
+import { createConfig } from "../../../tsdown.shared.js";
 
 export default createConfig({
   platform: "node",

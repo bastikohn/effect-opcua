@@ -50,9 +50,9 @@ Browsing:
 
 Demo server and demo client:
 
-- `examples/demo-server/test/demo-server.test.ts`
-- `examples/demo-client/test/demo-client.test.ts`
-- `examples/demo-client/test/types.tst.ts`
+- `examples/demo-machine/server/test/demo-server.test.ts`
+- `examples/demo-machine/client/test/demo-client.test.ts`
+- `examples/demo-machine/client/test/types.tst.ts`
 
 ## Type tests
 

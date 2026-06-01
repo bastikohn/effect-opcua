@@ -9,14 +9,14 @@ import { Effect } from "effect";
 import {
   startDemoOpcuaServer,
   type DemoOpcuaServer,
-} from "../../../examples/demo-server/src/index.js";
+} from "../../../examples/demo-machine/server/src/index.js";
 import { generate } from "../src/generate.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 const demoClientGeneratedDir = join(
   repoRoot,
-  "examples/demo-client/src/generated",
+  "examples/demo-machine/client/src/generated",
 );
 const generatedFiles = [
   "nodeIds.ts",

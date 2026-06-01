@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
 
-import { GlobalCommandKind } from "../../../examples/demo-server/src/index.js";
+import { GlobalCommandKind } from "../../../examples/demo-machine/server/src/index.js";
 import * as Opcua from "../src/Opcua.js";
 import * as OpcuaSession from "../src/OpcuaSession.js";
 import {

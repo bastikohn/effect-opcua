@@ -6,12 +6,12 @@ address space.
 
 ## Package roles
 
-`examples/demo-server` owns the simulated PLC/server behavior and address space.
+`examples/demo-machine/server` owns the simulated PLC/server behavior and address space.
 
-`examples/demo-client` is a typed backend/HMI SDK that consumes the public OPC
+`examples/demo-machine/client` is a typed backend/HMI SDK that consumes the public OPC
 UA address space. It must not import demo-server internals.
 
-`examples/tui` is an interactive consumer of the demo client.
+`examples/browse/tui` is an interactive consumer of the demo client.
 
 ## Command model
 
@@ -80,7 +80,7 @@ The demo server simulates one `DemoFillingCell` with:
 - axes, clamp, filling, inspection, safety, operator feedback, counters, and
   deterministic scenarios
 
-The full machine behavior is documented in `examples/demo-server/README.md`.
+The full machine behavior is documented in `examples/demo-machine/server/README.md`.
 
 ## Boundaries
 
@@ -90,6 +90,6 @@ generally useful for OPC UA consumers.
 
 Relevant tests:
 
-- `examples/demo-server/test/demo-server.test.ts`
-- `examples/demo-client/test/demo-client.test.ts`
-- `examples/demo-client/test/types.tst.ts`
+- `examples/demo-machine/server/test/demo-server.test.ts`
+- `examples/demo-machine/client/test/demo-client.test.ts`
+- `examples/demo-machine/client/test/types.tst.ts`

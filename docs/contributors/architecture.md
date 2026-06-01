@@ -1,11 +1,12 @@
 # Architecture
 
-The workspace is organized around one public client package and three examples:
+The workspace is organized around one public client package and grouped examples:
 
 - `packages/client`: `@effect-opcua/client`.
-- `examples/demo-server`: simulated OPC UA filling-cell server.
-- `examples/demo-client`: typed backend/HMI SDK built on the public client.
-- `examples/tui`: terminal UI consuming the demo client and server.
+- `examples/demo-machine/server`: simulated OPC UA filling-cell server.
+- `examples/demo-machine/client`: typed backend/HMI SDK built on the public client.
+- `examples/browse/tui`: terminal UI consuming the demo client and server.
+- `examples/browse/web`: web browse UI.
 
 ## Public package shape
 
@@ -67,5 +68,5 @@ targets the public OPC UA address space exposed by the demo server and imports
 Relevant tests:
 
 - `packages/client/test/exports.test.ts`
-- `examples/demo-client/test/demo-client.test.ts`
-- `examples/demo-server/test/demo-server.test.ts`
+- `examples/demo-machine/client/test/demo-client.test.ts`
+- `examples/demo-machine/server/test/demo-server.test.ts`

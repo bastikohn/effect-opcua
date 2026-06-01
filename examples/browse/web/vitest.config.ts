@@ -5,7 +5,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@effect-opcua/client": fileURLToPath(
-        new URL("../../packages/client/src/index.ts", import.meta.url),
+        new URL("../../../packages/client/src/index.ts", import.meta.url),
       ),
       "@effect-opcua/web/shared": fileURLToPath(
         new URL("./src/shared/index.ts", import.meta.url),

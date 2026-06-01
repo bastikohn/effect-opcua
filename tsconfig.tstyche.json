@@ -16,7 +16,7 @@
     "packages/codegen/test/**/*.tst.ts",
     "packages/client/src",
     "packages/client/test/**/*.tst.ts",
-    "examples/demo-client/src",
-    "examples/demo-client/test/**/*.tst.ts"
+    "examples/demo-machine/client/src",
+    "examples/demo-machine/client/test/**/*.tst.ts"
   ]
 }
