@@ -44,8 +44,16 @@ export const makeClientHandle = (url = rpcUrl()): Promise<ClientHandle> =>
     }),
   );
 
-export const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> =>
-  Effect.runPromise(effect);
+export const run = <A, E>(
+  effect: Effect.Effect<A, E>,
+): Promise<Exit.Exit<A, E>> => Effect.runPromiseExit(effect);
+
+export const runFork = <A, E>(effect: Effect.Effect<A, E>): Fiber.Fiber<A, E> =>
+  Effect.runFork(effect);
+
+export const awaitFiber = <A, E>(
+  fiber: Fiber.Fiber<A, E>,
+): Promise<Exit.Exit<A, E>> => Effect.runPromise(Fiber.await(fiber));
 
 export const runStream = <A, E>(
   stream: Stream.Stream<A, E>,

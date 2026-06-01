@@ -22,7 +22,7 @@ export const UaBrowserHandlers = UaBrowserRpcs.toLayer(
         Effect.gen(function* () {
           const session = yield* registry.connect(client.id, request);
           return yield* readNode(session, request.startNodeId ?? "i=85");
-        }),
+        }).pipe(Effect.onInterrupt(() => registry.cleanup(client.id))),
       Disconnect: (_payload, { client }) =>
         Effect.map(registry.disconnect(client.id), (disconnected) => ({
           disconnected,

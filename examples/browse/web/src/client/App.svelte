@@ -23,10 +23,13 @@
     ReadValue,
   } from "../shared/rpc.js";
   import { errorMessage, parseJsonValue } from "../shared/value.js";
+  import { Cause, Exit, type Fiber } from "effect";
   import {
+    awaitFiber,
     interrupt,
     makeClientHandle,
     run,
+    runFork,
     runStream,
     type ClientHandle,
   } from "./rpc.js";
@@ -61,7 +64,8 @@
   let username = $state("");
   let password = $state("");
   let connected = $state(false);
-  let busy = $state(false);
+  let connectFiber = $state<Fiber.Fiber<ReadNodeResponse, unknown>>();
+  let abortingConnect = $state(false);
   let tree = $state<TreeNode[]>([]);
   let selected = $state<ReadNodeResponse>();
   let selectedNodeId = $state("i=85");
@@ -75,6 +79,25 @@
   const canWrite = $derived(
     selected?.metadata.accessLevel?.writable === true &&
       selected?.metadata.userAccessLevel?.writable !== false,
+  );
+  const connecting = $derived(connectFiber !== undefined);
+  const statusText = $derived(
+    connected
+      ? "Connected"
+      : connecting
+        ? abortingConnect
+          ? "Aborting"
+          : "Connecting"
+        : handle
+          ? "Ready"
+          : "Opening RPC",
+  );
+  const statusClass = $derived(
+    connected
+      ? "fill-emerald-500 text-emerald-500"
+      : connecting
+        ? "fill-amber-500 text-amber-500"
+        : "fill-neutral-600 text-neutral-600",
   );
   const isMonitoring = $derived(monitorFiber !== undefined);
 
@@ -93,52 +116,72 @@
 
     return () => {
       cancelled = true;
+      const fiber = connectFiber;
+      connectFiber = undefined;
+      if (fiber) interrupt(fiber);
       stopMonitoring();
       if (handle) void handle.close();
     };
   });
 
   async function connect() {
-    if (!handle) return;
-    busy = true;
-    try {
-      const response = await run(
-        handle.client.Connect({
-          endpointUrl,
-          startNodeId,
-          auth:
-            authMode === "Anonymous"
-              ? { _tag: "Anonymous" as const }
-              : {
-                  _tag: "UserPassword" as const,
-                  username,
-                  password,
-                },
-        }),
-      );
-      connected = true;
-      selected = response;
-      selectedNodeId = response.nodeId;
-      writeText = stringifyValue(response.value);
-      tree = [nodeFromRead(response)];
-      await loadChildren(tree[0]);
-      log("info", `Connected ${endpointUrl}`);
-    } catch (error) {
-      connected = false;
-      log("error", messageOf(error));
-    } finally {
-      busy = false;
-    }
+    if (!handle || connectFiber) return;
+    abortingConnect = false;
+    const fiber: Fiber.Fiber<ReadNodeResponse, unknown> = runFork(
+      handle.client.Connect({
+        endpointUrl,
+        startNodeId,
+        auth:
+          authMode === "Anonymous"
+            ? { _tag: "Anonymous" as const }
+            : {
+                _tag: "UserPassword" as const,
+                username,
+                password,
+              },
+      }),
+    );
+    connectFiber = fiber;
+    const exit: Exit.Exit<ReadNodeResponse, unknown> = await awaitFiber(fiber);
+    if (connectFiber !== fiber) return;
+    connectFiber = undefined;
+    abortingConnect = false;
+    const response = Exit.match(exit, {
+      onFailure: (cause) => {
+        const interrupted = Cause.hasInterrupts(cause);
+        connected = false;
+        log(
+          interrupted ? "info" : "error",
+          interrupted ? "Connection attempt aborted" : messageOf(cause),
+        );
+        return undefined;
+      },
+      onSuccess: (value) => value,
+    });
+    if (!response) return;
+    connected = true;
+    selected = response;
+    selectedNodeId = response.nodeId;
+    writeText = stringifyValue(response.value);
+    tree = [nodeFromRead(response)];
+    await loadChildren(tree[0]);
+    log("info", `Connected ${endpointUrl}`);
+  }
+
+  function abortConnect() {
+    if (!connectFiber || abortingConnect) return;
+    abortingConnect = true;
+    interrupt(connectFiber);
   }
 
   async function disconnect() {
     if (!handle) return;
     stopMonitoring();
-    try {
-      await run(handle.client.Disconnect());
+    const exit = await run(handle.client.Disconnect());
+    if (Exit.isFailure(exit)) {
+      log("error", messageOf(exit.cause));
+    } else {
       log("info", "Disconnected");
-    } catch (error) {
-      log("error", messageOf(error));
     }
     connected = false;
     selected = undefined;
@@ -151,14 +194,15 @@
   async function selectNode(node: TreeNode) {
     if (!handle || !connected) return;
     selectedNodeId = node.nodeId;
-    try {
-      const response = await run(handle.client.ReadNode({ nodeId: node.nodeId }));
-      selected = response;
-      writeText = stringifyValue(response.value);
-      log("info", `Read ${node.nodeId}`);
-    } catch (error) {
-      log("error", messageOf(error));
+    const exit = await run(handle.client.ReadNode({ nodeId: node.nodeId }));
+    if (Exit.isFailure(exit)) {
+      log("error", messageOf(exit.cause));
+      return;
     }
+    const response = exit.value;
+    selected = response;
+    writeText = stringifyValue(response.value);
+    log("info", `Read ${node.nodeId}`);
   }
 
   async function toggleNode(node: TreeNode) {
@@ -171,38 +215,39 @@
   async function loadChildren(node: TreeNode) {
     if (!handle || !connected || node.loading) return;
     node.loading = true;
-    try {
-      const response = await run(handle.client.Browse({ nodeId: node.nodeId }));
+    const exit = await run(handle.client.Browse({ nodeId: node.nodeId }));
+    if (Exit.isFailure(exit)) {
+      log("error", messageOf(exit.cause));
+    } else {
+      const response = exit.value;
       node.children = response.references.map(nodeFromReference);
       node.loaded = true;
       log("info", `Browse ${node.nodeId}: ${response.references.length}`);
-    } catch (error) {
-      log("error", messageOf(error));
-    } finally {
-      node.loading = false;
     }
+    node.loading = false;
   }
 
   async function writeSelected() {
     if (!handle || !selected) return;
-    try {
-      const response = await run(
-        handle.client.WriteNode({
-          nodeId: selected.nodeId,
-          value: parseJsonValue(writeText),
-        }),
-      );
-      selected = response.refreshed;
-      writeText = stringifyValue(response.refreshed.value);
-      log(
-        response.write._tag === "Written" ? "info" : "error",
-        response.write._tag === "Failed"
-          ? response.write.message
-          : `${response.write._tag} ${response.nodeId}: ${response.write.status.text}`,
-      );
-    } catch (error) {
-      log("error", messageOf(error));
+    const exit = await run(
+      handle.client.WriteNode({
+        nodeId: selected.nodeId,
+        value: parseJsonValue(writeText),
+      }),
+    );
+    if (Exit.isFailure(exit)) {
+      log("error", messageOf(exit.cause));
+      return;
     }
+    const response = exit.value;
+    selected = response.refreshed;
+    writeText = stringifyValue(response.refreshed.value);
+    log(
+      response.write._tag === "Written" ? "info" : "error",
+      response.write._tag === "Failed"
+        ? response.write.message
+        : `${response.write._tag} ${response.nodeId}: ${response.write.status.text}`,
+    );
   }
 
   function addMonitorNode(nodeId = selected?.nodeId) {
@@ -365,7 +410,7 @@
         <input
           class="h-9 border border-neutral-700 bg-neutral-900 px-2 text-sm text-stone-100 outline-none focus:border-emerald-500"
           bind:value={endpointUrl}
-          disabled={connected || busy}
+          disabled={connected || connecting}
         />
       </label>
       <label class="grid w-32 gap-1 text-sm text-stone-400">
@@ -373,7 +418,7 @@
         <input
           class="h-9 border border-neutral-700 bg-neutral-900 px-2 text-sm text-stone-100 outline-none focus:border-emerald-500"
           bind:value={startNodeId}
-          disabled={connected || busy}
+          disabled={connected || connecting}
         />
       </label>
       <label class="grid w-40 gap-1 text-sm text-stone-400">
@@ -381,7 +426,7 @@
         <select
           class="h-9 border border-neutral-700 bg-neutral-900 px-2 text-sm text-stone-100 outline-none focus:border-emerald-500"
           bind:value={authMode}
-          disabled={connected || busy}
+          disabled={connected || connecting}
         >
           <option>Anonymous</option>
           <option>UserPassword</option>
@@ -393,7 +438,7 @@
           <input
             class="h-9 border border-neutral-700 bg-neutral-900 px-2 text-sm text-stone-100 outline-none focus:border-emerald-500"
             bind:value={username}
-            disabled={connected || busy}
+            disabled={connected || connecting}
           />
         </label>
         <label class="grid w-40 gap-1 text-sm text-stone-400">
@@ -402,7 +447,7 @@
             class="h-9 border border-neutral-700 bg-neutral-900 px-2 text-sm text-stone-100 outline-none focus:border-emerald-500"
             type="password"
             bind:value={password}
-            disabled={connected || busy}
+            disabled={connected || connecting}
           />
         </label>
       {/if}
@@ -411,18 +456,29 @@
           class="flex h-9 items-center gap-2 border border-neutral-700 bg-neutral-900 px-3 text-sm text-stone-100 hover:bg-neutral-800 disabled:opacity-50"
           type="button"
           onclick={disconnect}
-          disabled={busy}
+          disabled={connecting}
           title="Disconnect"
         >
           <Unplug size={16} />
           Disconnect
+        </button>
+      {:else if connecting}
+        <button
+          class="flex h-9 items-center gap-2 border border-red-800 bg-red-950 px-3 text-sm text-red-100 hover:bg-red-900 disabled:opacity-50"
+          type="button"
+          onclick={abortConnect}
+          disabled={abortingConnect}
+          title="Abort connection"
+        >
+          <Square size={13} />
+          {abortingConnect ? "Aborting" : "Abort"}
         </button>
       {:else}
         <button
           class="flex h-9 items-center gap-2 border border-emerald-700 bg-emerald-700 px-3 text-sm text-white hover:bg-emerald-600 disabled:opacity-50"
           type="button"
           onclick={connect}
-          disabled={!handle || busy}
+          disabled={!handle || connecting}
           title="Connect"
         >
           <PlugZap size={16} />
@@ -430,11 +486,8 @@
         </button>
       {/if}
       <div class="ml-auto flex h-9 items-center gap-2 text-sm text-stone-400">
-        <Circle
-          size={10}
-          class={connected ? "fill-emerald-500 text-emerald-500" : "fill-neutral-600 text-neutral-600"}
-        />
-        {connected ? "Connected" : handle ? "Ready" : "Opening RPC"}
+        <Circle size={10} class={statusClass} />
+        {statusText}
       </div>
     </form>
   </header>

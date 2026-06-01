@@ -59,13 +59,21 @@ export const makeOpcuaClient = (options: OpcuaClientLayerOptions) =>
     yield* wireClientEvents(unsafeRaw, events);
     yield* Effect.acquireRelease(
       Effect.tryPromise({
-        try: async () => {
-          await unsafeRaw.connect(options.endpointUrl);
-          EventBus.publishUnsafe(events, {
-            _tag: "Connected",
-            endpointUrl: options.endpointUrl,
-          });
-          return unsafeRaw;
+        try: async (signal) => {
+          const abort = () => {
+            void unsafeRaw.disconnect().catch(() => undefined);
+          };
+          signal.addEventListener("abort", abort, { once: true });
+          try {
+            await unsafeRaw.connect(options.endpointUrl);
+            EventBus.publishUnsafe(events, {
+              _tag: "Connected",
+              endpointUrl: options.endpointUrl,
+            });
+            return unsafeRaw;
+          } finally {
+            signal.removeEventListener("abort", abort);
+          }
         },
         catch: (cause) => {
           EventBus.publishUnsafe(events, {

@@ -325,7 +325,25 @@ export const OpcuaSession = Object.assign(
             yield* PubSub.sliding<OpcuaSessionEvent>(EVENT_BUFFER_SIZE);
           const raw = yield* Effect.acquireRelease(
             Effect.tryPromise({
-              try: () => client.unsafeRaw.createSession(options?.userIdentity),
+              try: async (signal) => {
+                let aborted = signal.aborted;
+                const abort = () => {
+                  aborted = true;
+                };
+                signal.addEventListener("abort", abort, { once: true });
+                try {
+                  const session = await client.unsafeRaw.createSession(
+                    options?.userIdentity,
+                  );
+                  if (aborted) {
+                    await session.close(true).catch(() => undefined);
+                    throw new Error("Session creation aborted");
+                  }
+                  return session;
+                } finally {
+                  signal.removeEventListener("abort", abort);
+                }
+              },
               catch: (cause) => sessionCreateError({ cause }),
             }),
             (session) =>

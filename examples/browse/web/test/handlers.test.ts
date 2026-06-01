@@ -1,4 +1,4 @@
-import { Effect, Layer, Stream } from "effect";
+import { Effect, Fiber, Layer, Stream } from "effect";
 import { RpcTest } from "effect/unstable/rpc";
 import { describe, expect, it } from "vitest";
 
@@ -101,5 +101,46 @@ describe("RPC handlers", () => {
       ),
     );
   });
-});
 
+  it("cleans up sessions when connect is interrupted", async () => {
+    let cleaned = false;
+    const session = {
+      ...makeFakeSession({
+        metadata: { "i=85": objectMetadata("i=85") },
+      }),
+      readNodeMetadata: () => Effect.never,
+    };
+    const registry = Layer.succeed(SessionRegistry)({
+      connect: () => Effect.succeed(session),
+      get: () => Effect.succeed(session),
+      disconnect: () => Effect.succeed(false),
+      cleanup: () =>
+        Effect.sync(() => {
+          cleaned = true;
+        }),
+      size: Effect.succeed(0),
+    });
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* RpcTest.makeClient(UaBrowserRpcs).pipe(
+            Effect.provide(UaBrowserHandlers),
+            Effect.provide(registry),
+          );
+
+          const fiber = yield* Effect.forkScoped(
+            client.Connect({
+              endpointUrl: "opc.tcp://localhost:4840",
+              startNodeId: "i=85",
+              auth: { _tag: "Anonymous" },
+            }),
+          );
+          yield* Effect.sleep("10 millis");
+          yield* Fiber.interrupt(fiber);
+          expect(cleaned).toBe(true);
+        }),
+      ),
+    );
+  });
+});
