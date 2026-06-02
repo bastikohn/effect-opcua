@@ -25,7 +25,10 @@ export class UaBrowserClient extends Context.Service<
   >
 >()("@effect-opcua/web/UaBrowserClient") {
   static layer = (url: string) =>
-    Layer.effect(UaBrowserClient, RpcClient.make(UaBrowserRpcs)).pipe(
+    Layer.effect(
+      UaBrowserClient,
+      RpcClient.make(UaBrowserRpcs, { spanPrefix: "web.client.rpc" }),
+    ).pipe(
       Layer.provide(RpcClient.layerProtocolSocket()),
       Layer.provide(BrowserSocket.layerWebSocket(url)),
       Layer.provide(RpcSerialization.layerJson),

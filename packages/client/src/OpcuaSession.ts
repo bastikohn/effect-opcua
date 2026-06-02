@@ -345,12 +345,18 @@ export const OpcuaSession = Object.assign(
                 }
               },
               catch: (cause) => sessionCreateError({ cause }),
-            }),
+            }).pipe(
+              Effect.withSpan("opcua.session.create", { kind: "client" }),
+            ),
             (session) =>
               Effect.tryPromise({
                 try: () => session.close(true),
                 catch: (cause) => sessionCloseError({ cause }),
-              }).pipe(Effect.ignore, Effect.andThen(PubSub.shutdown(events))),
+              }).pipe(
+                Effect.withSpan("opcua.session.close", { kind: "client" }),
+                Effect.ignore,
+                Effect.andThen(PubSub.shutdown(events)),
+              ),
           );
           yield* wireSessionEvents(raw, events);
           return yield* makeSession(raw, events, {
@@ -471,7 +477,12 @@ export const makeSession = (
           ValueOfVariableDef<typeof def>,
           NodeIdOfVariableDef<typeof def>
         >;
-      });
+      }).pipe(
+        Effect.withSpan("opcua.session.read", {
+          attributes: { "opcua.node_id": def.nodeId },
+          kind: "client",
+        }),
+      );
 
     const write: OpcuaSession["write"] = (def, value) =>
       Effect.gen(function* () {
@@ -484,7 +495,12 @@ export const makeSession = (
           structureRuntime,
         );
         return result as WriteResult<NodeIdOfVariableDef<typeof def>>;
-      });
+      }).pipe(
+        Effect.withSpan("opcua.session.write", {
+          attributes: { "opcua.node_id": def.nodeId },
+          kind: "client",
+        }),
+      );
 
     const call: OpcuaSession["call"] = (def, input, options) =>
       Effect.gen(function* () {
@@ -497,16 +513,39 @@ export const makeSession = (
           structureRuntime,
           options,
         );
-      });
+      }).pipe(
+        Effect.withSpan("opcua.session.call", {
+          attributes: {
+            "opcua.object_id": def.objectId,
+            "opcua.method_id": def.methodId,
+          },
+          kind: "client",
+        }),
+      );
 
     const readMany: OpcuaSession["readMany"] = (items, options) =>
-      readManyWithState(state, items, options);
+      readManyWithState(state, items, options).pipe(
+        Effect.withSpan("opcua.session.readMany", {
+          attributes: { "opcua.node_count": Object.keys(items).length },
+          kind: "client",
+        }),
+      );
 
     const writeMany: OpcuaSession["writeMany"] = (items, options) =>
-      writeManyWithState(state, items, options);
+      writeManyWithState(state, items, options).pipe(
+        Effect.withSpan("opcua.session.writeMany", {
+          attributes: { "opcua.node_count": Object.keys(items).length },
+          kind: "client",
+        }),
+      );
 
     const callMany: OpcuaSession["callMany"] = (items, options) =>
-      callManyWithState(state, items, options);
+      callManyWithState(state, items, options).pipe(
+        Effect.withSpan("opcua.session.callMany", {
+          attributes: { "opcua.method_count": Object.keys(items).length },
+          kind: "client",
+        }),
+      );
 
     const makeSubscription: OpcuaSession["makeSubscription"] = (options) =>
       Effect.gen(function* () {
@@ -531,12 +570,27 @@ export const makeSession = (
                 priority: options.priority ?? DEFAULT_PRIORITY,
               }),
             catch: (cause) => subscriptionCreateError({ cause }),
-          }),
+          }).pipe(
+            Effect.withSpan("opcua.subscription.create", {
+              attributes: {
+                "opcua.publishing_interval_ms": durationMillis(
+                  options.publishingInterval,
+                ),
+              },
+              kind: "client",
+            }),
+          ),
           (subscription) =>
             Effect.tryPromise({
               try: () => subscription.terminate(),
               catch: (cause) => subscriptionCreateError({ cause }),
             }).pipe(
+              Effect.withSpan("opcua.subscription.terminate", {
+                attributes: {
+                  "opcua.subscription_id": subscription.subscriptionId,
+                },
+                kind: "client",
+              }),
               Effect.ignore,
               Effect.andThen(PubSub.shutdown(subscriptionEvents)),
             ),
@@ -588,7 +642,17 @@ export const makeSession = (
           result,
           input.includeRaw ?? false,
         );
-      });
+      }).pipe(
+        Effect.withSpan("opcua.session.browse", {
+          attributes: {
+            "opcua.node_id": input.nodeId,
+            "opcua.max_references_per_node":
+              input.maxReferencesPerNode ??
+              DEFAULT_BROWSE_MAX_REFERENCES_PER_NODE,
+          },
+          kind: "client",
+        }),
+      );
 
     const browseNext: OpcuaSession["browseNext"] = (continuation) =>
       Effect.gen(function* () {
@@ -613,7 +677,12 @@ export const makeSession = (
           result,
           continuation.includeRaw ?? false,
         );
-      });
+      }).pipe(
+        Effect.withSpan("opcua.session.browseNext", {
+          attributes: { "opcua.node_id": continuation.nodeId },
+          kind: "client",
+        }),
+      );
 
     const releaseBrowseContinuation: OpcuaSession["releaseBrowseContinuation"] =
       (continuation) =>
@@ -633,7 +702,12 @@ export const makeSession = (
                 cause,
               }),
           });
-        });
+        }).pipe(
+          Effect.withSpan("opcua.session.releaseBrowseContinuation", {
+            attributes: { "opcua.node_id": continuation.nodeId },
+            kind: "client",
+          }),
+        );
 
     const browseChildren: OpcuaSession["browseChildren"] = (nodeId, options) =>
       Effect.gen(function* () {
@@ -679,7 +753,15 @@ export const makeSession = (
           status: first.status,
           references,
         };
-      });
+      }).pipe(
+        Effect.withSpan("opcua.session.browseChildren", {
+          attributes: {
+            "opcua.node_id": nodeId,
+            "opcua.browse_mode": options?.mode ?? "all",
+          },
+          kind: "client",
+        }),
+      );
 
     const readNamespaceArray: OpcuaSession["readNamespaceArray"] = () =>
       metadata.namespaceArray();

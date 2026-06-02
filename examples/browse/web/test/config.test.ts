@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { readServerConfig } from "../src/server/config.js";
+import { readServerConfig, readTelemetryConfig } from "../src/server/config.js";
 
 describe("web server config", () => {
   it("reads explicit web env names", () => {
@@ -23,5 +23,29 @@ describe("web server config", () => {
         EFFECT_OPCUA_WEB_PORT: "not-a-port",
       }).port,
     ).toBe(4123);
+  });
+
+  it("keeps telemetry disabled without an OTLP endpoint", () => {
+    expect(readTelemetryConfig({})).toEqual({ _tag: "Disabled" });
+  });
+
+  it("reads OTLP trace export settings", () => {
+    expect(
+      readTelemetryConfig({
+        EFFECT_OPCUA_WEB_OTLP_ENDPOINT: "http://127.0.0.1:4318",
+        EFFECT_OPCUA_WEB_OTLP_HEADERS: "x-api-key=secret,tenant=demo",
+        EFFECT_OPCUA_WEB_OTLP_PROTOCOL: "http/json",
+        OTEL_SERVICE_NAME: "effect-opcua-web",
+      }),
+    ).toEqual({
+      _tag: "Otlp",
+      protocol: "json",
+      serviceName: "effect-opcua-web",
+      tracesUrl: "http://127.0.0.1:4318/v1/traces",
+      headers: {
+        "x-api-key": "secret",
+        tenant: "demo",
+      },
+    });
   });
 });

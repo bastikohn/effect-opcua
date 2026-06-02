@@ -62,9 +62,12 @@ export const UaBrowserHandlers = UaBrowserRpcs.toLayer(
           return yield* withContinuationToken(registry, client.id, page);
         }),
       ReleaseBrowseContinuation: ({ continuationToken }, { client }) =>
-        Effect.map(registry.releaseContinuation(client.id, continuationToken), (released) => ({
-          released,
-        })),
+        Effect.map(
+          registry.releaseContinuation(client.id, continuationToken),
+          (released) => ({
+            released,
+          }),
+        ),
       ReadNode: ({ nodeId }, { client }) =>
         Effect.gen(function* () {
           const session = yield* registry.get(client.id);
@@ -132,6 +135,7 @@ const withContinuationToken = (
 
 export const UaBrowserRpcLive = RpcServer.layer(UaBrowserRpcs, {
   disableFatalDefects: true,
+  spanPrefix: "web.rpc",
 }).pipe(Layer.provide(UaBrowserHandlers));
 
 export const withClientCleanup = <E, R>(
@@ -146,9 +150,9 @@ export const withClientCleanup = <E, R>(
       yield* Effect.forkScoped(
         Effect.forever(
           Effect.flatMap(Queue.take(base.disconnects), (clientId) =>
-            registry.cleanup(clientId).pipe(
-              Effect.andThen(Queue.offer(forwarded, clientId)),
-            ),
+            registry
+              .cleanup(clientId)
+              .pipe(Effect.andThen(Queue.offer(forwarded, clientId))),
           ),
         ),
       );

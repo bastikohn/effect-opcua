@@ -86,7 +86,12 @@ export const makeOpcuaClient = (options: OpcuaClientLayerOptions) =>
             cause,
           });
         },
-      }),
+      }).pipe(
+        Effect.withSpan("opcua.connect", {
+          attributes: { "opcua.endpoint_url": options.endpointUrl },
+          kind: "client",
+        }),
+      ),
       () =>
         Effect.tryPromise({
           try: async () => {
@@ -101,7 +106,14 @@ export const makeOpcuaClient = (options: OpcuaClientLayerOptions) =>
               endpointUrl: options.endpointUrl,
               cause,
             }),
-        }).pipe(Effect.ignore, Effect.andThen(PubSub.shutdown(events))),
+        }).pipe(
+          Effect.withSpan("opcua.disconnect", {
+            attributes: { "opcua.endpoint_url": options.endpointUrl },
+            kind: "client",
+          }),
+          Effect.ignore,
+          Effect.andThen(PubSub.shutdown(events)),
+        ),
     );
     return {
       events: Stream.fromPubSub(events),

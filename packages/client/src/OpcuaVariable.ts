@@ -210,7 +210,12 @@ export const readVariable = <const Id extends string, A>(
     if (Codec.requiresStructureRuntime(def.codec)) {
       yield* structureRuntime.ensureInitialized();
     }
-    const dataValue = yield* readDataValue(session, def.nodeId);
+    const dataValue = yield* readDataValue(session, def.nodeId).pipe(
+      Effect.withSpan("opcua.raw.read", {
+        attributes: { "opcua.node_id": def.nodeId },
+        kind: "client",
+      }),
+    );
     return yield* sampleFromDataValue(def, dataValue, structureRuntime);
   });
 
@@ -246,7 +251,12 @@ export const readPreparedVariables = (
               operation: "read",
               cause,
             }),
-        });
+        }).pipe(
+          Effect.withSpan("opcua.raw.read.batch", {
+            attributes: { "opcua.node_count": chunk.length },
+            kind: "client",
+          }),
+        );
         if (dataValues.length !== chunk.length) {
           return yield* Effect.fail(
             serviceError({
@@ -320,7 +330,12 @@ export const writeVariable = <const Id extends string, A>(
           nodeId: def.nodeId,
           cause,
         }),
-    });
+    }).pipe(
+      Effect.withSpan("opcua.raw.write", {
+        attributes: { "opcua.node_id": def.nodeId },
+        kind: "client",
+      }),
+    );
     return writeResult(def.nodeId, statusCode);
   });
 

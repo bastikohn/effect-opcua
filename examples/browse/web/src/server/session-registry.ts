@@ -5,7 +5,10 @@ import {
   type OpcuaSubscription,
   type OpcuaVariable,
 } from "@effect-opcua/client";
-import { UserTokenType, type UserIdentityInfo } from "@effect-opcua/client/node-opcua";
+import {
+  UserTokenType,
+  type UserIdentityInfo,
+} from "@effect-opcua/client/node-opcua";
 import { Context, Effect, Exit, Layer, Scope, Semaphore } from "effect";
 
 import type { ConnectRequest } from "../shared/rpc.js";
@@ -67,7 +70,14 @@ export class SessionFactory extends Context.Service<
             session,
             close: Scope.close(scope, Exit.void),
           };
-        }),
+        }).pipe(
+          Effect.withSpan("opcua.session.open", {
+            attributes: {
+              "opcua.endpoint_url": request.endpointUrl,
+              "opcua.auth": request.auth._tag,
+            },
+          }),
+        ),
     }),
   );
 }
@@ -146,18 +156,27 @@ export class SessionRegistry extends Context.Service<
           lock.withPermit(
             Effect.gen(function* () {
               yield* closeExisting(clientId);
-              const handle = yield* factory.connect(request).pipe(
-                Effect.mapError((cause) =>
-                  rpcError("Connect", undefined, cause),
-                ),
-              );
+              const handle = yield* factory
+                .connect(request)
+                .pipe(
+                  Effect.mapError((cause) =>
+                    rpcError("Connect", undefined, cause),
+                  ),
+                );
               sessions.set(clientId, {
                 ...handle,
                 endpointUrl: request.endpointUrl,
                 continuations: new Map(),
               });
               return handle.session;
-            }),
+            }).pipe(
+              Effect.withSpan("web.session.connect", {
+                attributes: {
+                  "rpc.client_id": clientId,
+                  "opcua.endpoint_url": request.endpointUrl,
+                },
+              }),
+            ),
           ),
         get: (clientId) =>
           Effect.suspend(() => {
@@ -165,11 +184,11 @@ export class SessionRegistry extends Context.Service<
             return entry
               ? Effect.succeed(entry.session)
               : Effect.fail(
-                new WebRpcError({
-                  category: "Session",
-                  message: "No active OPC UA session for this browser tab",
-                  operation: "Session",
-                }),
+                  new WebRpcError({
+                    category: "Session",
+                    message: "No active OPC UA session for this browser tab",
+                    operation: "Session",
+                  }),
                 );
           }),
         disconnect: (clientId) =>
@@ -218,7 +237,9 @@ export class SessionRegistry extends Context.Service<
         releaseContinuations: (clientId, nodeId) =>
           Effect.suspend(() => {
             const entry = sessions.get(clientId);
-            return entry ? releaseEntryContinuations(entry, nodeId) : Effect.void;
+            return entry
+              ? releaseEntryContinuations(entry, nodeId)
+              : Effect.void;
           }),
         size: Effect.sync(() => sessions.size),
       });
@@ -281,7 +302,9 @@ const opcuaErrorMessage = (reason: OpcuaError.OpcuaErrorReason): string => {
   switch (reason._tag) {
     case "Configuration":
     case "MonitorConfiguration":
-      return stringCause(reason.cause) ?? `${reason.operation} configuration error`;
+      return (
+        stringCause(reason.cause) ?? `${reason.operation} configuration error`
+      );
     case "Service":
       return reason.status?.text ?? `${reason.operation} service error`;
     case "Connect":
@@ -321,7 +344,8 @@ const releaseEntryContinuations = (
   nodeId?: string,
 ): Effect.Effect<void> => {
   const continuations = [...entry.continuations.entries()].filter(
-    ([, continuation]) => nodeId === undefined || continuation.nodeId === nodeId,
+    ([, continuation]) =>
+      nodeId === undefined || continuation.nodeId === nodeId,
   );
   for (const [token] of continuations) entry.continuations.delete(token);
   return Effect.forEach(
