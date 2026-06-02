@@ -1,19 +1,21 @@
 import {
   OpcuaClient,
+  OpcuaError,
   OpcuaSession,
   type OpcuaSubscription,
   type OpcuaVariable,
 } from "@effect-opcua/client";
+import { UserTokenType, type UserIdentityInfo } from "@effect-opcua/client/node-opcua";
 import { Context, Effect, Exit, Layer, Scope, Semaphore } from "effect";
-import { UserTokenType, type UserIdentityInfo } from "node-opcua";
 
 import type { ConnectRequest } from "../shared/rpc.js";
-import { WebRpcError } from "../shared/rpc.js";
-import { errorMessage, toJsonValue } from "../shared/value.js";
+import { WebRpcError, type WebRpcErrorCategory } from "../shared/rpc.js";
 
 export type BrowserOpcuaSession = Pick<
   OpcuaSession.OpcuaSession,
   | "browseChildren"
+  | "browseNext"
+  | "releaseBrowseContinuation"
   | "readNodeMetadata"
   | "readManyNodeMetadata"
   | "readDataTypeDefinition"
@@ -21,6 +23,10 @@ export type BrowserOpcuaSession = Pick<
   | "write"
   | "makeSubscription"
 >;
+
+export type BrowserBrowseContinuation = Parameters<
+  BrowserOpcuaSession["browseNext"]
+>[0];
 
 export type SessionHandle = {
   readonly session: BrowserOpcuaSession;
@@ -76,6 +82,22 @@ export type SessionRegistryService = {
   ) => Effect.Effect<BrowserOpcuaSession, WebRpcError>;
   readonly disconnect: (clientId: number) => Effect.Effect<boolean>;
   readonly cleanup: (clientId: number) => Effect.Effect<void>;
+  readonly storeContinuation: (
+    clientId: number,
+    continuation: BrowserBrowseContinuation,
+  ) => Effect.Effect<string, WebRpcError>;
+  readonly takeContinuation: (
+    clientId: number,
+    token: string,
+  ) => Effect.Effect<BrowserBrowseContinuation, WebRpcError>;
+  readonly releaseContinuation: (
+    clientId: number,
+    token: string,
+  ) => Effect.Effect<boolean, WebRpcError>;
+  readonly releaseContinuations: (
+    clientId: number,
+    nodeId?: string,
+  ) => Effect.Effect<void>;
   readonly size: Effect.Effect<number>;
 };
 
@@ -83,6 +105,7 @@ type RegistryEntry = {
   readonly session: BrowserOpcuaSession;
   readonly close: Effect.Effect<void>;
   readonly endpointUrl: string;
+  readonly continuations: Map<string, BrowserBrowseContinuation>;
 };
 
 export class SessionRegistry extends Context.Service<
@@ -95,18 +118,28 @@ export class SessionRegistry extends Context.Service<
       const factory = yield* SessionFactory;
       const lock = yield* Semaphore.make(1);
       const sessions = new Map<number, RegistryEntry>();
+      let nextContinuationId = 1;
 
       const closeExisting = (clientId: number) =>
         Effect.sync(() => sessions.get(clientId)).pipe(
           Effect.flatMap((entry) =>
             entry
-              ? entry.close.pipe(
+              ? releaseEntryContinuations(entry).pipe(
+                  Effect.andThen(entry.close),
                   Effect.ignore,
                   Effect.andThen(Effect.sync(() => sessions.delete(clientId))),
                 )
               : Effect.void,
           ),
         );
+
+      const missingContinuation = (token: string) =>
+        new WebRpcError({
+          category: "Session",
+          message: "Browse continuation is no longer available",
+          operation: "BrowseContinuation",
+          nodeId: token,
+        });
 
       return SessionRegistry.of({
         connect: (clientId, request) =>
@@ -121,6 +154,7 @@ export class SessionRegistry extends Context.Service<
               sessions.set(clientId, {
                 ...handle,
                 endpointUrl: request.endpointUrl,
+                continuations: new Map(),
               });
               return handle.session;
             }),
@@ -131,10 +165,11 @@ export class SessionRegistry extends Context.Service<
             return entry
               ? Effect.succeed(entry.session)
               : Effect.fail(
-                  new WebRpcError({
-                    message: "No active OPC UA session for this browser tab",
-                    operation: "Session",
-                  }),
+                new WebRpcError({
+                  category: "Session",
+                  message: "No active OPC UA session for this browser tab",
+                  operation: "Session",
+                }),
                 );
           }),
         disconnect: (clientId) =>
@@ -144,6 +179,47 @@ export class SessionRegistry extends Context.Service<
             ),
           ),
         cleanup: (clientId) => closeExisting(clientId).pipe(Effect.ignore),
+        storeContinuation: (clientId, continuation) =>
+          Effect.suspend(() => {
+            const entry = sessions.get(clientId);
+            if (!entry) {
+              return Effect.fail(
+                new WebRpcError({
+                  category: "Session",
+                  message: "No active OPC UA session for this browser tab",
+                  operation: "BrowseContinuation",
+                }),
+              );
+            }
+            const token = `c${nextContinuationId++}`;
+            entry.continuations.set(token, continuation);
+            return Effect.succeed(token);
+          }),
+        takeContinuation: (clientId, token) =>
+          Effect.suspend(() => {
+            const entry = sessions.get(clientId);
+            const continuation = entry?.continuations.get(token);
+            if (!entry || !continuation) {
+              return Effect.fail(missingContinuation(token));
+            }
+            entry.continuations.delete(token);
+            return Effect.succeed(continuation);
+          }),
+        releaseContinuation: (clientId, token) =>
+          Effect.suspend(() => {
+            const entry = sessions.get(clientId);
+            const continuation = entry?.continuations.get(token);
+            if (!entry || !continuation) return Effect.succeed(false);
+            entry.continuations.delete(token);
+            return entry.session
+              .releaseBrowseContinuation(continuation)
+              .pipe(Effect.ignore, Effect.as(true));
+          }),
+        releaseContinuations: (clientId, nodeId) =>
+          Effect.suspend(() => {
+            const entry = sessions.get(clientId);
+            return entry ? releaseEntryContinuations(entry, nodeId) : Effect.void;
+          }),
         size: Effect.sync(() => sessions.size),
       });
     }),
@@ -160,11 +236,101 @@ export const rpcError = (
   cause: unknown,
 ) =>
   new WebRpcError({
-    message: errorMessage(cause),
+    category: errorCategory(cause),
+    message: safeErrorMessage(cause),
     operation,
     nodeId,
-    cause: toJsonValue(cause),
   });
+
+const errorCategory = (cause: unknown): WebRpcErrorCategory => {
+  if (cause instanceof WebRpcError) return cause.category;
+  if (!OpcuaError.isOpcuaError(cause)) return "Unexpected";
+  switch (cause.reason._tag) {
+    case "Configuration":
+    case "MonitorConfiguration":
+    case "AccessDenied":
+    case "Encode":
+    case "MethodInput":
+    case "MethodNotExecutable":
+      return "Configuration";
+    case "Connect":
+    case "Disconnect":
+      return "Transport";
+    case "SessionCreate":
+    case "SessionClose":
+      return "Session";
+    case "Service":
+    case "Decode":
+    case "SubscriptionCreate":
+    case "MonitorCreate":
+    case "MonitorStartup":
+    case "MonitorRuntime":
+      return "Service";
+  }
+};
+
+const safeErrorMessage = (cause: unknown): string => {
+  if (cause instanceof WebRpcError) return cause.message;
+  if (OpcuaError.isOpcuaError(cause)) return opcuaErrorMessage(cause.reason);
+  if (cause instanceof Error) return cause.message || cause.name;
+  if (typeof cause === "string") return cause;
+  return "Unexpected failure";
+};
+
+const opcuaErrorMessage = (reason: OpcuaError.OpcuaErrorReason): string => {
+  switch (reason._tag) {
+    case "Configuration":
+    case "MonitorConfiguration":
+      return stringCause(reason.cause) ?? `${reason.operation} configuration error`;
+    case "Service":
+      return reason.status?.text ?? `${reason.operation} service error`;
+    case "Connect":
+      return `Could not connect to ${reason.endpointUrl}`;
+    case "Disconnect":
+      return "OPC UA disconnect failed";
+    case "SessionCreate":
+      return "OPC UA session creation failed";
+    case "SessionClose":
+      return "OPC UA session close failed";
+    case "SubscriptionCreate":
+      return "OPC UA subscription creation failed";
+    case "AccessDenied":
+      return `Access denied for ${reason.nodeId}`;
+    case "Encode":
+      return `Could not encode value for ${reason.nodeId}`;
+    case "Decode":
+      return `Could not decode value for ${reason.nodeId}`;
+    case "MethodInput":
+      return `Invalid method input for ${reason.methodId}`;
+    case "MethodNotExecutable":
+      return `Method ${reason.methodId} is not executable`;
+    case "MonitorCreate":
+      return "OPC UA monitor creation failed";
+    case "MonitorStartup":
+      return `OPC UA monitor startup failed for ${reason.nodeId}`;
+    case "MonitorRuntime":
+      return "OPC UA monitor stream failed";
+  }
+};
+
+const stringCause = (cause: unknown): string | undefined =>
+  typeof cause === "string" && cause.length > 0 ? cause : undefined;
+
+const releaseEntryContinuations = (
+  entry: RegistryEntry,
+  nodeId?: string,
+): Effect.Effect<void> => {
+  const continuations = [...entry.continuations.entries()].filter(
+    ([, continuation]) => nodeId === undefined || continuation.nodeId === nodeId,
+  );
+  for (const [token] of continuations) entry.continuations.delete(token);
+  return Effect.forEach(
+    continuations,
+    ([, continuation]) =>
+      entry.session.releaseBrowseContinuation(continuation).pipe(Effect.ignore),
+    { discard: true },
+  );
+};
 
 const userIdentity = (auth: ConnectRequest["auth"]): UserIdentityInfo =>
   auth._tag === "UserPassword"

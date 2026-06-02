@@ -10,30 +10,69 @@ import type {
   BrowseResponse,
   DataTypeDefinitionResult,
   MetadataFailure,
+  MonitorEvent,
+  MonitorRejectedItem,
   MonitorSample,
   NodeMetadata,
   ReadNodeResponse,
   ReadValue,
+  StatusInfo,
   WriteNodeResponse,
-  WriteStatus,
 } from "../shared/rpc.js";
 import { WebRpcError } from "../shared/rpc.js";
 import { toJsonValue } from "../shared/value.js";
 import { rpcError, type BrowserOpcuaSession } from "./session-registry.js";
+import type { BrowserBrowseContinuation } from "./session-registry.js";
+
+export type BrowsePage = {
+  readonly response: BrowseResponse;
+  readonly continuation?: BrowserBrowseContinuation;
+};
+
+type RuntimeMonitorSample =
+  | {
+      readonly _tag: "Value";
+      readonly nodeId: string;
+      readonly value: unknown;
+      readonly status: StatusInfo;
+      readonly sourceTimestamp?: Date;
+      readonly serverTimestamp?: Date;
+    }
+  | {
+      readonly _tag: "DecodeError";
+      readonly nodeId: string;
+      readonly error: unknown;
+      readonly status: StatusInfo;
+      readonly sourceTimestamp?: Date;
+      readonly serverTimestamp?: Date;
+    }
+  | {
+      readonly _tag: "Status";
+      readonly nodeId: string;
+      readonly status: StatusInfo;
+      readonly sourceTimestamp?: Date;
+      readonly serverTimestamp?: Date;
+    };
 
 export const browseNode = (
   session: BrowserOpcuaSession,
   nodeId: string,
-): Effect.Effect<BrowseResponse, WebRpcError> =>
+  maxReferencesPerNode: number,
+): Effect.Effect<BrowsePage, WebRpcError> =>
   Effect.gen(function* () {
-    const result = yield* session.browseChildren(nodeId).pipe(
+    const result = yield* session.browseChildren(nodeId, {
+      mode: "page",
+      maxReferencesPerNode,
+    }).pipe(
       Effect.mapError((cause) => rpcError("Browse", nodeId, cause)),
     );
     if (result._tag === "NonGoodStatus") {
       return {
-        nodeId,
-        status: result.status,
-        references: [],
+        response: {
+          _tag: "NonGoodStatus",
+          nodeId,
+          status: result.status,
+        },
       };
     }
 
@@ -50,11 +89,66 @@ export const browseNode = (
       metadataResults.map((entry) => [entry.nodeId, entry]),
     );
     return {
-      nodeId,
-      status: result.status,
-      references: result.references.map((reference) =>
-        browseReference(reference, metadataByNodeId.get(reference.nodeId.text)),
+      response: {
+        _tag: "Browsed",
+        nodeId,
+        status: result.status,
+        references: result.references.map((reference) =>
+          browseReference(
+            reference,
+            metadataByNodeId.get(reference.nodeId.text),
+          ),
+        ),
+      },
+      continuation: result.continuation,
+    };
+  });
+
+export const browseContinuation = (
+  session: BrowserOpcuaSession,
+  continuation: BrowserBrowseContinuation,
+): Effect.Effect<BrowsePage, WebRpcError> =>
+  Effect.gen(function* () {
+    const result = yield* session.browseNext(continuation).pipe(
+      Effect.mapError((cause) =>
+        rpcError("BrowseNext", continuation.nodeId, cause),
       ),
+    );
+    if (result._tag === "NonGoodStatus") {
+      return {
+        response: {
+          _tag: "NonGoodStatus",
+          nodeId: continuation.nodeId,
+          status: result.status,
+        },
+      };
+    }
+
+    const nodeIds = result.references.map((reference) => reference.nodeId.text);
+    const metadataResults =
+      nodeIds.length === 0
+        ? []
+        : yield* session.readManyNodeMetadata(nodeIds).pipe(
+            Effect.mapError((cause) =>
+              rpcError("BrowseMetadata", continuation.nodeId, cause),
+            ),
+          );
+    const metadataByNodeId = new Map(
+      metadataResults.map((entry) => [entry.nodeId, entry]),
+    );
+    return {
+      response: {
+        _tag: "Browsed",
+        nodeId: continuation.nodeId,
+        status: result.status,
+        references: result.references.map((reference) =>
+          browseReference(
+            reference,
+            metadataByNodeId.get(reference.nodeId.text),
+          ),
+        ),
+      },
+      continuation: result.continuation,
     };
   });
 
@@ -98,16 +192,17 @@ export const writeNode = (
       nodeId,
       access: "readWrite",
     });
-    const result = yield* Effect.result(session.write(variable, value as never));
-    const write: WriteStatus = Result.isSuccess(result)
-      ? result.success
-      : {
-          _tag: "Failed",
-          nodeId,
-          message: rpcError("WriteNode", nodeId, result.failure).message,
-        };
+    const write = yield* session
+      .write(variable, value as never)
+      .pipe(Effect.mapError((cause) => rpcError("WriteNode", nodeId, cause)));
     const refreshed = yield* readNode(session, nodeId);
-    return { nodeId, write, refreshed };
+    return {
+      nodeId,
+      attemptedValue: toJsonValue(value),
+      writtenAt: new Date().toISOString(),
+      write,
+      refreshed,
+    };
   });
 
 export const monitorValues = (
@@ -152,51 +247,82 @@ export const monitorValues = (
       timestamps: "both",
       clientBuffer: OpcuaSubscription.BufferPolicy.sliding(64),
     });
-    return active.samples.pipe(
-      Stream.map((sample): MonitorSample => {
-        const base = {
-          nodeId: sample.nodeId,
-          metadata: metadataByNodeId.get(sample.nodeId),
-        };
-        if (sample._tag === "Value") {
-          return {
-            ...base,
-            sample: {
-              _tag: "Value",
-              nodeId: sample.nodeId,
-              value: toJsonValue(sample.value),
-              status: sample.status,
-              sourceTimestamp: sample.sourceTimestamp?.toISOString(),
-              serverTimestamp: sample.serverTimestamp?.toISOString(),
-            },
-          };
-        }
-        if (sample._tag === "DecodeError") {
-          return {
-            ...base,
-            sample: {
-              _tag: "DecodeError",
-              nodeId: sample.nodeId,
-              error: toJsonValue(sample.error),
-              status: sample.status,
-              sourceTimestamp: sample.sourceTimestamp?.toISOString(),
-              serverTimestamp: sample.serverTimestamp?.toISOString(),
-            },
-          };
-        }
-        return {
-          ...base,
-          sample: {
-            _tag: "NonGoodStatus",
-            nodeId: sample.nodeId,
-            status: sample.status,
-            sourceTimestamp: sample.sourceTimestamp?.toISOString(),
-            serverTimestamp: sample.serverTimestamp?.toISOString(),
-          },
-        };
-      }),
+    const started: MonitorEvent = {
+      _tag: "Started",
+      accepted: Array.from(active.startup.active.values()).map(
+        (item) => item.nodeId,
+      ),
+      rejected: Array.from(active.startup.failed.values()).map(
+        monitorRejectedItem,
+      ),
+    };
+    return Stream.concat(
+      Stream.succeed(started),
+      active.samples.pipe(
+        Stream.map(
+          (sample): MonitorEvent => ({
+            _tag: "Sample",
+            sample: monitorSample(sample, metadataByNodeId),
+          }),
+        ),
+      ),
     );
   });
+
+const monitorSample = (
+  sample: RuntimeMonitorSample,
+  metadataByNodeId: ReadonlyMap<string, NodeMetadata>,
+): MonitorSample => {
+  const base = {
+    nodeId: sample.nodeId,
+    metadata: metadataByNodeId.get(sample.nodeId),
+  };
+  if (sample._tag === "Value") {
+    return {
+      ...base,
+      sample: {
+        _tag: "Value",
+        nodeId: sample.nodeId,
+        value: toJsonValue(sample.value),
+        status: sample.status,
+        sourceTimestamp: sample.sourceTimestamp?.toISOString(),
+        serverTimestamp: sample.serverTimestamp?.toISOString(),
+      },
+    };
+  }
+  if (sample._tag === "DecodeError") {
+    return {
+      ...base,
+      sample: {
+        _tag: "DecodeError",
+        nodeId: sample.nodeId,
+        error: toJsonValue(sample.error),
+        status: sample.status,
+        sourceTimestamp: sample.sourceTimestamp?.toISOString(),
+        serverTimestamp: sample.serverTimestamp?.toISOString(),
+      },
+    };
+  }
+  return {
+    ...base,
+    sample: {
+      _tag: "NonGoodStatus",
+      nodeId: sample.nodeId,
+      status: sample.status,
+      sourceTimestamp: sample.sourceTimestamp?.toISOString(),
+      serverTimestamp: sample.serverTimestamp?.toISOString(),
+    },
+  };
+};
+
+const monitorRejectedItem = (
+  failure: OpcuaSubscription.MonitorStartupFailure,
+): MonitorRejectedItem => ({
+  nodeId: failure.nodeId,
+  message: rpcError("MonitorStartup", failure.nodeId, failure.error).message,
+  phase: failure.error.reason.phase,
+  status: failure.error.reason.status,
+});
 
 export const nodeMetadata = (
   metadata: OpcuaSession.OpcuaNodeMetadata,

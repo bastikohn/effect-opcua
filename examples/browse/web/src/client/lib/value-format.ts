@@ -1,4 +1,4 @@
-import type { MonitorSample, ReadValue } from "../shared/rpc.js";
+import type { MonitorSample, ReadValue } from "../../shared/rpc.js";
 
 export function stringifyValue(value: ReadValue | undefined) {
   return value?._tag === "Value" ? JSON.stringify(value.value, null, 2) : "";

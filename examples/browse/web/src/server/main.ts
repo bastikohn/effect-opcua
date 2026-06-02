@@ -8,10 +8,10 @@ import {
   UaBrowserRpcLive,
   withClientCleanup,
 } from "./handlers.js";
+import { readServerConfig } from "./config.js";
 import { SessionRegistry } from "./session-registry.js";
 
-const host = process.env.HOST ?? "127.0.0.1";
-const port = Number(process.env.PORT ?? 4123);
+const { host, port } = readServerConfig();
 
 const RpcProtocol = withClientCleanup(
   RpcServer.layerProtocolWebsocket({ path: "/rpc" }).pipe(

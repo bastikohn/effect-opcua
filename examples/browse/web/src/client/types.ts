@@ -1,4 +1,4 @@
-import type { BrowseReference, MonitorSample } from "../shared/rpc.js";
+import type { BrowseReference, MonitorSample, StatusInfo } from "../shared/rpc.js";
 
 export type AuthMode = "Anonymous" | "UserPassword";
 
@@ -10,6 +10,9 @@ export type TreeNode = {
   expanded: boolean;
   loading: boolean;
   loaded: boolean;
+  browseStatus?: StatusInfo;
+  browseRequestId?: number;
+  continuationToken?: string;
   children: TreeNode[];
 };
 
@@ -23,6 +26,8 @@ export type LogRow = {
 export type MonitorRow = {
   nodeId: string;
   label: string;
+  monitorStatus: "Desired" | "Accepted" | "Rejected";
+  rejectionMessage?: string;
   samples: MonitorSample[];
 };
 

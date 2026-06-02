@@ -20,11 +20,12 @@
   "scripts": {
     "build": "pnpm build:server && pnpm build:client",
     "build:client": "vite build",
-    "build:server": "tsdown --config-loader unrun",
+    "build:server": "pnpm --filter @effect-opcua/client build && tsdown --config-loader unrun",
     "dev": "node scripts/dev.mjs",
     "dev:client": "vite --host 127.0.0.1",
-    "dev:server": "pnpm build:server && node dist/server/main.mjs",
-    "start": "node dist/server/main.mjs",
+    "dev:server": "pnpm build:server && pnpm start:rpc",
+    "start": "pnpm start:rpc",
+    "start:rpc": "node dist/server/main.mjs",
     "typecheck": "svelte-check --tsconfig tsconfig.json && tsc --noEmit --project tsconfig.json",
     "test": "vitest run --passWithNoTests",
     "clean": "rm -rf dist coverage node_modules .svelte-kit"
@@ -36,7 +37,6 @@
     "@tailwindcss/vite": "^4.0.0",
     "effect": "4.0.0-beta.66",
     "lucide-svelte": "^0.468.0",
-    "node-opcua": "^2.170.0",
     "svelte": "^5.56.0",
     "tailwindcss": "^4.0.0",
     "vite": "^7.0.0"

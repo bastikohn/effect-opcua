@@ -5,15 +5,18 @@ import {
   ConnectRequestSchema,
   JsonValueSchema,
   UaBrowserRpcs,
+  WebRpcError,
 } from "../src/shared/rpc.js";
 import { parseJsonValue, toJsonValue } from "../src/shared/value.js";
 
 describe("RPC schemas and value normalization", () => {
   it("defines the expected RPC surface", () => {
     expect([...UaBrowserRpcs.requests.keys()]).toEqual([
+      "GetConfig",
       "Connect",
       "Disconnect",
       "Browse",
+      "ReleaseBrowseContinuation",
       "ReadNode",
       "WriteNode",
       "MonitorValues",
@@ -32,6 +35,22 @@ describe("RPC schemas and value normalization", () => {
       endpointUrl: "opc.tcp://localhost:4840",
       auth: { _tag: "Anonymous" },
     });
+  });
+
+  it("keeps web RPC errors browser-safe", () => {
+    const error = new WebRpcError({
+      category: "Session",
+      operation: "Session",
+      message: "No active OPC UA session",
+    });
+
+    expect(error).toMatchObject({
+      _tag: "WebRpcError",
+      category: "Session",
+      operation: "Session",
+      message: "No active OPC UA session",
+    });
+    expect("cause" in error).toBe(false);
   });
 
   it("keeps values JSON safe", () => {
@@ -59,4 +78,3 @@ describe("RPC schemas and value normalization", () => {
     });
   });
 });
-

@@ -1,19 +1,30 @@
-import { errorMessage } from "../shared/value.js";
-import type { EncryptedPassword } from "./types.js";
+import { errorMessage } from "../../shared/value.js";
+import type { EncryptedPassword } from "../types.js";
 
 const PASSWORD_KEY_DB = "effect-opcua-passwords";
 const PASSWORD_KEY_STORE = "keys";
 const PASSWORD_KEY_ID = "default";
 
 export function isPasswordStorageAvailable() {
-  return typeof window !== "undefined" && window.crypto?.subtle !== undefined && typeof indexedDB !== "undefined";
+  return (
+    typeof window !== "undefined" &&
+    window.crypto?.subtle !== undefined &&
+    typeof indexedDB !== "undefined"
+  );
 }
 
-export async function encryptPassword(value: string, onError: (message: string) => void) {
+export async function encryptPassword(
+  value: string,
+  onError: (message: string) => void,
+) {
   try {
     const key = await passwordKey();
     const iv = crypto.getRandomValues(new Uint8Array(12));
-    const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(value));
+    const encrypted = await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv },
+      key,
+      new TextEncoder().encode(value),
+    );
     return {
       keyId: PASSWORD_KEY_ID,
       iv: bytesToBase64(iv),
@@ -25,7 +36,10 @@ export async function encryptPassword(value: string, onError: (message: string) 
   }
 }
 
-export async function decryptPassword(value: EncryptedPassword, onError: (message: string) => void) {
+export async function decryptPassword(
+  value: EncryptedPassword,
+  onError: (message: string) => void,
+) {
   try {
     const decrypted = await crypto.subtle.decrypt(
       { name: "AES-GCM", iv: base64ToBytes(value.iv) },
@@ -42,20 +56,31 @@ export async function decryptPassword(value: EncryptedPassword, onError: (messag
 async function passwordKey() {
   const existing = await readPasswordKey();
   if (existing) return existing;
-  const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+  const key = await crypto.subtle.generateKey(
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"],
+  );
   await writePasswordKey(key);
   return key;
 }
 
 async function readPasswordKey() {
-  return withPasswordKeyStore("readonly", (store) => store.get(PASSWORD_KEY_ID));
+  return withPasswordKeyStore("readonly", (store) =>
+    store.get(PASSWORD_KEY_ID),
+  );
 }
 
 async function writePasswordKey(key: CryptoKey) {
-  await withPasswordKeyStore("readwrite", (store) => store.put(key, PASSWORD_KEY_ID));
+  await withPasswordKeyStore("readwrite", (store) =>
+    store.put(key, PASSWORD_KEY_ID),
+  );
 }
 
-async function withPasswordKeyStore<T>(mode: IDBTransactionMode, action: (store: IDBObjectStore) => IDBRequest<T>) {
+async function withPasswordKeyStore<T>(
+  mode: IDBTransactionMode,
+  action: (store: IDBObjectStore) => IDBRequest<T>,
+) {
   const database = await openPasswordDatabase();
   return new Promise<T | undefined>((resolve, reject) => {
     const transaction = database.transaction(PASSWORD_KEY_STORE, mode);

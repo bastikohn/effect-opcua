@@ -1,5 +1,5 @@
-import { errorMessage } from "../shared/value.js";
-import type { RecentConnectionAttempt } from "./types.js";
+import { errorMessage } from "../../shared/value.js";
+import type { RecentConnectionAttempt } from "../types.js";
 
 const RECENT_CONNECTIONS_STORAGE_KEY = "effect-opcua.recentConnections";
 const RECENT_CONNECTION_OPTIONS = 20;
@@ -28,13 +28,21 @@ export function connectionKey(attempt: RecentConnectionAttempt) {
 }
 
 export function connectionLabel(attempt: RecentConnectionAttempt) {
-  const auth = attempt.authMode === "UserPassword" && attempt.username ? ` as ${attempt.username}` : "";
+  const auth =
+    attempt.authMode === "UserPassword" && attempt.username
+      ? ` as ${attempt.username}`
+      : "";
   return `${attempt.endpointUrl} (${attempt.startNodeId})${auth}`;
 }
 
 export function connectionDetails(attempt: RecentConnectionAttempt) {
-  const auth = attempt.authMode === "UserPassword" ? `User: ${attempt.username || "UserPassword"}` : "Anonymous";
-  return [attempt.startNodeId, auth, attempt.password ? "password saved" : ""].filter(Boolean).join(" · ");
+  const auth =
+    attempt.authMode === "UserPassword"
+      ? `User: ${attempt.username || "UserPassword"}`
+      : "Anonymous";
+  return [attempt.startNodeId, auth, attempt.password ? "password saved" : ""]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 export function loadConnectionAttempts() {
@@ -50,7 +58,10 @@ export function loadConnectionAttempts() {
   }
 }
 
-export function persistConnectionAttempts(attempts: RecentConnectionAttempt[], onError: (message: string) => void) {
+export function persistConnectionAttempts(
+  attempts: RecentConnectionAttempt[],
+  onError: (message: string) => void,
+) {
   const storage = connectionStorage();
   if (!storage) return;
   try {
@@ -75,8 +86,16 @@ function isConnectionAttempt(value: unknown): value is RecentConnectionAttempt {
 
 function isEncryptedPassword(value: unknown) {
   if (!value || typeof value !== "object") return false;
-  const password = value as { keyId?: unknown; iv?: unknown; ciphertext?: unknown };
-  return password.keyId === PASSWORD_KEY_ID && typeof password.iv === "string" && typeof password.ciphertext === "string";
+  const password = value as {
+    keyId?: unknown;
+    iv?: unknown;
+    ciphertext?: unknown;
+  };
+  return (
+    password.keyId === PASSWORD_KEY_ID &&
+    typeof password.iv === "string" &&
+    typeof password.ciphertext === "string"
+  );
 }
 
 function connectionStorage() {

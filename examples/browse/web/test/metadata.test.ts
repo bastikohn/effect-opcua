@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { browseNode, readNode, writeNode } from "../src/server/dto.js";
 import {
+  badStatus,
   goodStatus,
   makeFakeSession,
   objectMetadata,
@@ -18,10 +19,12 @@ describe("metadata enrichment", () => {
       },
     });
 
-    const result = await Effect.runPromise(browseNode(session, "i=85"));
+    const result = await Effect.runPromise(browseNode(session, "i=85", 100));
 
-    expect(result.references).toHaveLength(1);
-    expect(result.references[0]).toMatchObject({
+    expect(result.response._tag).toBe("Browsed");
+    if (result.response._tag !== "Browsed") throw new Error("expected browsed result");
+    expect(result.response.references).toHaveLength(1);
+    expect(result.response.references[0]).toMatchObject({
       nodeId: "ns=1;s=Temperature",
       displayName: "Temperature",
       metadata: {
@@ -30,6 +33,25 @@ describe("metadata enrichment", () => {
         namespaceUri: "urn:test",
       },
     });
+  });
+
+  it("returns non-good browse status as result data", async () => {
+    const session = makeFakeSession({
+      metadata: {
+        "i=85": objectMetadata("i=85"),
+      },
+      browseStatus: badStatus,
+    });
+
+    await expect(Effect.runPromise(browseNode(session, "i=85", 100))).resolves.toEqual(
+      {
+        response: {
+        _tag: "NonGoodStatus",
+        nodeId: "i=85",
+        status: badStatus,
+        },
+      },
+    );
   });
 
   it("reads selected variable details with value and data type definition", async () => {
@@ -112,6 +134,50 @@ describe("metadata enrichment", () => {
 
     expect(writes).toEqual([12]);
     expect(result.write).toMatchObject({ _tag: "Written" });
+    expect(result.attemptedValue).toBe(12);
+    expect(result.writtenAt).toEqual(expect.any(String));
     expect(result.refreshed.value).toMatchObject({ value: 12 });
+  });
+
+  it("returns non-good write status as data", async () => {
+    const session = makeFakeSession({
+      metadata: {
+        "ns=1;s=Setpoint": variableMetadata("ns=1;s=Setpoint"),
+      },
+      writeStatus: {
+        _tag: "NonGoodStatus",
+        nodeId: "ns=1;s=Setpoint",
+        status: badStatus,
+      },
+    });
+
+    const result = await Effect.runPromise(
+      writeNode(session, "ns=1;s=Setpoint", 12),
+    );
+
+    expect(result.write).toEqual({
+      _tag: "NonGoodStatus",
+      nodeId: "ns=1;s=Setpoint",
+      status: badStatus,
+    });
+  });
+
+  it("fails write RPC DTOs for write operation failures", async () => {
+    const session = makeFakeSession({
+      metadata: {
+        "ns=1;s=Setpoint": variableMetadata("ns=1;s=Setpoint"),
+      },
+      writeFailure: new Error("socket closed"),
+    });
+
+    await expect(
+      Effect.runPromise(writeNode(session, "ns=1;s=Setpoint", 12)),
+    ).rejects.toMatchObject({
+      _tag: "WebRpcError",
+      category: "Unexpected",
+      operation: "WriteNode",
+      nodeId: "ns=1;s=Setpoint",
+      message: "socket closed",
+    });
   });
 });

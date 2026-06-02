@@ -30,7 +30,6 @@ export const toJsonValue = (value: unknown): JsonValue => {
       _tag: "Error",
       name: value.name,
       message: value.message,
-      stack: value.stack ?? null,
     };
   }
   if (typeof value === "object") {

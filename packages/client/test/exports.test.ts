@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import * as Root from "../src/index.js";
 import * as Opcua from "../src/Opcua.js";
 import * as OpcuaError from "../src/OpcuaError.js";
-import { StatusCodes } from "../src/node-opcua.js";
+import { StatusCodes, UserTokenType } from "../src/node-opcua.js";
 
 describe("exports", () => {
   it("keeps the main API centered on definitions and direct operations", () => {
@@ -19,5 +19,6 @@ describe("exports", () => {
     expect(typeof OpcuaError.isOpcuaError).toBe("function");
     expect(Root).toHaveProperty("OpcuaSession");
     expect(StatusCodes.Good.isGood()).toBe(true);
+    expect(UserTokenType.Anonymous).toBe(0);
   });
 });

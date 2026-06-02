@@ -25,6 +25,7 @@ export {
   ResultMask,
   StatusCodes,
   TimestampsToReturn,
+  UserTokenType,
   Variant,
   VariantArrayType,
   coerceNodeId,

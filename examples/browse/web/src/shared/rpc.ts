@@ -13,14 +13,19 @@ export const JsonValueSchema: Schema.Codec<unknown> = Schema.suspend(
     ]),
 );
 
+export const WebRpcErrorCategorySchema = Schema.Literals(
+  ["Configuration", "Session", "Transport", "Service", "Unexpected"] as const,
+);
+export type WebRpcErrorCategory = typeof WebRpcErrorCategorySchema.Type;
+
 export class WebRpcError extends Schema.ErrorClass<WebRpcError>(
   "WebRpcError",
 )({
   _tag: Schema.tag("WebRpcError"),
+  category: WebRpcErrorCategorySchema,
   message: Schema.String,
   operation: Schema.String,
   nodeId: Schema.optional(Schema.String),
-  cause: Schema.optional(JsonValueSchema),
 }) {}
 
 export const AuthSchema = Schema.Union([
@@ -41,6 +46,28 @@ export const ConnectRequestSchema = Schema.Struct({
   auth: AuthSchema,
 });
 export type ConnectRequest = typeof ConnectRequestSchema.Type;
+
+export const ConnectResponseSchema = Schema.Struct({
+  connected: Schema.Literal(true),
+  endpointUrl: Schema.String,
+});
+export type ConnectResponse = typeof ConnectResponseSchema.Type;
+
+export const WritePolicySchema = Schema.Union([
+  Schema.Struct({
+    _tag: Schema.Literal("Disabled"),
+  }),
+  Schema.Struct({
+    _tag: Schema.Literal("Enabled"),
+    reason: Schema.Literals(["RuntimeConfig"] as const),
+  }),
+]);
+export type WritePolicy = typeof WritePolicySchema.Type;
+
+export const WebConfigSchema = Schema.Struct({
+  writePolicy: WritePolicySchema,
+});
+export type WebConfig = typeof WebConfigSchema.Type;
 
 export const AccessBitsSchema = Schema.Struct({
   readable: Schema.Boolean,
@@ -198,11 +225,27 @@ export const BrowseReferenceSchema = Schema.Struct({
 });
 export type BrowseReference = typeof BrowseReferenceSchema.Type;
 
-export const BrowseResponseSchema = Schema.Struct({
+export const BrowseRequestSchema = Schema.Struct({
   nodeId: Schema.String,
-  status: StatusInfoSchema,
-  references: Schema.Array(BrowseReferenceSchema),
+  maxReferencesPerNode: Schema.optional(Schema.Number),
+  continuationToken: Schema.optional(Schema.String),
 });
+export type BrowseRequest = typeof BrowseRequestSchema.Type;
+
+export const BrowseResponseSchema = Schema.Union([
+  Schema.Struct({
+    _tag: Schema.Literal("Browsed"),
+    nodeId: Schema.String,
+    status: StatusInfoSchema,
+    references: Schema.Array(BrowseReferenceSchema),
+    continuationToken: Schema.optional(Schema.String),
+  }),
+  Schema.Struct({
+    _tag: Schema.Literal("NonGoodStatus"),
+    nodeId: Schema.String,
+    status: StatusInfoSchema,
+  }),
+]);
 export type BrowseResponse = typeof BrowseResponseSchema.Type;
 
 export const ReadNodeResponseSchema = Schema.Struct({
@@ -213,6 +256,7 @@ export const ReadNodeResponseSchema = Schema.Struct({
   dataTypeDefinition: Schema.optional(DataTypeDefinitionResultSchema),
 });
 export type ReadNodeResponse = typeof ReadNodeResponseSchema.Type;
+export type NodeSnapshot = ReadNodeResponse;
 
 export const WriteStatusSchema = Schema.Union([
   Schema.Struct({
@@ -225,16 +269,13 @@ export const WriteStatusSchema = Schema.Union([
     nodeId: Schema.String,
     status: StatusInfoSchema,
   }),
-  Schema.Struct({
-    _tag: Schema.Literal("Failed"),
-    nodeId: Schema.String,
-    message: Schema.String,
-  }),
 ]);
 export type WriteStatus = typeof WriteStatusSchema.Type;
 
 export const WriteNodeResponseSchema = Schema.Struct({
   nodeId: Schema.String,
+  attemptedValue: JsonValueSchema,
+  writtenAt: Schema.String,
   write: WriteStatusSchema,
   refreshed: ReadNodeResponseSchema,
 });
@@ -247,10 +288,35 @@ export const MonitorSampleSchema = Schema.Struct({
 });
 export type MonitorSample = typeof MonitorSampleSchema.Type;
 
+export const MonitorRejectedItemSchema = Schema.Struct({
+  nodeId: Schema.String,
+  message: Schema.String,
+  phase: Schema.optional(Schema.Literals(["Validation", "Create"] as const)),
+  status: Schema.optional(StatusInfoSchema),
+});
+export type MonitorRejectedItem = typeof MonitorRejectedItemSchema.Type;
+
+export const MonitorEventSchema = Schema.Union([
+  Schema.Struct({
+    _tag: Schema.Literal("Started"),
+    accepted: Schema.Array(Schema.String),
+    rejected: Schema.Array(MonitorRejectedItemSchema),
+  }),
+  Schema.Struct({
+    _tag: Schema.Literal("Sample"),
+    sample: MonitorSampleSchema,
+  }),
+]);
+export type MonitorEvent = typeof MonitorEventSchema.Type;
+
 export const UaBrowserRpcs = RpcGroup.make(
+  Rpc.make("GetConfig", {
+    success: WebConfigSchema,
+    error: WebRpcError,
+  }),
   Rpc.make("Connect", {
     payload: ConnectRequestSchema,
-    success: ReadNodeResponseSchema,
+    success: ConnectResponseSchema,
     error: WebRpcError,
   }),
   Rpc.make("Disconnect", {
@@ -258,8 +324,13 @@ export const UaBrowserRpcs = RpcGroup.make(
     error: WebRpcError,
   }),
   Rpc.make("Browse", {
-    payload: { nodeId: Schema.String },
+    payload: BrowseRequestSchema,
     success: BrowseResponseSchema,
+    error: WebRpcError,
+  }),
+  Rpc.make("ReleaseBrowseContinuation", {
+    payload: { continuationToken: Schema.String },
+    success: Schema.Struct({ released: Schema.Boolean }),
     error: WebRpcError,
   }),
   Rpc.make("ReadNode", {
@@ -280,7 +351,7 @@ export const UaBrowserRpcs = RpcGroup.make(
       nodeIds: Schema.Array(Schema.String),
       samplingIntervalMs: Schema.Number,
     },
-    success: MonitorSampleSchema,
+    success: MonitorEventSchema,
     error: WebRpcError,
     stream: true,
   }),

@@ -2,6 +2,7 @@ import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 
 import {
+  type BrowserBrowseContinuation,
   SessionFactory,
   SessionRegistry,
 } from "../src/server/session-registry.js";
@@ -53,5 +54,35 @@ describe("SessionRegistry", () => {
       }).pipe(Effect.provide(layer)),
     );
   });
-});
 
+  it("releases stored browse continuations on disconnect", async () => {
+    const released: Array<string> = [];
+    const factory = Layer.succeed(SessionFactory)({
+      connect: () =>
+        Effect.succeed({
+          session: makeFakeSession({
+            onReleaseContinuation: (nodeId) => released.push(nodeId),
+          }),
+          close: Effect.void,
+        }),
+    });
+    const layer = SessionRegistry.layer.pipe(Layer.provide(factory));
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const registry = yield* SessionRegistry;
+        yield* registry.connect(1, {
+          endpointUrl: "opc.tcp://one",
+          auth: { _tag: "Anonymous" },
+        });
+        const continuation: BrowserBrowseContinuation = {
+          nodeId: "i=85",
+          unsafeRaw: Buffer.from("1"),
+        };
+        yield* registry.storeContinuation(1, continuation);
+        yield* registry.disconnect(1);
+        expect(released).toEqual(["i=85"]);
+      }).pipe(Effect.provide(layer)),
+    );
+  });
+});

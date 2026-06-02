@@ -1,10 +1,17 @@
-import type { AccessBits, BrowseReference, ReadNodeResponse } from "../shared/rpc.js";
-import type { TreeNode } from "./types.js";
+import type {
+  AccessBits,
+  BrowseReference,
+  ReadNodeResponse,
+} from "../../shared/rpc.js";
+import type { TreeNode } from "../types.js";
 
 export function nodeFromRead(response: ReadNodeResponse): TreeNode {
   return {
     nodeId: response.nodeId,
-    label: response.metadata.displayName ?? response.metadata.browseName ?? response.nodeId,
+    label:
+      response.metadata.displayName ??
+      response.metadata.browseName ??
+      response.nodeId,
     nodeClass: response.metadata.nodeClass,
     metadata: response.metadata,
     expanded: true,
