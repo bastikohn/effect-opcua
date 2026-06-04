@@ -13,14 +13,16 @@ export const JsonValueSchema: Schema.Codec<unknown> = Schema.suspend(
     ]),
 );
 
-export const WebRpcErrorCategorySchema = Schema.Literals(
-  ["Configuration", "Session", "Transport", "Service", "Unexpected"] as const,
-);
+export const WebRpcErrorCategorySchema = Schema.Literals([
+  "Configuration",
+  "Session",
+  "Transport",
+  "Service",
+  "Unexpected",
+] as const);
 export type WebRpcErrorCategory = typeof WebRpcErrorCategorySchema.Type;
 
-export class WebRpcError extends Schema.ErrorClass<WebRpcError>(
-  "WebRpcError",
-)({
+export class WebRpcError extends Schema.ErrorClass<WebRpcError>("WebRpcError")({
   _tag: Schema.tag("WebRpcError"),
   category: WebRpcErrorCategorySchema,
   message: Schema.String,

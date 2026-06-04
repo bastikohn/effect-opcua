@@ -1,4 +1,4 @@
-import type { OpcuaDataTypeDefinition } from "@effect-opcua/client/OpcuaSession";
+import type { OpcuaDataTypeDefinition } from "@effect-opcua/client";
 
 import { issue } from "../diagnostics.js";
 import type { CodegenIssue } from "../types.js";

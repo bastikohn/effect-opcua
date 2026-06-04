@@ -1,7 +1,7 @@
 import type {
   OpcuaDataTypeDefinition,
   OpcuaStructureDefinition,
-} from "@effect-opcua/client/OpcuaSession";
+} from "@effect-opcua/client";
 
 import { issue } from "../diagnostics.js";
 import type { CodegenIssue } from "../types.js";

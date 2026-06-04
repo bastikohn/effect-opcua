@@ -19,7 +19,7 @@ const Reset = Opcua.method({
   input: {
     mode: Opcua.arg({
       name: "Mode",
-      codec: Opcua.schema(Schema.Literal("soft", "hard")),
+      codec: Opcua.schema(Schema.Literals(["soft", "hard"])),
     }),
   },
 });

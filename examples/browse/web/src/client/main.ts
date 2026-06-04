@@ -6,4 +6,3 @@ import "./styles.css";
 mount(App, {
   target: document.getElementById("app")!,
 });
-

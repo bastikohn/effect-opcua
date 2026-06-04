@@ -1,4 +1,7 @@
-import type { OpcuaSession, OpcuaSubscription } from "@effect-opcua/client";
+import type {
+  OpcuaNodeMetadata,
+  OpcuaSubscription,
+} from "@effect-opcua/client";
 import { Effect, Stream } from "effect";
 
 import type {
@@ -34,8 +37,8 @@ export const badStatus = {
 
 export const variableMetadata = (
   nodeId: string,
-  overrides: Partial<OpcuaSession.OpcuaNodeMetadata> = {},
-): OpcuaSession.OpcuaNodeMetadata => ({
+  overrides: Partial<OpcuaNodeMetadata> = {},
+): OpcuaNodeMetadata => ({
   nodeId,
   nodeClass: "Variable",
   browseName: nodeLabel(nodeId),
@@ -53,9 +56,7 @@ export const variableMetadata = (
 const nodeLabel = (nodeId: string) =>
   (nodeId.split(";").at(-1) ?? nodeId).replace(/^[a-z]=/, "");
 
-export const objectMetadata = (
-  nodeId: string,
-): OpcuaSession.OpcuaNodeMetadata => ({
+export const objectMetadata = (nodeId: string): OpcuaNodeMetadata => ({
   nodeId,
   nodeClass: "Object",
   browseName: "Objects",
@@ -64,7 +65,7 @@ export const objectMetadata = (
 });
 
 export type FakeSessionOptions = {
-  readonly metadata?: Record<string, OpcuaSession.OpcuaNodeMetadata>;
+  readonly metadata?: Record<string, OpcuaNodeMetadata>;
   readonly values?: Record<string, ReadValue>;
   readonly definitions?: Record<string, DataTypeDefinitionResult>;
   readonly browseStatus?: typeof goodStatus;
@@ -83,9 +84,7 @@ export const makeFakeSession = (
   const values = new Map(Object.entries(options.values ?? {}));
   const definitions = new Map(Object.entries(options.definitions ?? {}));
   const defaultBrowseNodeIds = [...metadata.keys()];
-  const browsePages =
-    options.browsePages ??
-    [defaultBrowseNodeIds];
+  const browsePages = options.browsePages ?? [defaultBrowseNodeIds];
   const pageReferences = (nodeIds: readonly string[]) =>
     nodeIds
       .filter((childNodeId) => childNodeId !== "i=85")
@@ -227,7 +226,10 @@ export const makeFakeSession = (
                       samplingInterval: 100,
                       queueSize: 5,
                       discardOldest: true,
-                      filter: { _tag: "StatusValue" as const, deadband: { _tag: "None" as const } },
+                      filter: {
+                        _tag: "StatusValue" as const,
+                        deadband: { _tag: "None" as const },
+                      },
                       timestamps: "both" as const,
                     },
                   },
@@ -239,7 +241,7 @@ export const makeFakeSession = (
           }),
         events: Stream.empty,
         unsafeRaw: undefined,
-      } as unknown as OpcuaSubscription.OpcuaSubscription),
+      } as unknown as OpcuaSubscription),
   };
 };
 

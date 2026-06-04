@@ -22,11 +22,6 @@ import {
   DEFAULT_BROWSE_NODE_CLASS_MASK,
   DEFAULT_BROWSE_REFERENCE_TYPE_ID,
   DEFAULT_BROWSE_RESULT_MASK,
-  DEFAULT_LIFETIME_COUNT,
-  DEFAULT_MAX_KEEP_ALIVE_COUNT,
-  DEFAULT_MAX_NOTIFICATIONS_PER_PUBLISH,
-  DEFAULT_PRIORITY,
-  DEFAULT_PUBLISHING_ENABLED,
   EVENT_BUFFER_SIZE,
 } from "./internal/constants.js";
 import { OpcuaClient } from "./OpcuaClient.js";
@@ -94,6 +89,7 @@ import {
   writeManyWithState,
   type SessionOperationsState,
 } from "./internal/session-operations.js";
+import { validateSubscriptionOptions } from "./internal/subscription-options.js";
 import {
   readDataTypeDefinition as readDataTypeDefinitionImpl,
   readManyDataTypeDefinitions as readManyDataTypeDefinitionsImpl,
@@ -105,7 +101,14 @@ import {
   type OpcuaStructureField,
 } from "./internal/data-type-definition.js";
 
-export type { OpcuaBrowseReference } from "./internal/browse.js";
+export type {
+  OpcuaBrowseChildrenOptions,
+  OpcuaBrowseChildrenResult,
+  OpcuaBrowseContinuation,
+  OpcuaBrowseOptions,
+  OpcuaBrowseReference,
+  OpcuaBrowseResult,
+} from "./internal/browse.js";
 export type {
   OpcuaAccessBits,
   OpcuaMetadataReadFailure,
@@ -143,6 +146,15 @@ export type OpcuaSessionBatchingOptions = {
 export type OpcuaSessionOptions = {
   readonly userIdentity?: UserIdentityInfo;
   readonly batching?: OpcuaSessionBatchingOptions;
+};
+
+export type OpcuaSubscriptionOptions = {
+  readonly publishingInterval: Duration.Duration;
+  readonly lifetimeCount?: number;
+  readonly maxKeepAliveCount?: number;
+  readonly maxNotificationsPerPublish?: number;
+  readonly publishingEnabled?: boolean;
+  readonly priority?: number;
 };
 
 export type ReadManyOptions = {
@@ -301,14 +313,9 @@ export type OpcuaSession = {
   readonly readManyDataTypeDefinitions: (
     dataTypeNodeIds: readonly string[],
   ) => Effect.Effect<readonly OpcuaDataTypeDefinitionResult[], OpcuaError>;
-  readonly makeSubscription: (options: {
-    readonly publishingInterval: Duration.Duration;
-    readonly lifetimeCount?: number;
-    readonly maxKeepAliveCount?: number;
-    readonly maxNotificationsPerPublish?: number;
-    readonly publishingEnabled?: boolean;
-    readonly priority?: number;
-  }) => Effect.Effect<OpcuaSubscription, OpcuaError, Scope.Scope>;
+  readonly makeSubscription: (
+    options: OpcuaSubscriptionOptions,
+  ) => Effect.Effect<OpcuaSubscription, OpcuaError, Scope.Scope>;
   readonly events: Stream.Stream<OpcuaSessionEvent>;
   readonly unsafeRaw: ClientSession;
 };
@@ -408,6 +415,29 @@ export const makeSubscription = (
   options: Parameters<OpcuaSession["makeSubscription"]>[0],
 ) =>
   Effect.flatMap(OpcuaSession, (session) => session.makeSubscription(options));
+
+export const browse = (input: OpcuaBrowseOptions) =>
+  Effect.flatMap(OpcuaSession, (session) => session.browse(input));
+
+export const browseNext = (
+  continuation: Parameters<OpcuaSession["browseNext"]>[0],
+) =>
+  Effect.flatMap(OpcuaSession, (session) => session.browseNext(continuation));
+
+export const releaseBrowseContinuation = (
+  continuation: OpcuaBrowseContinuation,
+) =>
+  Effect.flatMap(OpcuaSession, (session) =>
+    session.releaseBrowseContinuation(continuation),
+  );
+
+export const browseChildren = (
+  nodeId: NodeIdString,
+  options?: OpcuaBrowseChildrenOptions,
+) =>
+  Effect.flatMap(OpcuaSession, (session) =>
+    session.browseChildren(nodeId, options),
+  );
 
 export const readNamespaceArray = () =>
   Effect.flatMap(OpcuaSession, (session) => session.readNamespaceArray());
@@ -549,33 +579,26 @@ export const makeSession = (
 
     const makeSubscription: OpcuaSession["makeSubscription"] = (options) =>
       Effect.gen(function* () {
+        const normalized = yield* validateSubscriptionOptions(options);
         const subscriptionEvents =
           yield* PubSub.sliding<OpcuaSubscriptionEvent>(EVENT_BUFFER_SIZE);
         const rawSubscription = yield* Effect.acquireRelease(
           Effect.tryPromise({
             try: async () =>
               ClientSubscription.create(unsafeRaw, {
-                requestedPublishingInterval: durationMillis(
-                  options.publishingInterval,
-                ),
-                requestedLifetimeCount:
-                  options.lifetimeCount ?? DEFAULT_LIFETIME_COUNT,
-                requestedMaxKeepAliveCount:
-                  options.maxKeepAliveCount ?? DEFAULT_MAX_KEEP_ALIVE_COUNT,
+                requestedPublishingInterval: normalized.publishingInterval,
+                requestedLifetimeCount: normalized.lifetimeCount,
+                requestedMaxKeepAliveCount: normalized.maxKeepAliveCount,
                 maxNotificationsPerPublish:
-                  options.maxNotificationsPerPublish ??
-                  DEFAULT_MAX_NOTIFICATIONS_PER_PUBLISH,
-                publishingEnabled:
-                  options.publishingEnabled ?? DEFAULT_PUBLISHING_ENABLED,
-                priority: options.priority ?? DEFAULT_PRIORITY,
+                  normalized.maxNotificationsPerPublish,
+                publishingEnabled: normalized.publishingEnabled,
+                priority: normalized.priority,
               }),
             catch: (cause) => subscriptionCreateError({ cause }),
           }).pipe(
             Effect.withSpan("opcua.subscription.create", {
               attributes: {
-                "opcua.publishing_interval_ms": durationMillis(
-                  options.publishingInterval,
-                ),
+                "opcua.publishing_interval_ms": normalized.publishingInterval,
               },
               kind: "client",
             }),
@@ -804,6 +827,3 @@ export const makeSession = (
   });
 
 export const make = makeSession;
-
-const durationMillis = (duration: Duration.Duration) =>
-  Duration.toMillis(duration);

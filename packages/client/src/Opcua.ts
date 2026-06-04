@@ -1,5 +1,4 @@
 export {
-  Codec,
   dynamic,
   schema,
   structure,

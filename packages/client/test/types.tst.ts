@@ -1,11 +1,14 @@
 import { Config, Duration, Effect, Schema, Stream } from "effect";
 import { describe, expect, it } from "tstyche";
 
-import * as Opcua from "../src/Opcua.js";
-import * as OpcuaClient from "../src/OpcuaClient.js";
-import * as OpcuaSession from "../src/OpcuaSession.js";
+import {
+  Opcua,
+  OpcuaClient,
+  OpcuaSession,
+  type OpcuaSession as OpcuaSessionService,
+} from "@effect-opcua/client";
 
-declare const session: OpcuaSession.OpcuaSession;
+declare const session: OpcuaSessionService;
 
 describe("Opcua", () => {
   it("checks variable definition types", () => {

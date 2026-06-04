@@ -1,4 +1,9 @@
-import { Opcua, OpcuaSession } from "@effect-opcua/client";
+import {
+  Opcua,
+  OpcuaSession,
+  type OpcuaSession as OpcuaSessionService,
+  type ReadManyResult,
+} from "@effect-opcua/client";
 import {
   Context,
   Duration,
@@ -78,13 +83,13 @@ export class DemoMachineTelemetryCore extends Context.Service<
   };
 }
 
-const readSnapshotFromSession = (session: OpcuaSession.OpcuaSession) =>
+const readSnapshotFromSession = (session: OpcuaSessionService) =>
   session
     .readMany(snapshotVariables, { validation: "strict" })
     .pipe(Effect.flatMap(readManyToStaging), Effect.map(makeSnapshot));
 
 const refreshSnapshot = (
-  session: OpcuaSession.OpcuaSession,
+  session: OpcuaSessionService,
   snapshotRef: SubscriptionRef.SubscriptionRef<DemoMachineSnapshot>,
   latestRevision: Ref.Ref<bigint>,
   sampledRevision: unknown,
@@ -100,9 +105,7 @@ const refreshSnapshot = (
     yield* SubscriptionRef.set(snapshotRef, snapshot);
   }).pipe(Effect.catch(() => Effect.void));
 
-const readManyToStaging = (
-  results: OpcuaSession.ReadManyResult<typeof snapshotVariables>,
-) =>
+const readManyToStaging = (results: ReadManyResult<typeof snapshotVariables>) =>
   Effect.gen(function* () {
     const staging: Record<string, unknown> = {};
     for (const [key, result] of Object.entries(results)) {

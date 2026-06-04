@@ -22,7 +22,8 @@ describe("metadata enrichment", () => {
     const result = await Effect.runPromise(browseNode(session, "i=85", 100));
 
     expect(result.response._tag).toBe("Browsed");
-    if (result.response._tag !== "Browsed") throw new Error("expected browsed result");
+    if (result.response._tag !== "Browsed")
+      throw new Error("expected browsed result");
     expect(result.response.references).toHaveLength(1);
     expect(result.response.references[0]).toMatchObject({
       nodeId: "ns=1;s=Temperature",
@@ -43,15 +44,15 @@ describe("metadata enrichment", () => {
       browseStatus: badStatus,
     });
 
-    await expect(Effect.runPromise(browseNode(session, "i=85", 100))).resolves.toEqual(
-      {
-        response: {
+    await expect(
+      Effect.runPromise(browseNode(session, "i=85", 100)),
+    ).resolves.toEqual({
+      response: {
         _tag: "NonGoodStatus",
         nodeId: "i=85",
         status: badStatus,
-        },
       },
-    );
+    });
   });
 
   it("reads selected variable details with value and data type definition", async () => {
@@ -98,25 +99,27 @@ describe("metadata enrichment", () => {
         "ns=1;s=Missing": variableMetadata("ns=1;s=Missing"),
       },
     });
-    await expect(Effect.runPromise(readNode(missing, "ns=1;s=Missing")))
-      .resolves.toMatchObject({
-        dataTypeDefinition: {
-          _tag: "Missing",
-          dataTypeNodeId: "i=11",
-        },
-      });
+    await expect(
+      Effect.runPromise(readNode(missing, "ns=1;s=Missing")),
+    ).resolves.toMatchObject({
+      dataTypeDefinition: {
+        _tag: "Missing",
+        dataTypeNodeId: "i=11",
+      },
+    });
 
     const failed = {
       ...missing,
       readDataTypeDefinition: () => Effect.fail(new Error("boom") as never),
     };
-    await expect(Effect.runPromise(readNode(failed, "ns=1;s=Missing")))
-      .resolves.toMatchObject({
-        dataTypeDefinition: {
-          _tag: "Failure",
-          reason: "boom",
-        },
-      });
+    await expect(
+      Effect.runPromise(readNode(failed, "ns=1;s=Missing")),
+    ).resolves.toMatchObject({
+      dataTypeDefinition: {
+        _tag: "Failure",
+        reason: "boom",
+      },
+    });
   });
 
   it("writes and refreshes the selected value", async () => {

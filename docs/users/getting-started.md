@@ -4,11 +4,16 @@
 definitions, then run typed reads, writes, calls, batches, and monitors inside
 Effect programs.
 
+The client package is still in alpha. Use the root `@effect-opcua/client`
+imports and the documented `@effect-opcua/client/node-opcua` escape hatch; other
+source paths are not public API.
+
 ## Requirements
 
 - Node.js 22 or newer.
+- ESM projects.
 - `pnpm` 11 or newer in this workspace.
-- `effect` v4 as a peer dependency.
+- `effect` v4 beta as a peer dependency.
 
 For a consuming package, install the client and Effect:
 
@@ -45,7 +50,7 @@ const Reset = Opcua.method({
   input: {
     mode: Opcua.arg({
       name: "Mode",
-      codec: Opcua.schema(Schema.Literal("soft", "hard")),
+      codec: Opcua.schema(Schema.Literals(["soft", "hard"])),
     }),
   },
   output: {

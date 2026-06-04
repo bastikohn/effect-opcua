@@ -3,8 +3,13 @@
 These examples assume:
 
 ```ts
-import { Duration, Effect, Schema, Stream } from "effect";
-import { Opcua, OpcuaSession } from "@effect-opcua/client";
+import { Duration, Effect, Layer, Schema, Stream } from "effect";
+import {
+  Opcua,
+  OpcuaClient,
+  OpcuaError,
+  OpcuaSession,
+} from "@effect-opcua/client";
 import { makeNodeClassMask } from "@effect-opcua/client/node-opcua";
 
 const Temperature = Opcua.variable({
@@ -23,6 +28,33 @@ const Setpoint = Opcua.variable({
   access: "readWrite",
 });
 ```
+
+## Connect with a profile
+
+Keep connection settings in a layer factory so application programs only depend
+on `OpcuaSession`:
+
+```ts
+export const makeOpcuaLayer = (endpointUrl: string) =>
+  OpcuaSession.layer({
+    batching: {
+      read: { maxNodesPerRead: 250, maxConcurrentRequests: 1 },
+      write: { maxNodesPerWrite: 100, maxConcurrentRequests: 1 },
+      call: { maxMethodsPerCall: 50, maxConcurrentRequests: 1 },
+    },
+  }).pipe(
+    Layer.provide(
+      OpcuaClient.layer({
+        endpointUrl,
+        clientOptions: { endpointMustExist: false },
+      }),
+    ),
+  );
+```
+
+Use `Effect.scoped(program).pipe(Effect.provide(makeOpcuaLayer(endpointUrl)))`
+so client, session, subscription, and monitor finalizers run on exit or
+interruption.
 
 ## Read one value
 
@@ -98,7 +130,7 @@ const Reset = Opcua.method({
   input: {
     mode: Opcua.arg({
       name: "Mode",
-      codec: Opcua.schema(Schema.Literal("soft", "hard")),
+      codec: Opcua.schema(Schema.Literals(["soft", "hard"])),
     }),
   },
   output: {
@@ -125,6 +157,34 @@ const program = Effect.gen(function* () {
 
   return called;
 });
+```
+
+## Handle errors
+
+OPC UA service statuses are usually returned as result data. Failed Effects are
+reserved for configuration, connection/session lifecycle, service call,
+access-validation, encode/decode, and monitor failures:
+
+```ts
+try {
+  await Effect.runPromise(
+    Effect.scoped(program).pipe(
+      Effect.provide(makeOpcuaLayer("opc.tcp://localhost:4840")),
+    ),
+  );
+} catch (error) {
+  if (OpcuaError.isOpcuaError(error)) {
+    switch (error.reason._tag) {
+      case "Connect":
+      case "SessionCreate":
+      case "Configuration":
+      case "Service":
+      case "MonitorStartup":
+        console.error(error.reason);
+        break;
+    }
+  }
+}
 ```
 
 ## Monitor values
@@ -162,8 +222,10 @@ const program = Effect.gen(function* () {
 });
 ```
 
-Use `startup: "bestEffort"` when an HMI should start with the items accepted by
-the server and inspect rejected items through `monitor.startup.failed`.
+Use `startup: "strict"` when all requested items must be active. Use
+`startup: "bestEffort"` when an HMI should start with the items accepted by the
+server and inspect rejected items through `monitor.startup.failed`. Monitor
+startup cleans up created groups on interruption or strict startup failure.
 
 ## Browse children
 
@@ -180,7 +242,7 @@ const program = Effect.gen(function* () {
 Use `browse` and `browseNext` directly when you need explicit continuation
 control.
 
-## Use structures
+## Use ExtensionObject structures
 
 ```ts
 const ScanSettings = Opcua.structure({
@@ -210,3 +272,10 @@ const program = Effect.gen(function* () {
 
 The same structure codec can be used for variables, method inputs, method
 outputs, and monitored samples.
+
+Structure codecs need server metadata for the declared data type. The runtime
+uses `session.extractNamespaceDataType()` and `session.constructExtensionObject`
+through node-opcua. Scalar structures and one-dimensional arrays are supported;
+structure matrices, missing metadata, and opaque dynamic structures are not
+encoded by explicit structure codecs. Use generated structures when possible,
+or `Opcua.dynamic()` while exploring.

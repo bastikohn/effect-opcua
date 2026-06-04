@@ -1,4 +1,8 @@
-import type { BrowseReference, MonitorSample, StatusInfo } from "../shared/rpc.js";
+import type {
+  BrowseReference,
+  MonitorSample,
+  StatusInfo,
+} from "../shared/rpc.js";
 
 export type AuthMode = "Anonymous" | "UserPassword";
 

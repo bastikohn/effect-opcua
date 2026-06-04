@@ -1,4 +1,9 @@
-import { Opcua, OpcuaError, OpcuaSession } from "@effect-opcua/client";
+import {
+  Opcua,
+  OpcuaError,
+  OpcuaSession,
+  type OpcuaSession as OpcuaSessionService,
+} from "@effect-opcua/client";
 import {
   Context,
   Duration,
@@ -119,7 +124,7 @@ export class DemoMachineCommandCore extends Context.Service<
     );
 }
 
-const readStatusFromSession = (session: OpcuaSession.OpcuaSession) =>
+const readStatusFromSession = (session: OpcuaSessionService) =>
   session.read(Variables.Commands.Status).pipe(
     Effect.flatMap((result) => {
       if (result._tag === "Value") {
@@ -151,7 +156,7 @@ const submitCommand = (input: {
   readonly command: DemoMachineCommandType;
   readonly commandOptions?: DemoMachineCommandOptions;
   readonly layerOptions: DemoMachineOptions;
-  readonly session: OpcuaSession.OpcuaSession;
+  readonly session: OpcuaSessionService;
   readonly statusRef: SubscriptionRef.SubscriptionRef<CommandStatusBuffer>;
   readonly submitInProgress: Ref.Ref<boolean>;
 }) =>
@@ -229,7 +234,7 @@ const SchemaDecodeCommand = (command: DemoMachineCommandType) =>
   );
 
 const writeGood = (
-  session: OpcuaSession.OpcuaSession,
+  session: OpcuaSessionService,
   variable: Opcua.WritableVariableDef,
   value: unknown,
 ) =>

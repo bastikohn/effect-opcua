@@ -5,11 +5,5 @@
     "types": ["node", "svelte"],
     "verbatimModuleSyntax": false
   },
-  "include": [
-    "src",
-    "test",
-    "*.config.ts",
-    "*.d.ts",
-    "src/**/*.svelte"
-  ]
+  "include": ["src", "test", "*.config.ts", "*.d.ts", "src/**/*.svelte"]
 }

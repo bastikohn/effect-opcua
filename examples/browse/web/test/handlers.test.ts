@@ -80,9 +80,9 @@ describe("RPC handlers", () => {
           const browse = yield* client.Browse({ nodeId: "i=85" });
           expect(browse._tag).toBe("Browsed");
           if (browse._tag !== "Browsed") throw new Error("expected browse");
-          expect(browse.references.map((reference) => reference.nodeId)).toEqual(
-            ["ns=1;s=Temperature"],
-          );
+          expect(
+            browse.references.map((reference) => reference.nodeId),
+          ).toEqual(["ns=1;s=Temperature"]);
 
           const read = yield* client.ReadNode({
             nodeId: "ns=1;s=Temperature",
@@ -179,10 +179,7 @@ describe("RPC handlers", () => {
         "ns=1;s=Temperature": variableMetadata("ns=1;s=Temperature"),
         "ns=1;s=Pressure": variableMetadata("ns=1;s=Pressure"),
       },
-      browsePages: [
-        ["ns=1;s=Temperature"],
-        ["ns=1;s=Pressure"],
-      ],
+      browsePages: [["ns=1;s=Temperature"], ["ns=1;s=Pressure"]],
       onReleaseContinuation: (nodeId) => released.push(nodeId),
     });
     const factory = Layer.succeed(SessionFactory)({
@@ -264,18 +261,13 @@ describe("RPC handlers", () => {
 
   it("returns sanitized RPC errors", async () => {
     const registry = Layer.succeed(SessionRegistry)({
-      connect: () =>
-        Effect.fail(
-          new Error("not used by this test") as never,
-        ),
+      connect: () => Effect.fail(new Error("not used by this test") as never),
       get: () =>
-        Effect.succeed(
-          {
-            ...makeFakeSession(),
-            readNodeMetadata: () =>
-              Effect.fail(new Error("raw session failure with stack") as never),
-          },
-        ),
+        Effect.succeed({
+          ...makeFakeSession(),
+          readNodeMetadata: () =>
+            Effect.fail(new Error("raw session failure with stack") as never),
+        }),
       disconnect: () => Effect.succeed(false),
       cleanup: () => Effect.void,
       storeContinuation: () => Effect.succeed("unused"),

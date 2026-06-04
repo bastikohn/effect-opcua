@@ -16,6 +16,8 @@
     "test:types": "tstyche",
     "typecheck": "pnpm -r --filter='@effect-opcua/*' typecheck",
     "test": "pnpm -r --workspace-concurrency=1 --filter='@effect-opcua/*' test",
+    "smoke:client-package": "node scripts/client-package-smoke.mjs",
+    "check:release": "pnpm lint && pnpm format && pnpm build && pnpm typecheck && pnpm test:types && pnpm test && pnpm smoke:client-package && pnpm --filter @effect-opcua/client publish --dry-run --access public --no-git-checks",
     "lint": "eslint . --max-warnings=0",
     "format": "prettier --check .",
     "fix": "prettier --write . && eslint --fix . --max-warnings=0",

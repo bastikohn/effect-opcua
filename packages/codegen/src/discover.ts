@@ -1,7 +1,12 @@
 import { Effect } from "effect";
-import { OpcuaSession } from "@effect-opcua/client";
+import {
+  OpcuaSession,
+  type OpcuaBrowseReference,
+  type OpcuaDataTypeDefinitionResult,
+  type OpcuaNodeMetadata,
+  type OpcuaSession as OpcuaSessionService,
+} from "@effect-opcua/client";
 import type { OpcuaError } from "@effect-opcua/client/OpcuaError";
-import type { OpcuaNodeMetadata } from "@effect-opcua/client/OpcuaSession";
 
 import { errorIssue, issue, sortIssues } from "./diagnostics.js";
 import { codegenError } from "./errors.js";
@@ -53,7 +58,7 @@ export const discover = (
 ): Effect.Effect<
   DiscoveryModel,
   import("./errors.js").CodegenError | OpcuaError,
-  OpcuaSession.OpcuaSession
+  OpcuaSessionService
 > =>
   Effect.gen(function* () {
     const session = yield* OpcuaSession.OpcuaSession;
@@ -220,7 +225,7 @@ export const discover = (
   });
 
 const resolveRoot = (
-  session: OpcuaSession.OpcuaSession,
+  session: OpcuaSessionService,
   root: NormalizedRootConfig,
   rootIndex: number,
 ) =>
@@ -240,7 +245,7 @@ const resolveRoot = (
       );
 
 const resolveNodeIdRoot = (
-  session: OpcuaSession.OpcuaSession,
+  session: OpcuaSessionService,
   root: Extract<NormalizedRootConfig, { readonly nodeId: string }>,
   rootIndex: number,
 ) =>
@@ -256,7 +261,7 @@ const resolveNodeIdRoot = (
   });
 
 const resolvePathRoot = (
-  session: OpcuaSession.OpcuaSession,
+  session: OpcuaSessionService,
   root: Extract<NormalizedRootConfig, { readonly path: readonly string[] }>,
   rootIndex: number,
 ) =>
@@ -312,9 +317,7 @@ const resolvePathRoot = (
     } satisfies DiscoveredRoot;
   });
 
-const selectedChildReferences = (
-  references: readonly OpcuaSession.OpcuaBrowseReference[],
-) =>
+const selectedChildReferences = (references: readonly OpcuaBrowseReference[]) =>
   references
     .filter((reference) => reference.isForward !== false)
     .filter((reference) =>
@@ -324,9 +327,7 @@ const selectedChildReferences = (
     )
     .sort(referenceSort);
 
-const duplicateBrowseName = (
-  references: readonly OpcuaSession.OpcuaBrowseReference[],
-) => {
+const duplicateBrowseName = (references: readonly OpcuaBrowseReference[]) => {
   const groups = new Map<string, string[]>();
   for (const reference of references) {
     const name = reference.browseName?.name;
@@ -342,8 +343,8 @@ const duplicateBrowseName = (
 };
 
 const referenceSort = (
-  left: OpcuaSession.OpcuaBrowseReference,
-  right: OpcuaSession.OpcuaBrowseReference,
+  left: OpcuaBrowseReference,
+  right: OpcuaBrowseReference,
 ) =>
   (left.browseName?.name ?? "").localeCompare(right.browseName?.name ?? "") ||
   (left.nodeClass ?? "").localeCompare(right.nodeClass ?? "") ||
@@ -360,8 +361,8 @@ const matchingExclude = (
   );
 
 const readChildMetadata = (
-  session: OpcuaSession.OpcuaSession,
-  children: readonly OpcuaSession.OpcuaBrowseReference[],
+  session: OpcuaSessionService,
+  children: readonly OpcuaBrowseReference[],
   exclude: readonly NormalizedExcludeRule[],
   parentPath: readonly string[],
 ) =>
@@ -533,7 +534,7 @@ const shouldBrowseChildren = (nodeClass: string | undefined) =>
   nodeClass === "Object";
 
 const discoverDataTypeDefinitions = (
-  session: OpcuaSession.OpcuaSession,
+  session: OpcuaSessionService,
   nodes: ReadonlyMap<NodeKey, DiscoveredNode>,
 ) =>
   Effect.gen(function* () {
@@ -542,8 +543,7 @@ const discoverDataTypeDefinitions = (
       .filter((node) => node.nodeClass === "Variable")
       .flatMap((node) => (node.dataTypeNodeId ? [node.dataTypeNodeId] : []))
       .filter((nodeId) => !isBuiltInDataType(nodeId));
-    const results: import("@effect-opcua/client/OpcuaSession").OpcuaDataTypeDefinitionResult[] =
-      [];
+    const results: OpcuaDataTypeDefinitionResult[] = [];
 
     while (queue.length > 0) {
       const batch = [...new Set(queue.splice(0))]

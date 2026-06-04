@@ -1,16 +1,29 @@
 {
   "name": "@effect-opcua/client",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0-alpha.0",
   "description": "Effect-native OPC-UA client wrapper for node-opcua",
+  "license": "UNLICENSED",
   "sideEffects": false,
   "type": "module",
   "files": [
     "README.md",
     "dist",
-    "package.json",
-    "src"
+    "package.json"
   ],
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bastikohn/effect-opcua.git",
+    "directory": "packages/client"
+  },
+  "bugs": {
+    "url": "https://github.com/bastikohn/effect-opcua/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.mts",
@@ -20,12 +33,20 @@
       "types": "./dist/node-opcua.d.mts",
       "default": "./dist/node-opcua.mjs"
     },
+    "./Opcua": {
+      "types": "./dist/Opcua.d.mts",
+      "default": "./dist/Opcua.mjs"
+    },
+    "./OpcuaClient": {
+      "types": "./dist/OpcuaClient.d.mts",
+      "default": "./dist/OpcuaClient.mjs"
+    },
+    "./OpcuaError": {
+      "types": "./dist/OpcuaError.d.mts",
+      "default": "./dist/OpcuaError.mjs"
+    },
     "./package.json": "./package.json",
-    "./internal/*": null,
-    "./*": {
-      "types": "./dist/*.d.mts",
-      "default": "./dist/*.mjs"
-    }
+    "./internal/*": null
   },
   "main": "./dist/index.mjs",
   "module": "./dist/index.mjs",

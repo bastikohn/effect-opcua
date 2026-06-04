@@ -122,6 +122,10 @@ describe("codegen prototype", () => {
     expect(structures).toContain(
       "entries: Schema.Array(CommandStatusEntrySchema)",
     );
+    for (const generated of [nodeIds, enums, structures, variables, index]) {
+      expect(generated).not.toContain("@effect-opcua/client/");
+      expect(generated).not.toContain("/internal/");
+    }
 
     expect(index).toContain('export * as NodeIds from "./nodeIds.js";');
     expect(index).toContain('export * as Enums from "./enums.js";');
@@ -151,7 +155,6 @@ describe("codegen prototype", () => {
             baseUrl: repoRoot,
             paths: {
               "@effect-opcua/client": ["packages/client/src/index.ts"],
-              "@effect-opcua/client/*": ["packages/client/src/*"],
             },
           },
           include: [join(tempDir, "index.ts"), join(outputDir, "*.ts")],

@@ -1,14 +1,15 @@
-import * as Opcua from "@effect-opcua/client/Opcua";
-import * as OpcuaClient from "@effect-opcua/client/OpcuaClient";
-import * as OpcuaSession from "@effect-opcua/client/OpcuaSession";
-import type {
-  NodeIdString,
-  OpcuaDynamicValue,
-  ReadResult,
-  WriteResult,
-} from "@effect-opcua/client/OpcuaVariable";
-import type { MonitorSample } from "@effect-opcua/client/OpcuaSubscription";
-import type { OpcuaBrowseReference } from "@effect-opcua/client/OpcuaSession";
+import {
+  Opcua,
+  OpcuaClient,
+  OpcuaSession,
+  type MonitorSample,
+  type NodeIdString,
+  type OpcuaSession as OpcuaSessionService,
+  type OpcuaDynamicValue,
+  type OpcuaBrowseReference,
+  type ReadResult,
+  type WriteResult,
+} from "@effect-opcua/client";
 import {
   Cause,
   Duration,
@@ -132,7 +133,7 @@ export const createTuiRuntime = async (
       ],
     }));
 
-  const run = <A, E>(effect: Effect.Effect<A, E, OpcuaSession.OpcuaSession>) =>
+  const run = <A, E>(effect: Effect.Effect<A, E, OpcuaSessionService>) =>
     runtime.runPromise(effect);
 
   const root: TuiTreeEntry = {

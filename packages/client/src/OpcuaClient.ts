@@ -52,7 +52,7 @@ export const OpcuaClient = Object.assign(
 export const layer = OpcuaClient.layer;
 export const layerConfig = OpcuaClient.layerConfig;
 
-export const makeOpcuaClient = (options: OpcuaClientLayerOptions) =>
+const makeOpcuaClient = (options: OpcuaClientLayerOptions) =>
   Effect.gen(function* () {
     const events = yield* PubSub.sliding<OpcuaClientEvent>(EVENT_BUFFER_SIZE);
     const unsafeRaw = OPCUAClient.create(options.clientOptions ?? {});
@@ -60,12 +60,18 @@ export const makeOpcuaClient = (options: OpcuaClientLayerOptions) =>
     yield* Effect.acquireRelease(
       Effect.tryPromise({
         try: async (signal) => {
+          let aborted = signal.aborted;
           const abort = () => {
+            aborted = true;
             void unsafeRaw.disconnect().catch(() => undefined);
           };
           signal.addEventListener("abort", abort, { once: true });
           try {
             await unsafeRaw.connect(options.endpointUrl);
+            if (aborted) {
+              await unsafeRaw.disconnect().catch(() => undefined);
+              throw new Error("Connection aborted");
+            }
             EventBus.publishUnsafe(events, {
               _tag: "Connected",
               endpointUrl: options.endpointUrl,
@@ -120,5 +126,3 @@ export const makeOpcuaClient = (options: OpcuaClientLayerOptions) =>
       unsafeRaw,
     };
   });
-
-export const make = makeOpcuaClient;

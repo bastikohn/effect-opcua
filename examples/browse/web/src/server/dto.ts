@@ -1,7 +1,10 @@
 import {
-  OpcuaSubscription,
-  OpcuaVariable,
-  type OpcuaSession,
+  Opcua,
+  type MonitorStartupFailure,
+  type OpcuaBrowseReference,
+  type OpcuaMetadataReadFailure,
+  type OpcuaNodeMetadata,
+  type OpcuaNodeMetadataResult,
 } from "@effect-opcua/client";
 import { Duration, Effect, Result, Stream } from "effect";
 
@@ -60,12 +63,12 @@ export const browseNode = (
   maxReferencesPerNode: number,
 ): Effect.Effect<BrowsePage, WebRpcError> =>
   Effect.gen(function* () {
-    const result = yield* session.browseChildren(nodeId, {
-      mode: "page",
-      maxReferencesPerNode,
-    }).pipe(
-      Effect.mapError((cause) => rpcError("Browse", nodeId, cause)),
-    );
+    const result = yield* session
+      .browseChildren(nodeId, {
+        mode: "page",
+        maxReferencesPerNode,
+      })
+      .pipe(Effect.mapError((cause) => rpcError("Browse", nodeId, cause)));
     if (result._tag === "NonGoodStatus") {
       return {
         response: {
@@ -80,11 +83,13 @@ export const browseNode = (
     const metadataResults =
       nodeIds.length === 0
         ? []
-        : yield* session.readManyNodeMetadata(nodeIds).pipe(
-            Effect.mapError((cause) =>
-              rpcError("BrowseMetadata", nodeId, cause),
-            ),
-          );
+        : yield* session
+            .readManyNodeMetadata(nodeIds)
+            .pipe(
+              Effect.mapError((cause) =>
+                rpcError("BrowseMetadata", nodeId, cause),
+              ),
+            );
     const metadataByNodeId = new Map(
       metadataResults.map((entry) => [entry.nodeId, entry]),
     );
@@ -109,11 +114,13 @@ export const browseContinuation = (
   continuation: BrowserBrowseContinuation,
 ): Effect.Effect<BrowsePage, WebRpcError> =>
   Effect.gen(function* () {
-    const result = yield* session.browseNext(continuation).pipe(
-      Effect.mapError((cause) =>
-        rpcError("BrowseNext", continuation.nodeId, cause),
-      ),
-    );
+    const result = yield* session
+      .browseNext(continuation)
+      .pipe(
+        Effect.mapError((cause) =>
+          rpcError("BrowseNext", continuation.nodeId, cause),
+        ),
+      );
     if (result._tag === "NonGoodStatus") {
       return {
         response: {
@@ -128,11 +135,13 @@ export const browseContinuation = (
     const metadataResults =
       nodeIds.length === 0
         ? []
-        : yield* session.readManyNodeMetadata(nodeIds).pipe(
-            Effect.mapError((cause) =>
-              rpcError("BrowseMetadata", continuation.nodeId, cause),
-            ),
-          );
+        : yield* session
+            .readManyNodeMetadata(nodeIds)
+            .pipe(
+              Effect.mapError((cause) =>
+                rpcError("BrowseMetadata", continuation.nodeId, cause),
+              ),
+            );
     const metadataByNodeId = new Map(
       metadataResults.map((entry) => [entry.nodeId, entry]),
     );
@@ -157,9 +166,11 @@ export const readNode = (
   nodeId: string,
 ): Effect.Effect<ReadNodeResponse, WebRpcError> =>
   Effect.gen(function* () {
-    const metadata = yield* session.readNodeMetadata(nodeId).pipe(
-      Effect.mapError((cause) => rpcError("ReadNodeMetadata", nodeId, cause)),
-    );
+    const metadata = yield* session
+      .readNodeMetadata(nodeId)
+      .pipe(
+        Effect.mapError((cause) => rpcError("ReadNodeMetadata", nodeId, cause)),
+      );
     const valueResult = isReadable(metadata)
       ? yield* Effect.result(readValue(session, nodeId))
       : undefined;
@@ -188,7 +199,7 @@ export const writeNode = (
   value: unknown,
 ): Effect.Effect<WriteNodeResponse, WebRpcError> =>
   Effect.gen(function* () {
-    const variable = OpcuaVariable.make({
+    const variable = Opcua.variable({
       nodeId,
       access: "readWrite",
     });
@@ -216,11 +227,13 @@ export const monitorValues = (
     const metadataResults =
       input.nodeIds.length === 0
         ? []
-        : yield* session.readManyNodeMetadata(input.nodeIds).pipe(
-            Effect.mapError((cause) =>
-              rpcError("MonitorMetadata", undefined, cause),
-            ),
-          );
+        : yield* session
+            .readManyNodeMetadata(input.nodeIds)
+            .pipe(
+              Effect.mapError((cause) =>
+                rpcError("MonitorMetadata", undefined, cause),
+              ),
+            );
     const metadataByNodeId = new Map(
       metadataResults.flatMap((result) =>
         result._tag === "Success"
@@ -234,7 +247,7 @@ export const monitorValues = (
     const items = Object.fromEntries(
       input.nodeIds.map((nodeId) => [
         nodeId,
-        OpcuaVariable.make({ nodeId, access: "read" }),
+        Opcua.variable({ nodeId, access: "read" }),
       ]),
     );
     const active = yield* subscription.monitor(items, {
@@ -243,9 +256,9 @@ export const monitorValues = (
       samplingInterval: Duration.millis(input.samplingIntervalMs),
       queueSize: 5,
       discardOldest: true,
-      filter: OpcuaSubscription.MonitorFilter.statusValue(),
+      filter: Opcua.MonitorFilter.statusValue(),
       timestamps: "both",
-      clientBuffer: OpcuaSubscription.BufferPolicy.sliding(64),
+      clientBuffer: Opcua.BufferPolicy.sliding(64),
     });
     const started: MonitorEvent = {
       _tag: "Started",
@@ -316,7 +329,7 @@ const monitorSample = (
 };
 
 const monitorRejectedItem = (
-  failure: OpcuaSubscription.MonitorStartupFailure,
+  failure: MonitorStartupFailure,
 ): MonitorRejectedItem => ({
   nodeId: failure.nodeId,
   message: rpcError("MonitorStartup", failure.nodeId, failure.error).message,
@@ -324,9 +337,7 @@ const monitorRejectedItem = (
   status: failure.error.reason.status,
 });
 
-export const nodeMetadata = (
-  metadata: OpcuaSession.OpcuaNodeMetadata,
-): NodeMetadata => ({
+export const nodeMetadata = (metadata: OpcuaNodeMetadata): NodeMetadata => ({
   nodeId: metadata.nodeId,
   nodeClass: metadata.nodeClass,
   browseName: metadata.browseName,
@@ -350,7 +361,7 @@ const readValue = (
 ): Effect.Effect<ReadValue, unknown> =>
   Effect.map(
     session.read(
-      OpcuaVariable.make({
+      Opcua.variable({
         nodeId,
         access: "read",
       }),
@@ -399,19 +410,16 @@ const readDataTypeDefinition = (
         Effect.succeed({
           _tag: "Failure" as const,
           dataTypeNodeId,
-          reason: rpcError(
-            "ReadDataTypeDefinition",
-            dataTypeNodeId,
-            cause,
-          ).message,
+          reason: rpcError("ReadDataTypeDefinition", dataTypeNodeId, cause)
+            .message,
         }),
       onSuccess: (result) => Effect.succeed(result),
     }),
   );
 
 const browseReference = (
-  reference: OpcuaSession.OpcuaBrowseReference,
-  metadataResult: OpcuaSession.OpcuaNodeMetadataResult | undefined,
+  reference: OpcuaBrowseReference,
+  metadataResult: OpcuaNodeMetadataResult | undefined,
 ): BrowseReference => ({
   nodeId: reference.nodeId.text,
   namespaceIndex: reference.nodeId.namespace,
@@ -435,7 +443,7 @@ const browseReference = (
 
 const metadataFailure = (
   nodeId: string,
-  failure: OpcuaSession.OpcuaMetadataReadFailure,
+  failure: OpcuaMetadataReadFailure,
 ): MetadataFailure => {
   if (failure._tag === "NonGoodStatus") {
     return {
@@ -452,6 +460,6 @@ const metadataFailure = (
   };
 };
 
-const isReadable = (metadata: OpcuaSession.OpcuaNodeMetadata) =>
+const isReadable = (metadata: OpcuaNodeMetadata) =>
   metadata.accessLevel?.readable === true &&
   metadata.userAccessLevel?.readable !== false;
