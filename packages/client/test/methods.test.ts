@@ -390,7 +390,7 @@ function methodNodeId<const Name extends string>(name: Name) {
 }
 
 type FakeMethodSession = {
-  readonly session: OpcuaSession.OpcuaSession;
+  readonly session: OpcuaSession.OpcuaSessionService;
 };
 
 const runWithFakeSession = <A, E>(

@@ -265,16 +265,19 @@ describe("Opcua", () => {
   });
 
   it("checks layer config types", () => {
-    expect(OpcuaClient.layerConfig).type.toBeCallableWith({
+    expect(OpcuaClient.layerConfig).type.toBeCallableWith(
+      Config.all({
+        endpointUrl: Config.string("OPCUA_ENDPOINT_URL"),
+      }),
+    );
+    expect(OpcuaClient.layerConfig).type.toBeCallableWith(
+      Config.all({
+        endpointUrl: Config.string("OPCUA_ENDPOINT_URL"),
+        clientOptions: Config.succeed({}),
+      }),
+    );
+    expect(OpcuaClient.layerConfig).type.not.toBeCallableWith({
       endpointUrl: Config.string("OPCUA_ENDPOINT_URL"),
-    });
-    expect(OpcuaClient.layerConfig).type.toBeCallableWith({
-      endpointUrl: Config.string("OPCUA_ENDPOINT_URL"),
-      clientOptions: {},
-    });
-    expect(OpcuaClient.layerConfig).type.toBeCallableWith({
-      endpointUrl: Config.string("OPCUA_ENDPOINT_URL"),
-      clientOptions: Config.succeed({}),
     });
     expect(OpcuaClient.layerConfig).type.not.toBeCallableWith({
       endpointUrl: "opc.tcp://localhost:4840",

@@ -4,7 +4,6 @@ import {
   OpcuaSession,
   type MonitorSample,
   type NodeIdString,
-  type OpcuaSession as OpcuaSessionService,
   type OpcuaDynamicValue,
   type OpcuaBrowseReference,
   type ReadResult,
@@ -133,8 +132,7 @@ export const createTuiRuntime = async (
       ],
     }));
 
-  const run = <A, E>(effect: Effect.Effect<A, E, OpcuaSessionService>) =>
-    runtime.runPromise(effect);
+  const run = runtime.runPromise;
 
   const root: TuiTreeEntry = {
     entryId: "root",

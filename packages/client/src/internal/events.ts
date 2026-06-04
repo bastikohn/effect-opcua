@@ -9,11 +9,6 @@ import type { NodeIdString } from "./capabilities.js";
 
 export type OpcuaClientEvent =
   | { readonly _tag: "Connected"; readonly endpointUrl: string }
-  | {
-      readonly _tag: "ConnectionFailed";
-      readonly endpointUrl: string;
-      readonly cause: unknown;
-    }
   | { readonly _tag: "Backoff"; readonly unsafeRaw: unknown }
   | { readonly _tag: "StartReconnection"; readonly unsafeRaw: unknown }
   | { readonly _tag: "AfterReconnection"; readonly unsafeRaw: unknown }

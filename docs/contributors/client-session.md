@@ -17,8 +17,8 @@ Failures:
 - Disconnect failures are ignored during finalization after being converted to
   `Disconnect` errors.
 
-`OpcuaClient.layerConfig(options)` resolves the endpoint and optional client
-options from Effect `Config` before creating the same layer.
+`OpcuaClient.layerConfig(config)` resolves a `Config.Config<OpcuaClientLayerOptions>`
+before creating the same layer.
 
 ## Session layer
 

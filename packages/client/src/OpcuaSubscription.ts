@@ -296,131 +296,128 @@ export const makeSubscription = (
 ): OpcuaSubscription => {
   const finalizingMonitorGroups = new WeakSet<ClientMonitoredItemGroup>();
 
-  const monitor = <const Items extends MonitorItemDictionary>(
+  const monitor = Effect.fnUntraced(function* <
+    const Items extends MonitorItemDictionary,
+  >(
     items: Items,
     options: MonitorOptions<Items>,
-  ): Effect.Effect<
+  ): Effect.fn.Return<
     ActiveMonitor<Items>,
     OpcuaMonitorCreateError<Items> | OpcuaMonitorConfigurationError,
     Scope.Scope
-  > =>
-    Effect.gen(function* () {
-      const normalized = yield* normalizeMonitorItems(items);
-      const createOptions = yield* validateMonitorOptions(normalized, options);
-      const effective = yield* applyMonitorOptions(normalized, options);
-      const validation = yield* validateStartupItems(
-        unsafeRaw,
-        effective,
-        options.validation,
-        createOptions,
-        validateVariable,
-      );
+  > {
+    const normalized = yield* normalizeMonitorItems(items);
+    const createOptions = yield* validateMonitorOptions(normalized, options);
+    const effective = yield* applyMonitorOptions(normalized, options);
+    const validation = yield* validateStartupItems(
+      unsafeRaw,
+      effective,
+      options.validation,
+      createOptions,
+      validateVariable,
+    );
 
-      if (options.startup === "strict" && validation.failed.size > 0) {
-        const report = makeStartupReport<Items>(
-          normalized.length,
-          new Map(),
-          validation.failed,
-        );
-        return yield* Effect.fail(
-          monitorCreateError<Items>({
-            subscriptionId: unsafeRaw.subscriptionId,
-            startup: report,
-            cause: Array.from(validation.failed.values()),
-          }),
-        );
-      }
-
-      const notificationQueue = yield* makeQueue<
-        RawMonitorNotification<Items>,
-        OpcuaMonitorRuntimeError
-      >(options.clientBuffer);
-      const createdGroups: Array<ClientMonitoredItemGroup> = [];
-      const retainedGroups: Array<RetainedMonitorGroup<Items>> = [];
-      const teardowns: Array<() => void> = [];
-      const groupRegistry: MonitorGroupRegistry = {
-        add: (group) => {
-          createdGroups.push(group);
-        },
-        remove: (group) => {
-          removeCreatedMonitorGroup(createdGroups, group);
-        },
-      };
-
-      yield* Effect.addFinalizer(() =>
-        cleanupMonitor(
-          createdGroups,
-          teardowns,
-          notificationQueue,
-          finalizingMonitorGroups,
-        ),
-      );
-
-      const created =
-        validation.active.length > 0
-          ? yield* createMonitorChunks(
-              unsafeRaw,
-              validation.active,
-              createOptions,
-              groupRegistry,
-            )
-          : [];
-      const active = new Map<MonitorKey<Items>, MonitorStarted>();
-      const failed = new Map(validation.failed);
-
-      for (const chunk of created) {
-        for (const [key, started] of chunk.active) active.set(key, started);
-        for (const [key, failure] of chunk.failed) failed.set(key, failure);
-        if (chunk.retained) retainedGroups.push(chunk.retained);
-      }
-
+    if (options.startup === "strict" && validation.failed.size > 0) {
       const report = makeStartupReport<Items>(
         normalized.length,
-        active,
-        failed,
+        new Map(),
+        validation.failed,
       );
+      return yield* Effect.fail(
+        monitorCreateError<Items>({
+          subscriptionId: unsafeRaw.subscriptionId,
+          startup: report,
+          cause: Array.from(validation.failed.values()),
+        }),
+      );
+    }
 
-      if (options.startup === "strict" && failed.size > 0) {
-        yield* cleanupMonitor(
-          createdGroups,
-          teardowns,
-          notificationQueue,
-          finalizingMonitorGroups,
-        );
-        return yield* Effect.fail(
-          monitorCreateError<Items>({
-            subscriptionId: unsafeRaw.subscriptionId,
-            startup: report,
-            cause: Array.from(failed.values()),
-          }),
-        );
-      }
+    const notificationQueue = yield* makeQueue<
+      RawMonitorNotification<Items>,
+      OpcuaMonitorRuntimeError
+    >(options.clientBuffer);
+    const createdGroups: Array<ClientMonitoredItemGroup> = [];
+    const retainedGroups: Array<RetainedMonitorGroup<Items>> = [];
+    const teardowns: Array<() => void> = [];
+    const groupRegistry: MonitorGroupRegistry = {
+      add: (group) => {
+        createdGroups.push(group);
+      },
+      remove: (group) => {
+        removeCreatedMonitorGroup(createdGroups, group);
+      },
+    };
 
-      for (const retained of retainedGroups) {
-        teardowns.push(
-          wireMonitorGroup(
+    yield* Effect.addFinalizer(() =>
+      cleanupMonitor(
+        createdGroups,
+        teardowns,
+        notificationQueue,
+        finalizingMonitorGroups,
+      ),
+    );
+
+    const created =
+      validation.active.length > 0
+        ? yield* createMonitorChunks(
             unsafeRaw,
-            events,
-            retained.group,
-            retained.entries,
-            notificationQueue,
-            options.clientBuffer,
-            finalizingMonitorGroups,
-          ),
-        );
-      }
+            validation.active,
+            createOptions,
+            groupRegistry,
+          )
+        : [];
+    const active = new Map<MonitorKey<Items>, MonitorStarted>();
+    const failed = new Map(validation.failed);
 
-      return {
-        startup: report,
-        samples: Stream.fromQueue(notificationQueue).pipe(
-          Stream.mapEffect(
-            ({ entry, dataValue }) =>
-              monitorSampleFromDataValue(entry, dataValue, structureRuntime),
-            { concurrency: 1 },
-          ),
+    for (const chunk of created) {
+      for (const [key, started] of chunk.active) active.set(key, started);
+      for (const [key, failure] of chunk.failed) failed.set(key, failure);
+      if (chunk.retained) retainedGroups.push(chunk.retained);
+    }
+
+    const report = makeStartupReport<Items>(normalized.length, active, failed);
+
+    if (options.startup === "strict" && failed.size > 0) {
+      yield* cleanupMonitor(
+        createdGroups,
+        teardowns,
+        notificationQueue,
+        finalizingMonitorGroups,
+      );
+      return yield* Effect.fail(
+        monitorCreateError<Items>({
+          subscriptionId: unsafeRaw.subscriptionId,
+          startup: report,
+          cause: Array.from(failed.values()),
+        }),
+      );
+    }
+
+    for (const retained of retainedGroups) {
+      teardowns.push(
+        wireMonitorGroup(
+          unsafeRaw,
+          events,
+          retained.group,
+          retained.entries,
+          notificationQueue,
+          options.clientBuffer,
+          finalizingMonitorGroups,
         ),
-      };
-    });
+      );
+    }
+
+    return {
+      startup: report,
+      samples: Stream.fromQueue(notificationQueue).pipe(
+        Stream.mapEffect(
+          ({ entry, dataValue }) =>
+            monitorSampleFromDataValue(entry, dataValue, structureRuntime),
+          { concurrency: 1 },
+        ),
+      ),
+    };
+  });
 
   return {
     monitor: monitor as OpcuaSubscription["monitor"],
@@ -953,5 +950,3 @@ const revisedMonitorItemOptions = (
 
 const dateTimestamp = (timestamp: Date | null | undefined) =>
   timestamp instanceof Date ? timestamp : undefined;
-
-export const make = makeSubscription;

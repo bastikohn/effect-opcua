@@ -3,7 +3,7 @@ import {
   layer as clientLayer,
   layerConfig as clientLayerConfig,
 } from "./OpcuaClient.js";
-import type { OpcuaClient as OpcuaClientServiceType } from "./OpcuaClient.js";
+import type { OpcuaClientService as OpcuaClientServiceType } from "./OpcuaClient.js";
 import {
   OpcuaSession as OpcuaSessionService,
   browse,
@@ -24,7 +24,7 @@ import {
   write,
   writeMany,
 } from "./OpcuaSession.js";
-import type { OpcuaSession as OpcuaSessionServiceType } from "./OpcuaSession.js";
+import type { OpcuaSessionService as OpcuaSessionServiceType } from "./OpcuaSession.js";
 
 export * as Opcua from "./Opcua.js";
 

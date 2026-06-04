@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Context, Effect } from "effect";
 import {
   OpcuaSession,
   type OpcuaBrowseReference,
@@ -43,6 +43,9 @@ type MetadataTargetReference = {
 
 const objectsFolderNodeId = "i=85";
 const allowedReferenceTypes = new Set(["i=35", "i=46", "i=47", "i=49"]);
+type OpcuaSessionRequirement = Context.Service.Identifier<
+  typeof OpcuaSession.OpcuaSession
+>;
 const metadataPropertyNames = new Set([
   "InputArguments",
   "OutputArguments",
@@ -58,7 +61,7 @@ export const discover = (
 ): Effect.Effect<
   DiscoveryModel,
   import("./errors.js").CodegenError | OpcuaError,
-  OpcuaSessionService
+  OpcuaSessionRequirement
 > =>
   Effect.gen(function* () {
     const session = yield* OpcuaSession.OpcuaSession;

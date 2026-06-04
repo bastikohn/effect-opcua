@@ -1,5 +1,5 @@
 import { OPCUAClient, type OPCUAClientOptions } from "node-opcua";
-import { Config, Context, Effect, Layer, PubSub, Stream } from "effect";
+import { type Config, Context, Effect, Layer, PubSub, Stream } from "effect";
 
 import { EVENT_BUFFER_SIZE } from "./internal/constants.js";
 import { connectError, disconnectError } from "./OpcuaError.js";
@@ -9,9 +9,40 @@ import {
   wireClientEvents,
 } from "./internal/events.js";
 
-export type OpcuaClient = {
+export type OpcuaClientService = {
   readonly events: Stream.Stream<OpcuaClientEvent>;
   readonly unsafeRaw: OPCUAClient;
+};
+
+export class OpcuaClient extends Context.Service<
+  OpcuaClient,
+  OpcuaClientService
+>()("@effect-opcua/client/OpcuaClient") {}
+
+const connect = async (
+  client: OPCUAClient,
+  endpointUrl: string,
+  events: PubSub.PubSub<OpcuaClientEvent>,
+  signal: AbortSignal,
+) => {
+  let disconnectAfterAbort: Promise<void> | undefined;
+  const disconnectOnAbort = () => {
+    disconnectAfterAbort ??= client.disconnect().catch(() => undefined);
+  };
+
+  signal.addEventListener("abort", disconnectOnAbort, { once: true });
+  try {
+    await client.connect(endpointUrl);
+    if (signal.aborted) {
+      disconnectOnAbort();
+      await disconnectAfterAbort;
+      throw new Error("Connection aborted");
+    }
+    EventBus.publishUnsafe(events, { _tag: "Connected", endpointUrl });
+    return client;
+  } finally {
+    signal.removeEventListener("abort", disconnectOnAbort);
+  }
 };
 
 export type OpcuaClientLayerOptions = {
@@ -19,110 +50,64 @@ export type OpcuaClientLayerOptions = {
   readonly clientOptions?: OPCUAClientOptions;
 };
 
-export type OpcuaClientLayerConfig = {
-  readonly endpointUrl: Config.Config<string>;
-  readonly clientOptions?:
-    | OPCUAClientOptions
-    | Config.Config<OPCUAClientOptions>;
-};
+const make = Effect.fnUntraced(function* (options: OpcuaClientLayerOptions) {
+  const events = yield* PubSub.sliding<OpcuaClientEvent>({
+    capacity: EVENT_BUFFER_SIZE,
+    replay: 1,
+  });
+  yield* Effect.addFinalizer(() => PubSub.shutdown(events));
 
-export const OpcuaClient = Object.assign(
-  Context.Service<OpcuaClient>("@effect-opcua/client/OpcuaClient"),
-  {
-    layer: (options: OpcuaClientLayerOptions) =>
-      Layer.effect(OpcuaClient, makeOpcuaClient(options)),
-    layerConfig: (options: OpcuaClientLayerConfig) =>
-      Layer.effect(
-        OpcuaClient,
-        Effect.gen(function* () {
-          const endpointUrl = yield* options.endpointUrl;
-          const clientOptions =
-            options.clientOptions === undefined
-              ? undefined
-              : Config.isConfig(options.clientOptions)
-                ? yield* options.clientOptions
-                : options.clientOptions;
-
-          return yield* makeOpcuaClient({ endpointUrl, clientOptions });
+  const unsafeRaw = yield* Effect.try({
+    try: () => OPCUAClient.create(options.clientOptions ?? {}),
+    catch: (cause) => connectError({ endpointUrl: options.endpointUrl, cause }),
+  });
+  yield* wireClientEvents(unsafeRaw, events);
+  yield* Effect.acquireRelease(
+    Effect.tryPromise({
+      try: (signal) => connect(unsafeRaw, options.endpointUrl, events, signal),
+      catch: (cause) =>
+        connectError({
+          endpointUrl: options.endpointUrl,
+          cause,
         }),
-      ),
-  },
-);
-
-export const layer = OpcuaClient.layer;
-export const layerConfig = OpcuaClient.layerConfig;
-
-const makeOpcuaClient = (options: OpcuaClientLayerOptions) =>
-  Effect.gen(function* () {
-    const events = yield* PubSub.sliding<OpcuaClientEvent>(EVENT_BUFFER_SIZE);
-    const unsafeRaw = OPCUAClient.create(options.clientOptions ?? {});
-    yield* wireClientEvents(unsafeRaw, events);
-    yield* Effect.acquireRelease(
+    }).pipe(
+      Effect.withSpan("opcua.connect", {
+        attributes: { "opcua.endpoint_url": options.endpointUrl },
+        kind: "client",
+      }),
+    ),
+    () =>
       Effect.tryPromise({
-        try: async (signal) => {
-          let aborted = signal.aborted;
-          const abort = () => {
-            aborted = true;
-            void unsafeRaw.disconnect().catch(() => undefined);
-          };
-          signal.addEventListener("abort", abort, { once: true });
-          try {
-            await unsafeRaw.connect(options.endpointUrl);
-            if (aborted) {
-              await unsafeRaw.disconnect().catch(() => undefined);
-              throw new Error("Connection aborted");
-            }
-            EventBus.publishUnsafe(events, {
-              _tag: "Connected",
-              endpointUrl: options.endpointUrl,
-            });
-            return unsafeRaw;
-          } finally {
-            signal.removeEventListener("abort", abort);
-          }
-        },
-        catch: (cause) => {
+        try: async () => {
+          await unsafeRaw.disconnect();
           EventBus.publishUnsafe(events, {
-            _tag: "ConnectionFailed",
+            _tag: "Disconnected",
             endpointUrl: options.endpointUrl,
-            cause,
-          });
-          return connectError({
-            endpointUrl: options.endpointUrl,
-            cause,
           });
         },
+        catch: (cause) =>
+          disconnectError({
+            endpointUrl: options.endpointUrl,
+            cause,
+          }),
       }).pipe(
-        Effect.withSpan("opcua.connect", {
+        Effect.withSpan("opcua.disconnect", {
           attributes: { "opcua.endpoint_url": options.endpointUrl },
           kind: "client",
         }),
+        Effect.ignore,
       ),
-      () =>
-        Effect.tryPromise({
-          try: async () => {
-            await unsafeRaw.disconnect();
-            EventBus.publishUnsafe(events, {
-              _tag: "Disconnected",
-              endpointUrl: options.endpointUrl,
-            });
-          },
-          catch: (cause) =>
-            disconnectError({
-              endpointUrl: options.endpointUrl,
-              cause,
-            }),
-        }).pipe(
-          Effect.withSpan("opcua.disconnect", {
-            attributes: { "opcua.endpoint_url": options.endpointUrl },
-            kind: "client",
-          }),
-          Effect.ignore,
-          Effect.andThen(PubSub.shutdown(events)),
-        ),
-    );
-    return {
-      events: Stream.fromPubSub(events),
-      unsafeRaw,
-    };
+  );
+  return OpcuaClient.of({
+    events: Stream.fromPubSub(events),
+    unsafeRaw,
   });
+});
+
+export const layer = (options: OpcuaClientLayerOptions) =>
+  Layer.effect(OpcuaClient, make(options));
+
+export type OpcuaClientLayerConfig = Config.Config<OpcuaClientLayerOptions>;
+
+export const layerConfig = (config: OpcuaClientLayerConfig) =>
+  Layer.effect(OpcuaClient, Effect.flatMap(config, make));

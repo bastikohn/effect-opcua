@@ -53,11 +53,11 @@ export class SessionFactory extends Context.Service<
       connect: (request) =>
         Effect.gen(function* () {
           const scope = yield* Scope.make();
-          const sessionLayer = OpcuaSession.OpcuaSession.layer({
+          const sessionLayer = OpcuaSession.layer({
             userIdentity: userIdentity(request.auth),
           }).pipe(
             Layer.provide(
-              OpcuaClient.OpcuaClient.layer({
+              OpcuaClient.layer({
                 endpointUrl: request.endpointUrl,
                 clientOptions: { endpointMustExist: false },
               }),
