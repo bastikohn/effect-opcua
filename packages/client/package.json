@@ -2,10 +2,11 @@
   "name": "@effect-opcua/client",
   "version": "0.1.0-alpha.0",
   "description": "Effect-native OPC-UA client wrapper for node-opcua",
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "sideEffects": false,
   "type": "module",
   "files": [
+    "LICENSE",
     "README.md",
     "dist",
     "package.json"

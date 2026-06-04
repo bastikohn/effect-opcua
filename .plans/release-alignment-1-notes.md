@@ -42,7 +42,7 @@ Completed on 2026-06-04.
 - Set `@effect-opcua/client` to version `0.1.0-alpha.0`.
 - Removed the package `private` flag.
 - Added package metadata:
-  - `license: "UNLICENSED"`;
+  - `license: "Apache-2.0"`;
   - Node `engines` requirement;
   - repository and bugs links;
   - public npm publish config.
@@ -64,9 +64,7 @@ Completed on 2026-06-04.
 
 ### Notes
 
-- There is no existing project license file. To avoid inventing a license grant,
-  the package now uses `license: "UNLICENSED"`. Replace this with the intended
-  SPDX license and license file before publishing as open source.
+- The repository and client package now include Apache-2.0 `LICENSE` files.
 - The dry-run publish command needed `--no-git-checks` because the working tree
   contains the in-progress release-alignment changes.
 
