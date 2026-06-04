@@ -7,12 +7,7 @@
     "paths": {
       "@effect-opcua/codegen": ["packages/codegen/src/index.ts"],
       "@effect-opcua/client": ["packages/client/src/index.ts"],
-      "@effect-opcua/client/node-opcua": ["packages/client/src/node-opcua.ts"],
-      "@effect-opcua/client/Opcua": ["packages/client/src/Opcua.ts"],
-      "@effect-opcua/client/OpcuaClient": [
-        "packages/client/src/OpcuaClient.ts"
-      ],
-      "@effect-opcua/client/OpcuaError": ["packages/client/src/OpcuaError.ts"]
+      "@effect-opcua/client/node-opcua": ["packages/client/src/node-opcua.ts"]
     }
   },
   "include": [

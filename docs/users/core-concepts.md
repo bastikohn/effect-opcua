@@ -1,5 +1,21 @@
 # Core concepts
 
+## Public import paths
+
+Use only:
+
+- `@effect-opcua/client`
+- `@effect-opcua/client/node-opcua`
+
+Do not import source-module subpaths such as:
+
+- `@effect-opcua/client/Opcua`
+- `@effect-opcua/client/OpcuaClient`
+- `@effect-opcua/client/OpcuaError`
+- `@effect-opcua/client/internal/*`
+
+Those paths are intentionally not public.
+
 ## Definitions
 
 The public API centers on definitions:

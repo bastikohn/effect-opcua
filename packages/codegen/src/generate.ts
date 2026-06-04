@@ -2,7 +2,7 @@ import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { Effect, Layer, Scope } from "effect";
 import { OpcuaClient, OpcuaSession } from "@effect-opcua/client";
-import type { OpcuaError } from "@effect-opcua/client/OpcuaError";
+import type * as Client from "@effect-opcua/client";
 
 import { compile } from "./compile.js";
 import { normalizeConfig } from "./config.js";
@@ -22,6 +22,8 @@ import type {
   GeneratedFile,
   NormalizedCodegenConfig,
 } from "./internal/types.js";
+
+type OpcuaError = Client.OpcuaError.OpcuaError;
 
 export const generate = (
   config: CodegenConfig,

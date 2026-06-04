@@ -8,22 +8,40 @@ The workspace is organized around one public client package and grouped examples
 - `examples/browse/tui`: terminal UI consuming the demo client and server.
 - `examples/browse/web`: web browse UI.
 
+## Public import paths
+
+Use only:
+
+- `@effect-opcua/client`
+- `@effect-opcua/client/node-opcua`
+
+Do not import source-module subpaths such as:
+
+- `@effect-opcua/client/Opcua`
+- `@effect-opcua/client/OpcuaClient`
+- `@effect-opcua/client/OpcuaError`
+- `@effect-opcua/client/internal/*`
+
+Those paths are intentionally not public.
+
 ## Public package shape
 
-The client root export is namespace-based:
+The client package has exactly two code entry points:
 
 ```ts
-export * as Opcua from "./Opcua.js";
-export * as OpcuaClient from "./OpcuaClient.js";
-export * as OpcuaError from "./OpcuaError.js";
-export * as OpcuaMethod from "./OpcuaMethod.js";
-export * as OpcuaSession from "./OpcuaSession.js";
-export * as OpcuaSubscription from "./OpcuaSubscription.js";
-export * as OpcuaVariable from "./OpcuaVariable.js";
+import {
+  Opcua,
+  OpcuaClient,
+  OpcuaError,
+  OpcuaSession,
+} from "@effect-opcua/client";
+import { StatusCodes } from "@effect-opcua/client/node-opcua";
 ```
 
 `Opcua` is the ergonomic surface for definitions, codecs, filters, and buffer
-policies. The other modules expose service-specific APIs and types.
+policies. `OpcuaClient`, `OpcuaSession`, and `OpcuaError` expose the public
+service and error APIs. Source modules remain package-local implementation
+units, not npm entry points.
 
 `@effect-opcua/client/node-opcua` is the explicit escape hatch for node-opcua
 types, constants, and helpers that users still need.

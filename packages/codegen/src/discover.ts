@@ -6,7 +6,7 @@ import {
   type OpcuaNodeMetadata,
   type OpcuaSession as OpcuaSessionService,
 } from "@effect-opcua/client";
-import type { OpcuaError } from "@effect-opcua/client/OpcuaError";
+import type * as Client from "@effect-opcua/client";
 
 import { errorIssue, issue, sortIssues } from "./diagnostics.js";
 import { codegenError } from "./errors.js";
@@ -29,6 +29,8 @@ type TraversalItem = {
   readonly rootSegmentCount: number;
   readonly path: readonly string[];
 };
+
+type OpcuaError = Client.OpcuaError.OpcuaError;
 
 type NodeDraft = Omit<DiscoveredNode, "path" | "allPaths"> & {
   path: readonly string[];

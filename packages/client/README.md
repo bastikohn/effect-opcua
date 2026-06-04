@@ -16,7 +16,21 @@ ergonomics, performance, or the package boundary.
 pnpm add @effect-opcua/client effect
 ```
 
-## Public Imports
+## Public import paths
+
+Use only:
+
+- `@effect-opcua/client`
+- `@effect-opcua/client/node-opcua`
+
+Do not import source-module subpaths such as:
+
+- `@effect-opcua/client/Opcua`
+- `@effect-opcua/client/OpcuaClient`
+- `@effect-opcua/client/OpcuaError`
+- `@effect-opcua/client/internal/*`
+
+Those paths are intentionally not public.
 
 ```ts
 import {

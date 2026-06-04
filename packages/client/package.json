@@ -34,18 +34,6 @@
       "types": "./dist/node-opcua.d.mts",
       "default": "./dist/node-opcua.mjs"
     },
-    "./Opcua": {
-      "types": "./dist/Opcua.d.mts",
-      "default": "./dist/Opcua.mjs"
-    },
-    "./OpcuaClient": {
-      "types": "./dist/OpcuaClient.d.mts",
-      "default": "./dist/OpcuaClient.mjs"
-    },
-    "./OpcuaError": {
-      "types": "./dist/OpcuaError.d.mts",
-      "default": "./dist/OpcuaError.mjs"
-    },
     "./package.json": "./package.json",
     "./internal/*": null
   },

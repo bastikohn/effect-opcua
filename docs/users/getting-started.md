@@ -4,9 +4,24 @@
 definitions, then run typed reads, writes, calls, batches, and monitors inside
 Effect programs.
 
-The client package is still in alpha. Use the root `@effect-opcua/client`
-imports and the documented `@effect-opcua/client/node-opcua` escape hatch; other
-source paths are not public API.
+The client package is still in alpha. Its public import surface is intentionally
+small while the library settles.
+
+## Public import paths
+
+Use only:
+
+- `@effect-opcua/client`
+- `@effect-opcua/client/node-opcua`
+
+Do not import source-module subpaths such as:
+
+- `@effect-opcua/client/Opcua`
+- `@effect-opcua/client/OpcuaClient`
+- `@effect-opcua/client/OpcuaError`
+- `@effect-opcua/client/internal/*`
+
+Those paths are intentionally not public.
 
 ## Requirements
 

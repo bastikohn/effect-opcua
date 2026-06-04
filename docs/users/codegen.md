@@ -12,6 +12,23 @@ Generated output is intentionally narrow:
 - `variables.ts`: hierarchical `Opcua.variable` definitions.
 - `index.ts`: namespace exports for the generated modules.
 
+## Public import paths
+
+Use only:
+
+- `@effect-opcua/client`
+- `@effect-opcua/client/node-opcua`
+
+Do not import source-module subpaths such as:
+
+- `@effect-opcua/client/Opcua`
+- `@effect-opcua/client/OpcuaClient`
+- `@effect-opcua/client/OpcuaError`
+- `@effect-opcua/client/internal/*`
+
+Those paths are intentionally not public. Generated code imports from
+`@effect-opcua/client` unless a raw node-opcua symbol is required.
+
 ## Config
 
 Use segment paths for roots and excludes. A browse name containing dots stays one
