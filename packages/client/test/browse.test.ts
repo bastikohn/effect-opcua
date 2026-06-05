@@ -1,21 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 
-import * as OpcuaSession from "../src/OpcuaSession.js";
-import { isOpcuaError } from "../src/OpcuaError.js";
-import type { OpcuaBrowseReference } from "../src/internal/browse.js";
+import { OpcuaError, OpcuaSession } from "@effect-opcua/client";
 import {
   BrowseDirection,
   makeNodeClassMask,
   makeResultMask,
-} from "../src/node-opcua.js";
+} from "@effect-opcua/client/node-opcua";
 import { makeLiveTestContext } from "./live.js";
 import { demoNodeId } from "./support/demo-model.js";
 
 const { runLive } = makeLiveTestContext("browse", 1);
 
 const isConfigurationReason = (error: unknown) =>
-  isOpcuaError(error) && error.reason._tag === "Configuration";
+  OpcuaError.isOpcuaError(error) && error.reason._tag === "Configuration";
 
 describe("browse", () => {
   it("moves node-opcua helpers to the node-opcua subpath", () => {
@@ -34,7 +32,7 @@ describe("browse", () => {
     expect(result._tag).toBe("Browsed");
     const references = result._tag === "Browsed" ? result.references : [];
     const machine = references.find(
-      (reference: OpcuaBrowseReference) =>
+      (reference: OpcuaSession.OpcuaBrowseReference) =>
         reference.browseName?.name === "DemoFillingCell",
     );
     expect(machine).toMatchObject({

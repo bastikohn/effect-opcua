@@ -1,10 +1,12 @@
+import type { OpcuaSession } from "@effect-opcua/client";
 import type {
   OPCUAClientOptions,
   UserIdentityInfo,
 } from "@effect-opcua/client/node-opcua";
-import type { OpcuaDataTypeDefinitionResult } from "@effect-opcua/client";
 
 import type { CodegenIssue, PathPatternSegment } from "../types.js";
+
+type OpcuaDataTypeDefinitionResult = OpcuaSession.OpcuaDataTypeDefinitionResult;
 
 export type NormalizedCodegenConfig = {
   readonly endpointUrl: string;

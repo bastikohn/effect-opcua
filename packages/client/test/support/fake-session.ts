@@ -15,8 +15,8 @@ import type {
 } from "node-opcua";
 import { ExtensionObject } from "node-opcua";
 
-import { makeSession } from "../../src/OpcuaSession.js";
-import type { OpcuaSessionBatchingOptions } from "../../src/OpcuaSession.js";
+import { makeSession } from "../../src/internal/opcua-session.js";
+import type { OpcuaSession } from "@effect-opcua/client";
 import type { OpcuaSessionEvent } from "../../src/internal/events.js";
 import {
   AttributeIds,
@@ -25,7 +25,7 @@ import {
   StatusCodes,
   Variant,
   coerceNodeId,
-} from "../../src/node-opcua.js";
+} from "@effect-opcua/client/node-opcua";
 
 export type FakeVariableMetadata = {
   readonly dataType?: string | NodeId;
@@ -51,7 +51,7 @@ export type FakeMethodDefinition = {
 };
 
 export type FakeSessionOptions = {
-  readonly batching?: OpcuaSessionBatchingOptions;
+  readonly batching?: OpcuaSession.OpcuaSessionBatchingOptions;
   readonly namespaceArray?: ReadonlyArray<string>;
   readonly nodeMetadata?: Readonly<Record<string, FakeNodeMetadata>>;
   readonly missingNodeIds?: ReadonlyArray<string>;

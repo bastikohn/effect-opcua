@@ -1,10 +1,7 @@
 import {
   Opcua,
+  OpcuaSession,
   type MonitorStartupFailure,
-  type OpcuaBrowseReference,
-  type OpcuaMetadataReadFailure,
-  type OpcuaNodeMetadata,
-  type OpcuaNodeMetadataResult,
 } from "@effect-opcua/client";
 import { Duration, Effect, Result, Stream } from "effect";
 
@@ -26,6 +23,11 @@ import { WebRpcError } from "../shared/rpc.js";
 import { toJsonValue } from "../shared/value.js";
 import { rpcError, type BrowserOpcuaSession } from "./session-registry.js";
 import type { BrowserBrowseContinuation } from "./session-registry.js";
+
+type OpcuaBrowseReference = OpcuaSession.OpcuaBrowseReference;
+type OpcuaMetadataReadFailure = OpcuaSession.OpcuaMetadataReadFailure;
+type OpcuaNodeMetadata = OpcuaSession.OpcuaNodeMetadata;
+type OpcuaNodeMetadataResult = OpcuaSession.OpcuaNodeMetadataResult;
 
 export type BrowsePage = {
   readonly response: BrowseResponse;

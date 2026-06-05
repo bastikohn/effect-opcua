@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
 
-import * as Opcua from "../src/Opcua.js";
-import { isOpcuaError } from "../src/OpcuaError.js";
+import { Opcua, OpcuaError } from "@effect-opcua/client";
 import { makeFakeSession, numberDataValue } from "./support/fake-session.js";
 
 describe("keyed batch APIs", () => {
@@ -341,10 +340,10 @@ describe("keyed batch APIs", () => {
       ),
     );
 
-    expect(isOpcuaError(result.error)).toBe(true);
-    expect(isOpcuaError(result.error) && result.error.reason._tag).toBe(
-      "Encode",
-    );
+    expect(OpcuaError.isOpcuaError(result.error)).toBe(true);
+    expect(
+      OpcuaError.isOpcuaError(result.error) && result.error.reason._tag,
+    ).toBe("Encode");
     expect(result.calls.writes).toHaveLength(0);
   });
 
@@ -389,7 +388,7 @@ const isConfigurationError = (
   error: unknown,
 ): error is {
   readonly reason: { readonly _tag: "Configuration"; readonly cause?: unknown };
-} => isOpcuaError(error) && error.reason._tag === "Configuration";
+} => OpcuaError.isOpcuaError(error) && error.reason._tag === "Configuration";
 
 const configurationCauses = (errors: ReadonlyArray<unknown>) =>
   errors.map((error) =>

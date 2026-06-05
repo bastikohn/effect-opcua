@@ -1,7 +1,4 @@
-import type {
-  OpcuaDataTypeDefinition,
-  OpcuaStructureDefinition,
-} from "@effect-opcua/client";
+import type { OpcuaSession } from "@effect-opcua/client";
 
 import { issue } from "../diagnostics.js";
 import type { CodegenIssue } from "../types.js";
@@ -19,6 +16,9 @@ import {
 } from "./builtin-types.js";
 import { nodeOpcuaFieldName, sanitizeCamel, sanitizePascal } from "./names.js";
 import { typeFallbackSeverity } from "./policy.js";
+
+type OpcuaDataTypeDefinition = OpcuaSession.OpcuaDataTypeDefinition;
+type OpcuaStructureDefinition = OpcuaSession.OpcuaStructureDefinition;
 
 export type StructureGraph = {
   readonly structures: ReadonlyMap<string, StructureDefinition>;

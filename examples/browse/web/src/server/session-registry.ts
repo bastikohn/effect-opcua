@@ -2,7 +2,6 @@ import {
   OpcuaClient,
   OpcuaError,
   OpcuaSession,
-  type OpcuaSessionService,
   type OpcuaSubscription,
   type ReadableVariableDef,
 } from "@effect-opcua/client";
@@ -14,6 +13,8 @@ import { Context, Effect, Exit, Layer, Scope, Semaphore } from "effect";
 
 import type { ConnectRequest } from "../shared/rpc.js";
 import { WebRpcError, type WebRpcErrorCategory } from "../shared/rpc.js";
+
+type OpcuaSessionService = OpcuaSession.OpcuaSessionService;
 
 export type BrowserOpcuaSession = Pick<
   OpcuaSessionService,

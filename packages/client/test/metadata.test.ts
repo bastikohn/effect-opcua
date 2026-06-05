@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 
-import * as OpcuaSession from "../src/OpcuaSession.js";
-import { NodeClass } from "../src/node-opcua.js";
+import { OpcuaSession } from "@effect-opcua/client";
+import { NodeClass } from "@effect-opcua/client/node-opcua";
 import { makeLiveTestContext } from "./live.js";
 import { demoNodeId } from "./support/demo-model.js";
 import { makeFakeSession } from "./support/fake-session.js";

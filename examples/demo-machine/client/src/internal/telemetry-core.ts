@@ -1,9 +1,4 @@
-import {
-  Opcua,
-  OpcuaSession,
-  type OpcuaSessionService,
-  type ReadManyResult,
-} from "@effect-opcua/client";
+import { Opcua, OpcuaSession } from "@effect-opcua/client";
 import {
   Context,
   Duration,
@@ -23,6 +18,9 @@ import {
   snapshotVariables,
   type TelemetryStaging,
 } from "./telemetry-snapshot.js";
+
+type OpcuaSessionService = OpcuaSession.OpcuaSessionService;
+type ReadManyResult<Items> = OpcuaSession.ReadManyResult<Items>;
 
 export type DemoMachineTelemetryCoreService = {
   readonly readSnapshot: Effect.Effect<DemoMachineSnapshot>;

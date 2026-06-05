@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Duration, Effect } from "effect";
 
-import { isOpcuaError } from "../src/OpcuaError.js";
+import { OpcuaError } from "@effect-opcua/client";
 import { validateSubscriptionOptions } from "../src/internal/subscription-options.js";
 import { makeFakeSession } from "./support/fake-session.js";
 
@@ -18,8 +18,8 @@ const invalidSubscriptionOptions = (options: unknown) =>
   );
 
 const configurationCause = (error: unknown) => {
-  expect(isOpcuaError(error)).toBe(true);
-  if (!isOpcuaError(error)) return undefined;
+  expect(OpcuaError.isOpcuaError(error)).toBe(true);
+  if (!OpcuaError.isOpcuaError(error)) return undefined;
   expect(error.reason._tag).toBe("Configuration");
   if (error.reason._tag !== "Configuration") return undefined;
   expect(error.reason.operation).toBe("subscription.options");

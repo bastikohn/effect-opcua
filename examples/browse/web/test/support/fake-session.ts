@@ -1,7 +1,4 @@
-import type {
-  OpcuaNodeMetadata,
-  OpcuaSubscription,
-} from "@effect-opcua/client";
+import type { OpcuaSession, OpcuaSubscription } from "@effect-opcua/client";
 import { Effect, Stream } from "effect";
 
 import type {
@@ -10,6 +7,8 @@ import type {
   WriteStatus,
 } from "../../src/shared/rpc.js";
 import type { BrowserOpcuaSession } from "../../src/server/session-registry.js";
+
+type OpcuaNodeMetadata = OpcuaSession.OpcuaNodeMetadata;
 
 export const goodStatus = {
   text: "Good",

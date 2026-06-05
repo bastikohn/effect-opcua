@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 
-import * as Opcua from "../../src/Opcua.js";
+import { Opcua } from "@effect-opcua/client";
 
 export const demoNodeId = <const Path extends string>(path: Path) =>
   `ns=1;s=DemoFillingCell.${path}` as const;

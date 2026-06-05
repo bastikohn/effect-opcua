@@ -1,7 +1,4 @@
-import type {
-  OpcuaDataTypeDefinition,
-  OpcuaDataTypeDefinitionResult,
-} from "@effect-opcua/client";
+import type { OpcuaSession } from "@effect-opcua/client";
 
 import { issue } from "../diagnostics.js";
 import type { CodegenIssue } from "../types.js";
@@ -15,6 +12,9 @@ import { compileEnums } from "./enums.js";
 import type { SurfaceNode } from "./names.js";
 import { typeFallbackSeverity } from "./policy.js";
 import { compileStructures } from "./structures.js";
+
+type OpcuaDataTypeDefinition = OpcuaSession.OpcuaDataTypeDefinition;
+type OpcuaDataTypeDefinitionResult = OpcuaSession.OpcuaDataTypeDefinitionResult;
 
 export type TypeGraph = {
   readonly enums: ReadonlyMap<string, EnumDefinition>;

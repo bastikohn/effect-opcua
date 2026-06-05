@@ -1,11 +1,5 @@
 import { Context, Effect } from "effect";
-import {
-  OpcuaSession,
-  type OpcuaBrowseReference,
-  type OpcuaDataTypeDefinitionResult,
-  type OpcuaNodeMetadata,
-  type OpcuaSessionService,
-} from "@effect-opcua/client";
+import { OpcuaSession } from "@effect-opcua/client";
 import type * as Client from "@effect-opcua/client";
 
 import { errorIssue, issue, sortIssues } from "./diagnostics.js";
@@ -31,6 +25,10 @@ type TraversalItem = {
 };
 
 type OpcuaError = Client.OpcuaError.OpcuaError;
+type OpcuaBrowseReference = OpcuaSession.OpcuaBrowseReference;
+type OpcuaDataTypeDefinitionResult = OpcuaSession.OpcuaDataTypeDefinitionResult;
+type OpcuaNodeMetadata = OpcuaSession.OpcuaNodeMetadata;
+type OpcuaSessionService = OpcuaSession.OpcuaSessionService;
 
 type NodeDraft = Omit<DiscoveredNode, "path" | "allPaths"> & {
   path: readonly string[];

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 
-import { coerceNodeId } from "../src/node-opcua.js";
+import { coerceNodeId } from "@effect-opcua/client/node-opcua";
 import { makeFakeSession } from "./support/fake-session.js";
 
 describe("data type definitions", () => {

@@ -1,9 +1,4 @@
-import {
-  Opcua,
-  OpcuaError,
-  OpcuaSession,
-  type OpcuaSessionService,
-} from "@effect-opcua/client";
+import { Opcua, OpcuaError, OpcuaSession } from "@effect-opcua/client";
 import {
   Context,
   Duration,
@@ -43,6 +38,8 @@ import { mapCommandStatusBuffer } from "./command-status-mapper.js";
 import { getCommandSpec } from "./command-specs.js";
 import { makeCommandId } from "./ids.js";
 import { resolveCommandTimeout, resolveObservedTimeout } from "./timeouts.js";
+
+type OpcuaSessionService = OpcuaSession.OpcuaSessionService;
 
 export type DemoMachineCommandCoreService = {
   readonly readStatus: Effect.Effect<CommandStatusBuffer>;

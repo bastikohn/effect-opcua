@@ -1,4 +1,4 @@
-import type { OpcuaDataTypeDefinition } from "@effect-opcua/client";
+import type { OpcuaSession } from "@effect-opcua/client";
 
 import { issue } from "../diagnostics.js";
 import type { CodegenIssue } from "../types.js";
@@ -7,6 +7,8 @@ import type {
   EnumMemberDefinition,
 } from "../internal/types.js";
 import { sanitizePascal } from "./names.js";
+
+type OpcuaDataTypeDefinition = OpcuaSession.OpcuaDataTypeDefinition;
 
 export type EnumGraph = {
   readonly enums: ReadonlyMap<string, EnumDefinition>;

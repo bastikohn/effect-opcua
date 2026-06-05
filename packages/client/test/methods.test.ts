@@ -2,14 +2,13 @@ import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
 import type { CallMethodRequestLike } from "node-opcua";
 
-import * as Opcua from "../src/Opcua.js";
-import type * as OpcuaSession from "../src/OpcuaSession.js";
+import { Opcua, type OpcuaSession } from "@effect-opcua/client";
 import {
   DataType,
   StatusCodes,
   Variant,
   VariantArrayType,
-} from "../src/node-opcua.js";
+} from "@effect-opcua/client/node-opcua";
 import {
   booleanArgument,
   makeFakeSession,

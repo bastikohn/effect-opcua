@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
 
-import * as Opcua from "../src/Opcua.js";
-import { DataType, coerceNodeId } from "../src/node-opcua.js";
+import { Opcua } from "@effect-opcua/client";
+import { DataType, coerceNodeId } from "@effect-opcua/client/node-opcua";
 import { validateStructureMetadata } from "../src/internal/structure-runtime.js";
 
 const ScanSettings = Opcua.structure({

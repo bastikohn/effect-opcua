@@ -3,12 +3,12 @@ import { join } from "node:path";
 import { afterAll, beforeAll, vi } from "vitest";
 import { Effect, Layer, Scope } from "effect";
 
+import { OpcuaClient, OpcuaSession } from "@effect-opcua/client";
+
 import {
   startDemoOpcuaServer,
   type DemoOpcuaServer,
 } from "../../../examples/demo-machine/server/src/index.js";
-import * as OpcuaClient from "../src/OpcuaClient.js";
-import * as OpcuaSession from "../src/OpcuaSession.js";
 
 vi.setConfig({ testTimeout: 30_000 });
 

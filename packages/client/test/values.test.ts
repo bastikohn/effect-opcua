@@ -2,14 +2,13 @@ import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
 
 import { GlobalCommandKind } from "../../../examples/demo-machine/server/src/index.js";
-import * as Opcua from "../src/Opcua.js";
-import * as OpcuaSession from "../src/OpcuaSession.js";
+import { Opcua, OpcuaSession } from "@effect-opcua/client";
 import {
   type DataValue,
   DataType,
   StatusCodes,
   VariantArrayType,
-} from "../src/node-opcua.js";
+} from "@effect-opcua/client/node-opcua";
 import { makeLiveTestContext } from "./live.js";
 import {
   GlobalCommandSubmitRequest,

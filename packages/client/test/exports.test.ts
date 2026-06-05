@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import * as Opcua from "../src/Opcua.js";
-import * as Root from "../src/index.js";
-import { StatusCodes, UserTokenType } from "../src/node-opcua.js";
+import { Opcua } from "@effect-opcua/client";
+import * as Root from "@effect-opcua/client";
+import { StatusCodes, UserTokenType } from "@effect-opcua/client/node-opcua";
 
 describe("exports", () => {
   it("keeps the root API small and intentional", () => {

@@ -19,14 +19,10 @@ import {
 
 import {
   OpcuaClient,
-  layer as opcuaClientLayer,
-  type OpcuaClientService,
-} from "../src/OpcuaClient.js";
-import { isOpcuaError } from "../src/OpcuaError.js";
-import {
+  OpcuaError,
   OpcuaSession,
-  layer as opcuaSessionLayer,
-} from "../src/OpcuaSession.js";
+  type OpcuaClientService,
+} from "@effect-opcua/client";
 import { makeFakeSession } from "./support/fake-session.js";
 
 const deferred = <A = void>() => {
@@ -72,13 +68,13 @@ describe("lifecycle", () => {
     const scope = await Effect.runPromise(Scope.make());
     const context = await Effect.runPromise(
       Layer.build(
-        opcuaClientLayer({
+        OpcuaClient.layer({
           endpointUrl: "opc.tcp://localhost:4840",
           clientOptions: { endpointMustExist: false },
         }),
       ).pipe(Scope.provide(scope)),
     );
-    const client = Context.get(context, OpcuaClient);
+    const client = Context.get(context, OpcuaClient.OpcuaClient);
     const events = await Effect.runPromise(
       client.events.pipe(
         Stream.take(1),
@@ -105,7 +101,7 @@ describe("lifecycle", () => {
 
     const error = await Effect.runPromise(
       Layer.build(
-        opcuaClientLayer({
+        OpcuaClient.layer({
           endpointUrl: "opc.tcp://localhost:4840",
           clientOptions: { endpointMustExist: false },
         }),
@@ -113,8 +109,8 @@ describe("lifecycle", () => {
     );
     await Effect.runPromise(Scope.close(scope, Exit.void));
 
-    expect(isOpcuaError(error)).toBe(true);
-    expect(isOpcuaError(error) && error.reason).toEqual({
+    expect(OpcuaError.isOpcuaError(error)).toBe(true);
+    expect(OpcuaError.isOpcuaError(error) && error.reason).toEqual({
       _tag: "Connect",
       endpointUrl: "opc.tcp://localhost:4840",
       cause,
@@ -139,7 +135,7 @@ describe("lifecycle", () => {
     const scope = await Effect.runPromise(Scope.make());
     const fiber = Effect.runFork(
       Layer.build(
-        opcuaClientLayer({
+        OpcuaClient.layer({
           endpointUrl: "opc.tcp://localhost:4840",
           clientOptions: { endpointMustExist: false },
         }),
@@ -169,14 +165,14 @@ describe("lifecycle", () => {
       unsafeRaw: rawClient as never,
     };
     const scope = await Effect.runPromise(Scope.make());
-    const sessionLayer = opcuaSessionLayer().pipe(
-      Layer.provide(Layer.succeed(OpcuaClient, client)),
+    const sessionLayer = OpcuaSession.layer().pipe(
+      Layer.provide(Layer.succeed(OpcuaClient.OpcuaClient, client)),
     );
 
     const context = await Effect.runPromise(
       Layer.build(sessionLayer).pipe(Scope.provide(scope)),
     );
-    const session = Context.get(context, OpcuaSession);
+    const session = Context.get(context, OpcuaSession.OpcuaSession);
     const events = Effect.runFork(Stream.runDrain(session.events));
 
     await Effect.runPromise(Scope.close(scope, Exit.void));
@@ -208,8 +204,8 @@ describe("lifecycle", () => {
       unsafeRaw: rawClient as never,
     };
     const scope = await Effect.runPromise(Scope.make());
-    const sessionLayer = opcuaSessionLayer().pipe(
-      Layer.provide(Layer.succeed(OpcuaClient, client)),
+    const sessionLayer = OpcuaSession.layer().pipe(
+      Layer.provide(Layer.succeed(OpcuaClient.OpcuaClient, client)),
     );
 
     const fiber = Effect.runFork(

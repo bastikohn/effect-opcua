@@ -11,12 +11,13 @@ import {
   Stream,
 } from "effect";
 
-import * as Opcua from "../src/Opcua.js";
-import * as OpcuaSession from "../src/OpcuaSession.js";
 import {
-  makeSubscription,
+  Opcua,
+  OpcuaSession,
   type MonitorOptions,
-} from "../src/OpcuaSubscription.js";
+  type ReadableVariableDef,
+} from "@effect-opcua/client";
+import { makeSubscription } from "../src/OpcuaSubscription.js";
 import type { OpcuaSubscriptionEvent } from "../src/internal/events.js";
 import {
   AccessLevelFlag,
@@ -25,9 +26,8 @@ import {
   TimestampsToReturn,
   Variant,
   type ClientSubscription,
-} from "../src/node-opcua.js";
+} from "@effect-opcua/client/node-opcua";
 import type { OpcuaStructureRuntime } from "../src/internal/structure-runtime.js";
-import type { ReadableVariableDef } from "../src/OpcuaVariable.js";
 import { makeLiveTestContext } from "./live.js";
 import {
   GlobalCommandSubmitRequest,

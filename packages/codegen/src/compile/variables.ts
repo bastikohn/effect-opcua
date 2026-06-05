@@ -1,4 +1,4 @@
-import type { OpcuaDataTypeDefinitionResult } from "@effect-opcua/client";
+import type { OpcuaSession } from "@effect-opcua/client";
 
 import { issue } from "../diagnostics.js";
 import type { CodegenIssue } from "../types.js";
@@ -17,6 +17,8 @@ import { displayPath } from "./names.js";
 import type { SurfaceNode } from "./names.js";
 import { typeFallbackSeverity } from "./policy.js";
 import type { TypeGraph } from "./type-graph.js";
+
+type OpcuaDataTypeDefinitionResult = OpcuaSession.OpcuaDataTypeDefinitionResult;
 
 export const compileVariables = (
   config: NormalizedCodegenConfig,

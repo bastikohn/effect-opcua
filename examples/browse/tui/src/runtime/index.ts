@@ -5,7 +5,6 @@ import {
   type MonitorSample,
   type NodeIdString,
   type OpcuaDynamicValue,
-  type OpcuaBrowseReference,
   type ReadResult,
   type WriteResult,
 } from "@effect-opcua/client";
@@ -18,6 +17,8 @@ import {
   ManagedRuntime,
   Stream,
 } from "effect";
+
+type OpcuaBrowseReference = OpcuaSession.OpcuaBrowseReference;
 
 export type TreeEntryId = string;
 
