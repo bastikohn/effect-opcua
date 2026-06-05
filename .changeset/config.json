@@ -8,7 +8,6 @@
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
   "ignore": [
-    "@effect-opcua/codegen",
     "@effect-opcua/demo-client",
     "@effect-opcua/demo-server",
     "@effect-opcua/tui",

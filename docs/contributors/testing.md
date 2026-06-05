@@ -17,7 +17,7 @@ pnpm check:release
 
 `pnpm check:release` runs the alpha release gate: lint, format, build,
 workspace typecheck, Tstyche tests, workspace tests, packed client package
-smoke test, and an npm publish dry-run for `@effect-opcua/client`.
+smoke test, and an npm publish dry-run for every public package.
 
 ## Feature-to-test map
 
