@@ -1,65 +1,10 @@
-import {
-  OpcuaClient as OpcuaClientService,
-  layer as clientLayer,
-  layerConfig as clientLayerConfig,
-} from "./OpcuaClient.js";
-import type { OpcuaClientService as OpcuaClientServiceType } from "./OpcuaClient.js";
-import {
-  OpcuaSession as OpcuaSessionService,
-  browse,
-  browseChildren,
-  browseNext,
-  call,
-  callMany,
-  layer as sessionLayer,
-  makeSubscription,
-  read,
-  readDataTypeDefinition,
-  readMany,
-  readManyDataTypeDefinitions,
-  readManyNodeMetadata,
-  readNamespaceArray,
-  readNodeMetadata,
-  releaseBrowseContinuation,
-  write,
-  writeMany,
-} from "./OpcuaSession.js";
-import type { OpcuaSessionService as OpcuaSessionServiceType } from "./OpcuaSession.js";
-
 export * as Opcua from "./Opcua.js";
-
-export const OpcuaClient = Object.assign(OpcuaClientService, {
-  OpcuaClient: OpcuaClientService,
-  layer: clientLayer,
-  layerConfig: clientLayerConfig,
-});
-
-export const OpcuaSession = Object.assign(OpcuaSessionService, {
-  OpcuaSession: OpcuaSessionService,
-  layer: sessionLayer,
-  read,
-  write,
-  call,
-  readMany,
-  writeMany,
-  callMany,
-  browse,
-  makeSubscription,
-  readNamespaceArray,
-  readNodeMetadata,
-  readManyNodeMetadata,
-  readDataTypeDefinition,
-  readManyDataTypeDefinitions,
-  browseChildren,
-  browseNext,
-  releaseBrowseContinuation,
-});
-
+export * as OpcuaClient from "./OpcuaClient.js";
+export * as OpcuaSession from "./OpcuaSession.js";
 export * as OpcuaError from "./OpcuaError.js";
 
-export type OpcuaClient = OpcuaClientServiceType;
-
-export type OpcuaSession = OpcuaSessionServiceType;
+export type { OpcuaClientService } from "./OpcuaClient.js";
+export type { OpcuaSessionService } from "./OpcuaSession.js";
 
 export {
   BufferPolicy,
