@@ -1,0 +1,13 @@
+{
+  "mode": "pre",
+  "tag": "alpha",
+  "initialVersions": {
+    "@effect-opcua/client": "0.1.0-alpha.0",
+    "@effect-opcua/tui": "0.0.0",
+    "@effect-opcua/web": "0.0.0",
+    "@effect-opcua/demo-client": "0.0.0",
+    "@effect-opcua/demo-server": "0.0.0",
+    "@effect-opcua/codegen": "0.0.0"
+  },
+  "changesets": []
+}
