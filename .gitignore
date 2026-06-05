@@ -6,5 +6,3 @@ coverage
 .DS_Store
 *.log
 .plans/*
-!.plans/
-!.plans/release-alignment-1-notes.md
