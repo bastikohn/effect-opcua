@@ -1,30 +1,12 @@
-import { fileURLToPath } from "node:url";
-import { defineConfig } from "vitest/config";
+import { createVitestConfig, resolveTestPath } from "../../../vitest.shared.js";
 
-export default defineConfig({
-  resolve: {
-    alias: {
-      "@effect-opcua/client/node-opcua": fileURLToPath(
-        new URL("../../../packages/client/src/node-opcua.ts", import.meta.url),
-      ),
-      "@effect-opcua/client": fileURLToPath(
-        new URL("../../../packages/client/src/index.ts", import.meta.url),
-      ),
-      "@effect-opcua/web/shared": fileURLToPath(
-        new URL("./src/shared/index.ts", import.meta.url),
-      ),
-      "@effect-opcua/web/server": fileURLToPath(
-        new URL("./src/server/index.ts", import.meta.url),
-      ),
-    },
-  },
-  test: {
-    environment: "node",
-    globals: false,
-    include: ["test/**/*.{test,spec}.ts", "src/**/*.{test,spec}.ts"],
-    coverage: {
-      provider: "v8",
-      reportsDirectory: "coverage",
-    },
-  },
+export default createVitestConfig({
+  "@effect-opcua/web/shared": resolveTestPath(
+    import.meta.url,
+    "./src/shared/index.ts",
+  ),
+  "@effect-opcua/web/server": resolveTestPath(
+    import.meta.url,
+    "./src/server/index.ts",
+  ),
 });
