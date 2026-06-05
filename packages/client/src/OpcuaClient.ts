@@ -9,15 +9,14 @@ import {
   wireClientEvents,
 } from "./internal/events.js";
 
-export type OpcuaClientService = {
+export type Service = {
   readonly events: Stream.Stream<OpcuaClientEvent>;
   readonly unsafeRaw: OPCUAClient;
 };
 
-export class OpcuaClient extends Context.Service<
-  OpcuaClient,
-  OpcuaClientService
->()("@effect-opcua/client/OpcuaClient") {}
+export class OpcuaClient extends Context.Service<OpcuaClient, Service>()(
+  "@effect-opcua/client/OpcuaClient",
+) {}
 
 const connect = async (
   client: OPCUAClient,

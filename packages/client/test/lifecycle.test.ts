@@ -17,12 +17,7 @@ import {
   Stream,
 } from "effect";
 
-import {
-  OpcuaClient,
-  OpcuaError,
-  OpcuaSession,
-  type OpcuaClientService,
-} from "@effect-opcua/client";
+import { OpcuaClient, OpcuaError, OpcuaSession } from "@effect-opcua/client";
 import { makeFakeSession } from "./support/fake-session.js";
 
 const deferred = <A = void>() => {
@@ -160,7 +155,7 @@ describe("lifecycle", () => {
     const rawClient = {
       createSession: async () => rawSession,
     };
-    const client: OpcuaClientService = {
+    const client: OpcuaClient.Service = {
       events: Stream.empty,
       unsafeRaw: rawClient as never,
     };
@@ -199,7 +194,7 @@ describe("lifecycle", () => {
         return rawSession;
       },
     };
-    const client: OpcuaClientService = {
+    const client: OpcuaClient.Service = {
       events: Stream.empty,
       unsafeRaw: rawClient as never,
     };

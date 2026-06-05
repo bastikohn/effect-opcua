@@ -8,6 +8,13 @@ import {
   type Stream,
 } from "effect";
 
+import {
+  OpcuaVariable,
+  OpcuaMethod,
+  OpcuaSubscription,
+  OpcuaError,
+} from "@effect-opcua/client";
+
 import type {
   OpcuaBrowseChildrenOptions,
   OpcuaBrowseChildrenResult,
@@ -15,7 +22,6 @@ import type {
   OpcuaBrowseOptions,
   OpcuaBrowseResult,
 } from "./internal/browse.js";
-import type { OpcuaError } from "./OpcuaError.js";
 import type { OpcuaSessionEvent } from "./internal/events.js";
 import type {
   OpcuaAccessBits,
@@ -23,25 +29,7 @@ import type {
   OpcuaNodeMetadata,
   OpcuaNodeMetadataResult,
 } from "./internal/metadata.js";
-import type { OpcuaSubscription } from "./OpcuaSubscription.js";
 import type { NodeIdString } from "./internal/capabilities.js";
-import type {
-  AnyMethodDef,
-  InputOfMethodDef,
-  MethodCallOptions,
-  MethodCallResult,
-  OutputOfMethodDef,
-} from "./OpcuaMethod.js";
-import type {
-  NodeIdOfVariableDef,
-  ReadableVariableDef,
-  ReadResult,
-  VariableAccess,
-  VariableDef,
-  ValueOfVariableDef,
-  WritableVariableDef,
-  WriteResult,
-} from "./OpcuaVariable.js";
 import type {
   OpcuaDataTypeDefinition,
   OpcuaDataTypeDefinitionResult,
@@ -94,7 +82,7 @@ export type OpcuaSessionBatchingOptions = {
   readonly call?: CallManyServiceOptions;
 };
 
-export type OpcuaSessionOptions = {
+export type Options = {
   readonly userIdentity?: UserIdentityInfo;
   readonly batching?: OpcuaSessionBatchingOptions;
 };
@@ -122,176 +110,205 @@ export type CallManyOptions = {
 };
 
 export type ReadManyResult<Items> = {
-  readonly [Key in keyof Items]: Items[Key] extends VariableDef<
+  readonly [Key in keyof Items]: Items[Key] extends OpcuaVariable.VariableDef<
     infer Id,
     infer A,
     "read" | "readWrite"
   >
-    ? ReadResult<A, Id>
+    ? OpcuaVariable.ReadResult<A, Id>
     : never;
 };
 
 export type WriteManyItem<
-  Def extends WritableVariableDef = WritableVariableDef,
-> = readonly [def: Def, value: ValueOfVariableDef<Def>];
+  Def extends OpcuaVariable.WritableVariableDef =
+    OpcuaVariable.WritableVariableDef,
+> = readonly [def: Def, value: OpcuaVariable.ValueOfVariableDef<Def>];
 
 type AnyWriteManyRecord = Record<
   string,
-  readonly [WritableVariableDef, unknown]
+  readonly [OpcuaVariable.WritableVariableDef, unknown]
 >;
 
 export type WriteManyInput<Items extends AnyWriteManyRecord> = {
   readonly [Key in keyof Items]: Items[Key] extends readonly [
-    infer Def extends WritableVariableDef,
+    infer Def extends OpcuaVariable.WritableVariableDef,
     unknown,
   ]
-    ? readonly [def: Def, value: ValueOfVariableDef<Def>]
+    ? readonly [def: Def, value: OpcuaVariable.ValueOfVariableDef<Def>]
     : never;
 };
 
 export type WriteManyResult<Items> = {
   readonly [Key in keyof Items]: Items[Key] extends readonly [
-    infer Def extends WritableVariableDef,
+    infer Def extends OpcuaVariable.WritableVariableDef,
     unknown,
   ]
-    ? Def extends VariableDef<infer Id, unknown, VariableAccess>
-      ? WriteResult<Id>
+    ? Def extends OpcuaVariable.VariableDef<
+        infer Id,
+        unknown,
+        OpcuaVariable.VariableAccess
+      >
+      ? OpcuaVariable.WriteResult<Id>
       : never
     : never;
 };
 
-export type CallManyItem<Def extends AnyMethodDef = AnyMethodDef> =
-  | readonly [def: Def, input: InputOfMethodDef<Def>]
+export type CallManyItem<
+  Def extends OpcuaMethod.AnyMethodDef = OpcuaMethod.AnyMethodDef,
+> =
+  | readonly [def: Def, input: OpcuaMethod.InputOfMethodDef<Def>]
   | readonly [
       def: Def,
-      input: InputOfMethodDef<Def>,
-      options: MethodCallOptions,
+      input: OpcuaMethod.InputOfMethodDef<Def>,
+      options: OpcuaMethod.MethodCallOptions,
     ];
 
 type AnyCallManyRecord = Record<
   string,
-  | readonly [AnyMethodDef, unknown]
-  | readonly [AnyMethodDef, unknown, MethodCallOptions]
+  | readonly [OpcuaMethod.AnyMethodDef, unknown]
+  | readonly [OpcuaMethod.AnyMethodDef, unknown, OpcuaMethod.MethodCallOptions]
 >;
 
 export type CallManyInput<Items extends AnyCallManyRecord> = {
   readonly [Key in keyof Items]: Items[Key] extends readonly [
-    infer Def extends AnyMethodDef,
+    infer Def extends OpcuaMethod.AnyMethodDef,
     unknown,
-    MethodCallOptions,
+    OpcuaMethod.MethodCallOptions,
   ]
     ? readonly [
         def: Def,
-        input: InputOfMethodDef<Def>,
-        options: MethodCallOptions,
+        input: OpcuaMethod.InputOfMethodDef<Def>,
+        options: OpcuaMethod.MethodCallOptions,
       ]
-    : Items[Key] extends readonly [infer Def extends AnyMethodDef, unknown]
-      ? readonly [def: Def, input: InputOfMethodDef<Def>]
+    : Items[Key] extends readonly [
+          infer Def extends OpcuaMethod.AnyMethodDef,
+          unknown,
+        ]
+      ? readonly [def: Def, input: OpcuaMethod.InputOfMethodDef<Def>]
       : never;
 };
 
 export type CallManyResult<Items> = {
   readonly [Key in keyof Items]: Items[Key] extends readonly [
-    infer Def extends AnyMethodDef,
+    infer Def extends OpcuaMethod.AnyMethodDef,
     unknown,
     ...ReadonlyArray<unknown>,
   ]
-    ? MethodCallResult<OutputOfMethodDef<Def>, Def["objectId"], Def["methodId"]>
+    ? OpcuaMethod.MethodCallResult<
+        OpcuaMethod.OutputOfMethodDef<Def>,
+        Def["objectId"],
+        Def["methodId"]
+      >
     : never;
 };
 
-export type OpcuaSessionService = {
-  readonly read: <const Def extends ReadableVariableDef>(
+export type Service = {
+  readonly read: <const Def extends OpcuaVariable.ReadableVariableDef>(
     def: Def,
   ) => Effect.Effect<
-    ReadResult<ValueOfVariableDef<Def>, NodeIdOfVariableDef<Def>>,
-    OpcuaError
+    OpcuaVariable.ReadResult<
+      OpcuaVariable.ValueOfVariableDef<Def>,
+      OpcuaVariable.NodeIdOfVariableDef<Def>
+    >,
+    OpcuaError.OpcuaError
   >;
-  readonly write: <const Def extends WritableVariableDef>(
+  readonly write: <const Def extends OpcuaVariable.WritableVariableDef>(
     def: Def,
-    value: ValueOfVariableDef<Def>,
-  ) => Effect.Effect<WriteResult<NodeIdOfVariableDef<Def>>, OpcuaError>;
-  readonly call: <const Spec extends AnyMethodDef>(
-    def: Spec,
-    input: InputOfMethodDef<Spec>,
-    options?: MethodCallOptions,
+    value: OpcuaVariable.ValueOfVariableDef<Def>,
   ) => Effect.Effect<
-    MethodCallResult<
-      OutputOfMethodDef<Spec>,
+    OpcuaVariable.WriteResult<OpcuaVariable.NodeIdOfVariableDef<Def>>,
+    OpcuaError.OpcuaError
+  >;
+  readonly call: <const Spec extends OpcuaMethod.AnyMethodDef>(
+    def: Spec,
+    input: OpcuaMethod.InputOfMethodDef<Spec>,
+    options?: OpcuaMethod.MethodCallOptions,
+  ) => Effect.Effect<
+    OpcuaMethod.MethodCallResult<
+      OpcuaMethod.OutputOfMethodDef<Spec>,
       Spec["objectId"],
       Spec["methodId"]
     >,
-    OpcuaError
+    OpcuaError.OpcuaError
   >;
-  readonly readMany: <const Items extends Record<string, ReadableVariableDef>>(
+  readonly readMany: <
+    const Items extends Record<string, OpcuaVariable.ReadableVariableDef>,
+  >(
     items: Items,
     options?: ReadManyOptions,
-  ) => Effect.Effect<ReadManyResult<Items>, OpcuaError>;
+  ) => Effect.Effect<ReadManyResult<Items>, OpcuaError.OpcuaError>;
   readonly writeMany: <const Items extends AnyWriteManyRecord>(
     items: Items & WriteManyInput<Items>,
     options?: WriteManyOptions,
-  ) => Effect.Effect<WriteManyResult<Items>, OpcuaError>;
+  ) => Effect.Effect<WriteManyResult<Items>, OpcuaError.OpcuaError>;
   readonly callMany: <const Items extends AnyCallManyRecord>(
     items: Items & CallManyInput<Items>,
     options?: CallManyOptions,
-  ) => Effect.Effect<CallManyResult<Items>, OpcuaError>;
+  ) => Effect.Effect<CallManyResult<Items>, OpcuaError.OpcuaError>;
   readonly browse: (
     input: OpcuaBrowseOptions,
-  ) => Effect.Effect<OpcuaBrowseResult, OpcuaError>;
+  ) => Effect.Effect<OpcuaBrowseResult, OpcuaError.OpcuaError>;
   readonly browseNext: (
     continuation: OpcuaBrowseContinuation & { readonly includeRaw?: boolean },
-  ) => Effect.Effect<OpcuaBrowseResult, OpcuaError>;
+  ) => Effect.Effect<OpcuaBrowseResult, OpcuaError.OpcuaError>;
   readonly releaseBrowseContinuation: (
     continuation: OpcuaBrowseContinuation,
-  ) => Effect.Effect<void, OpcuaError>;
+  ) => Effect.Effect<void, OpcuaError.OpcuaError>;
   readonly browseChildren: (
     nodeId: NodeIdString,
     options?: OpcuaBrowseChildrenOptions,
-  ) => Effect.Effect<OpcuaBrowseChildrenResult, OpcuaError>;
+  ) => Effect.Effect<OpcuaBrowseChildrenResult, OpcuaError.OpcuaError>;
   readonly readNamespaceArray: () => Effect.Effect<
     readonly string[],
-    OpcuaError
+    OpcuaError.OpcuaError
   >;
   readonly readNodeMetadata: (
     nodeId: string,
-  ) => Effect.Effect<OpcuaNodeMetadata, OpcuaError>;
+  ) => Effect.Effect<OpcuaNodeMetadata, OpcuaError.OpcuaError>;
   readonly readManyNodeMetadata: (
     nodeIds: readonly string[],
-  ) => Effect.Effect<readonly OpcuaNodeMetadataResult[], OpcuaError>;
+  ) => Effect.Effect<readonly OpcuaNodeMetadataResult[], OpcuaError.OpcuaError>;
   readonly readDataTypeDefinition: (
     dataTypeNodeId: string,
-  ) => Effect.Effect<OpcuaDataTypeDefinitionResult, OpcuaError>;
+  ) => Effect.Effect<OpcuaDataTypeDefinitionResult, OpcuaError.OpcuaError>;
   readonly readManyDataTypeDefinitions: (
     dataTypeNodeIds: readonly string[],
-  ) => Effect.Effect<readonly OpcuaDataTypeDefinitionResult[], OpcuaError>;
+  ) => Effect.Effect<
+    readonly OpcuaDataTypeDefinitionResult[],
+    OpcuaError.OpcuaError
+  >;
   readonly makeSubscription: (
     options: OpcuaSubscriptionOptions,
-  ) => Effect.Effect<OpcuaSubscription, OpcuaError, Scope.Scope>;
+  ) => Effect.Effect<
+    OpcuaSubscription.OpcuaSubscription,
+    OpcuaError.OpcuaError,
+    Scope.Scope
+  >;
   readonly events: Stream.Stream<OpcuaSessionEvent>;
   readonly unsafeRaw: ClientSession;
 };
 
-export class OpcuaSession extends Context.Service<
-  OpcuaSession,
-  OpcuaSessionService
->()("@effect-opcua/client/OpcuaSession") {}
+export class OpcuaSession extends Context.Service<OpcuaSession, Service>()(
+  "@effect-opcua/client/OpcuaSession",
+) {}
 
-export const read = <const Def extends ReadableVariableDef>(def: Def) =>
-  OpcuaSession.use((session) => session.read(def));
-
-export const write = <const Def extends WritableVariableDef>(
+export const read = <const Def extends OpcuaVariable.ReadableVariableDef>(
   def: Def,
-  value: ValueOfVariableDef<Def>,
+) => OpcuaSession.use((session) => session.read(def));
+
+export const write = <const Def extends OpcuaVariable.WritableVariableDef>(
+  def: Def,
+  value: OpcuaVariable.ValueOfVariableDef<Def>,
 ) => OpcuaSession.use((session) => session.write(def, value));
 
-export const call = <const Spec extends AnyMethodDef>(
+export const call = <const Spec extends OpcuaMethod.AnyMethodDef>(
   def: Spec,
-  input: InputOfMethodDef<Spec>,
-  options?: MethodCallOptions,
+  input: OpcuaMethod.InputOfMethodDef<Spec>,
+  options?: OpcuaMethod.MethodCallOptions,
 ) => OpcuaSession.use((session) => session.call(def, input, options));
 
 export const readMany = <
-  const Items extends Record<string, ReadableVariableDef>,
+  const Items extends Record<string, OpcuaVariable.ReadableVariableDef>,
 >(
   items: Items,
   options?: ReadManyOptions,
@@ -308,14 +325,14 @@ export const callMany = <const Items extends AnyCallManyRecord>(
 ) => OpcuaSession.use((session) => session.callMany(items, options));
 
 export const makeSubscription = (
-  options: Parameters<OpcuaSessionService["makeSubscription"]>[0],
+  options: Parameters<Service["makeSubscription"]>[0],
 ) => OpcuaSession.use((session) => session.makeSubscription(options));
 
 export const browse = (input: OpcuaBrowseOptions) =>
   OpcuaSession.use((session) => session.browse(input));
 
 export const browseNext = (
-  continuation: Parameters<OpcuaSessionService["browseNext"]>[0],
+  continuation: Parameters<Service["browseNext"]>[0],
 ) => OpcuaSession.use((session) => session.browseNext(continuation));
 
 export const releaseBrowseContinuation = (
@@ -349,5 +366,5 @@ export const readManyDataTypeDefinitions = (
     session.readManyDataTypeDefinitions(dataTypeNodeIds),
   );
 
-export const layer = (options?: OpcuaSessionOptions) =>
+export const layer = (options?: Options) =>
   Layer.effect(OpcuaSession, make(options));

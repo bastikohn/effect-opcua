@@ -6,15 +6,14 @@ import {
 import { Effect, PubSub, Scope, Semaphore, Stream } from "effect";
 
 import {
-  DEFAULT_BROWSE_DIRECTION,
-  DEFAULT_BROWSE_INCLUDE_SUBTYPES,
-  DEFAULT_BROWSE_MAX_REFERENCES_PER_NODE,
-  DEFAULT_BROWSE_NODE_CLASS_MASK,
-  DEFAULT_BROWSE_REFERENCE_TYPE_ID,
-  DEFAULT_BROWSE_RESULT_MASK,
-  EVENT_BUFFER_SIZE,
-} from "./constants.js";
-import { OpcuaClient, type OpcuaClientService } from "../OpcuaClient.js";
+  OpcuaClient,
+  OpcuaSession,
+  OpcuaError,
+  OpcuaMethod,
+  OpcuaSubscription,
+  OpcuaVariable,
+} from "@effect-opcua/client";
+
 import {
   browseContinuationError,
   browseOptionsError,
@@ -22,29 +21,13 @@ import {
   normalizeBrowseResult,
 } from "./browse.js";
 import {
-  serviceError,
-  sessionCloseError,
-  sessionCreateError,
-  subscriptionCreateError,
-} from "../OpcuaError.js";
-import {
   type OpcuaSessionEvent,
   type OpcuaSubscriptionEvent,
   wireSessionEvents,
   wireSubscriptionEvents,
 } from "./events.js";
 import { makeMetadataService } from "./metadata.js";
-import { makeSubscription as makeSubscriptionImpl } from "../OpcuaSubscription.js";
 import { makeStructureRuntime } from "./structure-runtime.js";
-import { callResolvedMethod, resolveMethod } from "../OpcuaMethod.js";
-import {
-  readVariable,
-  writeVariable,
-  type NodeIdOfVariableDef,
-  type ReadResult,
-  type ValueOfVariableDef,
-  type WriteResult,
-} from "../OpcuaVariable.js";
 import {
   callManyWithState,
   readManyWithState,
@@ -56,15 +39,20 @@ import {
   readDataTypeDefinition as readDataTypeDefinitionImpl,
   readManyDataTypeDefinitions as readManyDataTypeDefinitionsImpl,
 } from "./data-type-definition.js";
+
 import {
-  OpcuaSession,
-  type OpcuaSessionOptions,
-  type OpcuaSessionService,
-} from "../OpcuaSession.js";
+  DEFAULT_BROWSE_DIRECTION,
+  DEFAULT_BROWSE_INCLUDE_SUBTYPES,
+  DEFAULT_BROWSE_MAX_REFERENCES_PER_NODE,
+  DEFAULT_BROWSE_NODE_CLASS_MASK,
+  DEFAULT_BROWSE_REFERENCE_TYPE_ID,
+  DEFAULT_BROWSE_RESULT_MASK,
+  EVENT_BUFFER_SIZE,
+} from "./constants.js";
 
 const createSession = async (
-  client: OpcuaClientService,
-  options: OpcuaSessionOptions | undefined,
+  client: OpcuaClient.Service,
+  options: OpcuaSession.Options | undefined,
   signal: AbortSignal,
 ) => {
   const session = await client.unsafeRaw.createSession(options?.userIdentity);
@@ -76,9 +64,9 @@ const createSession = async (
 };
 
 export const make = Effect.fnUntraced(function* (
-  options?: OpcuaSessionOptions,
+  options?: OpcuaSession.Options,
 ) {
-  const client = yield* OpcuaClient;
+  const client = yield* OpcuaClient.OpcuaClient;
   const events = yield* PubSub.sliding<OpcuaSessionEvent>({
     capacity: EVENT_BUFFER_SIZE,
     replay: 1,
@@ -88,12 +76,12 @@ export const make = Effect.fnUntraced(function* (
   const raw = yield* Effect.acquireRelease(
     Effect.tryPromise({
       try: (signal) => createSession(client, options, signal),
-      catch: (cause) => sessionCreateError({ cause }),
+      catch: (cause) => OpcuaError.sessionCreateError({ cause }),
     }).pipe(Effect.withSpan("opcua.session.create", { kind: "client" })),
     (session) =>
       Effect.tryPromise({
         try: () => session.close(true),
-        catch: (cause) => sessionCloseError({ cause }),
+        catch: (cause) => OpcuaError.sessionCloseError({ cause }),
       }).pipe(
         Effect.withSpan("opcua.session.close", { kind: "client" }),
         Effect.ignore,
@@ -106,9 +94,9 @@ export const make = Effect.fnUntraced(function* (
 export const makeSession: (
   unsafeRaw: ClientSession,
   events: PubSub.PubSub<OpcuaSessionEvent>,
-  options?: Pick<OpcuaSessionOptions, "batching">,
-) => Effect.Effect<OpcuaSessionService, never, Scope.Scope> = Effect.fnUntraced(
-  function* (unsafeRaw, events, options) {
+  options?: Pick<OpcuaSession.Options, "batching">,
+) => Effect.Effect<OpcuaSession.Service, never, Scope.Scope> =
+  Effect.fnUntraced(function* (unsafeRaw, events, options) {
     const browseSemaphore = Semaphore.makeUnsafe(1);
     const structureRuntime = makeStructureRuntime(unsafeRaw);
     const metadata = makeMetadataService(unsafeRaw, structureRuntime);
@@ -140,13 +128,17 @@ export const makeSession: (
         }),
     );
 
-    const read: OpcuaSessionService["read"] = (def) =>
+    const read: OpcuaSession.Service["read"] = (def) =>
       Effect.gen(function* () {
         yield* metadata.variable(def);
-        const result = yield* readVariable(unsafeRaw, def, structureRuntime);
-        return result as ReadResult<
-          ValueOfVariableDef<typeof def>,
-          NodeIdOfVariableDef<typeof def>
+        const result = yield* OpcuaVariable.readVariable(
+          unsafeRaw,
+          def,
+          structureRuntime,
+        );
+        return result as OpcuaVariable.ReadResult<
+          OpcuaVariable.ValueOfVariableDef<typeof def>,
+          OpcuaVariable.NodeIdOfVariableDef<typeof def>
         >;
       }).pipe(
         Effect.withSpan("opcua.session.read", {
@@ -155,17 +147,19 @@ export const makeSession: (
         }),
       );
 
-    const write: OpcuaSessionService["write"] = (def, value) =>
+    const write: OpcuaSession.Service["write"] = (def, value) =>
       Effect.gen(function* () {
         const variableMetadata = yield* metadata.variable(def);
-        const result = yield* writeVariable(
+        const result = yield* OpcuaVariable.writeVariable(
           unsafeRaw,
           def,
           variableMetadata,
           value,
           structureRuntime,
         );
-        return result as WriteResult<NodeIdOfVariableDef<typeof def>>;
+        return result as OpcuaVariable.WriteResult<
+          OpcuaVariable.NodeIdOfVariableDef<typeof def>
+        >;
       }).pipe(
         Effect.withSpan("opcua.session.write", {
           attributes: { "opcua.node_id": def.nodeId },
@@ -173,11 +167,11 @@ export const makeSession: (
         }),
       );
 
-    const call: OpcuaSessionService["call"] = (def, input, options) =>
+    const call: OpcuaSession.Service["call"] = (def, input, options) =>
       Effect.gen(function* () {
         const methodMetadata = yield* metadata.method(def);
-        const method = yield* resolveMethod(def, methodMetadata);
-        return yield* callResolvedMethod(
+        const method = yield* OpcuaMethod.resolveMethod(def, methodMetadata);
+        return yield* OpcuaMethod.callResolvedMethod(
           unsafeRaw,
           method,
           input,
@@ -194,7 +188,7 @@ export const makeSession: (
         }),
       );
 
-    const readMany: OpcuaSessionService["readMany"] = (items, options) =>
+    const readMany: OpcuaSession.Service["readMany"] = (items, options) =>
       readManyWithState(state, items, options).pipe(
         Effect.withSpan("opcua.session.readMany", {
           attributes: { "opcua.node_count": Object.keys(items).length },
@@ -202,7 +196,7 @@ export const makeSession: (
         }),
       );
 
-    const writeMany: OpcuaSessionService["writeMany"] = (items, options) =>
+    const writeMany: OpcuaSession.Service["writeMany"] = (items, options) =>
       writeManyWithState(state, items, options).pipe(
         Effect.withSpan("opcua.session.writeMany", {
           attributes: { "opcua.node_count": Object.keys(items).length },
@@ -210,7 +204,7 @@ export const makeSession: (
         }),
       );
 
-    const callMany: OpcuaSessionService["callMany"] = (items, options) =>
+    const callMany: OpcuaSession.Service["callMany"] = (items, options) =>
       callManyWithState(state, items, options).pipe(
         Effect.withSpan("opcua.session.callMany", {
           attributes: { "opcua.method_count": Object.keys(items).length },
@@ -218,7 +212,7 @@ export const makeSession: (
         }),
       );
 
-    const makeSubscription: OpcuaSessionService["makeSubscription"] = (
+    const makeSubscription: OpcuaSession.Service["makeSubscription"] = (
       options,
     ) =>
       Effect.gen(function* () {
@@ -242,7 +236,7 @@ export const makeSession: (
                 publishingEnabled: normalized.publishingEnabled,
                 priority: normalized.priority,
               }),
-            catch: (cause) => subscriptionCreateError({ cause }),
+            catch: (cause) => OpcuaError.subscriptionCreateError({ cause }),
           }).pipe(
             Effect.withSpan("opcua.subscription.create", {
               attributes: {
@@ -254,7 +248,7 @@ export const makeSession: (
           (subscription) =>
             Effect.tryPromise({
               try: () => subscription.terminate(),
-              catch: (cause) => subscriptionCreateError({ cause }),
+              catch: (cause) => OpcuaError.subscriptionCreateError({ cause }),
             }).pipe(
               Effect.withSpan("opcua.subscription.terminate", {
                 attributes: {
@@ -266,7 +260,7 @@ export const makeSession: (
             ),
         );
         yield* wireSubscriptionEvents(rawSubscription, subscriptionEvents);
-        return makeSubscriptionImpl(
+        return OpcuaSubscription.makeSubscription(
           rawSubscription,
           subscriptionEvents,
           structureRuntime,
@@ -274,7 +268,7 @@ export const makeSession: (
         );
       });
 
-    const browse: OpcuaSessionService["browse"] = (input) =>
+    const browse: OpcuaSession.Service["browse"] = (input) =>
       Effect.gen(function* () {
         const validationError = browseOptionsError(input);
         if (validationError) return yield* Effect.fail(validationError);
@@ -300,7 +294,7 @@ export const makeSession: (
                 DEFAULT_BROWSE_MAX_REFERENCES_PER_NODE,
             ),
           catch: (cause) =>
-            serviceError({
+            OpcuaError.serviceError({
               operation: "browse",
               nodeId: input.nodeId,
               cause,
@@ -324,7 +318,7 @@ export const makeSession: (
         }),
       );
 
-    const browseNext: OpcuaSessionService["browseNext"] = (continuation) =>
+    const browseNext: OpcuaSession.Service["browseNext"] = (continuation) =>
       Effect.gen(function* () {
         const validationError = browseContinuationError(
           "browseNext",
@@ -335,7 +329,7 @@ export const makeSession: (
         const result = yield* Effect.tryPromise({
           try: () => unsafeRaw.browseNext(continuation.unsafeRaw, false),
           catch: (cause) =>
-            serviceError({
+            OpcuaError.serviceError({
               operation: "browseNext",
               nodeId: continuation.nodeId,
               cause,
@@ -354,7 +348,7 @@ export const makeSession: (
         }),
       );
 
-    const releaseBrowseContinuation: OpcuaSessionService["releaseBrowseContinuation"] =
+    const releaseBrowseContinuation: OpcuaSession.Service["releaseBrowseContinuation"] =
       (continuation) =>
         Effect.gen(function* () {
           const validationError = browseContinuationError(
@@ -366,7 +360,7 @@ export const makeSession: (
           yield* Effect.tryPromise({
             try: () => unsafeRaw.browseNext(continuation.unsafeRaw, true),
             catch: (cause) =>
-              serviceError({
+              OpcuaError.serviceError({
                 operation: "releaseBrowseContinuation",
                 nodeId: continuation.nodeId,
                 cause,
@@ -379,7 +373,7 @@ export const makeSession: (
           }),
         );
 
-    const browseChildren: OpcuaSessionService["browseChildren"] = (
+    const browseChildren: OpcuaSession.Service["browseChildren"] = (
       nodeId,
       options,
     ) =>
@@ -436,26 +430,26 @@ export const makeSession: (
         }),
       );
 
-    const readNamespaceArray: OpcuaSessionService["readNamespaceArray"] = () =>
+    const readNamespaceArray: OpcuaSession.Service["readNamespaceArray"] = () =>
       metadata.namespaceArray();
 
-    const readNodeMetadata: OpcuaSessionService["readNodeMetadata"] = (
+    const readNodeMetadata: OpcuaSession.Service["readNodeMetadata"] = (
       nodeId,
     ) => metadata.node(nodeId);
 
-    const readManyNodeMetadata: OpcuaSessionService["readManyNodeMetadata"] = (
+    const readManyNodeMetadata: OpcuaSession.Service["readManyNodeMetadata"] = (
       nodeIds,
     ) => metadata.nodes(nodeIds);
 
-    const readDataTypeDefinition: OpcuaSessionService["readDataTypeDefinition"] =
+    const readDataTypeDefinition: OpcuaSession.Service["readDataTypeDefinition"] =
       (dataTypeNodeId) =>
         readDataTypeDefinitionImpl(unsafeRaw, metadata, dataTypeNodeId);
 
-    const readManyDataTypeDefinitions: OpcuaSessionService["readManyDataTypeDefinitions"] =
+    const readManyDataTypeDefinitions: OpcuaSession.Service["readManyDataTypeDefinitions"] =
       (dataTypeNodeIds) =>
         readManyDataTypeDefinitionsImpl(unsafeRaw, metadata, dataTypeNodeIds);
 
-    return OpcuaSession.of({
+    return OpcuaSession.OpcuaSession.of({
       read,
       write,
       call,
@@ -475,5 +469,4 @@ export const makeSession: (
       events: Stream.fromPubSub(events),
       unsafeRaw,
     });
-  },
-);
+  });

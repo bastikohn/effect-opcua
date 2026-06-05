@@ -14,10 +14,9 @@ import {
 import {
   Opcua,
   OpcuaSession,
-  type MonitorOptions,
-  type ReadableVariableDef,
+  OpcuaSubscription,
+  OpcuaVariable,
 } from "@effect-opcua/client";
-import { makeSubscription } from "../src/OpcuaSubscription.js";
 import type { OpcuaSubscriptionEvent } from "../src/internal/events.js";
 import {
   AccessLevelFlag,
@@ -54,8 +53,14 @@ const monitorOptions = (
 });
 
 const unitMonitorOptions = (
-  overrides?: Partial<MonitorOptions<Record<string, ReadableVariableDef>>>,
-): MonitorOptions<Record<string, ReadableVariableDef>> => ({
+  overrides?: Partial<
+    OpcuaSubscription.MonitorOptions<
+      Record<string, OpcuaVariable.ReadableVariableDef>
+    >
+  >,
+): OpcuaSubscription.MonitorOptions<
+  Record<string, OpcuaVariable.ReadableVariableDef>
+> => ({
   startup: overrides?.startup ?? "strict",
   validation: overrides?.validation ?? "none",
   samplingInterval: overrides?.samplingInterval ?? Duration.millis(50),
@@ -139,7 +144,7 @@ const makeFakeSubscription = (options?: {
   readonly onMonitorItems?: () => void;
   readonly failCall?: (callIndex: number) => boolean;
   readonly validateVariable?: (
-    def: ReadableVariableDef,
+    def: OpcuaVariable.ReadableVariableDef,
   ) => Effect.Effect<never>;
 }) =>
   Effect.gen(function* () {
@@ -192,7 +197,7 @@ const makeFakeSubscription = (options?: {
         }
       },
     } as unknown as ClientSubscription;
-    const subscription = makeSubscription(
+    const subscription = OpcuaSubscription.makeSubscription(
       raw,
       events,
       fakeStructureRuntime,
@@ -213,7 +218,7 @@ const makeItems = (count: number) =>
       `item${index}`,
       Opcua.variable({ nodeId: `ns=1;s=item${index}` }),
     ]),
-  ) as Record<string, ReadableVariableDef>;
+  ) as Record<string, OpcuaVariable.ReadableVariableDef>;
 
 const numberDataValue = (value: number) => ({
   statusCode: StatusCodes.Good,

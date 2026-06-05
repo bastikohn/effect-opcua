@@ -9,6 +9,8 @@ import {
 } from "node-opcua";
 import { Duration, Effect, PubSub, Queue, Result, Scope, Stream } from "effect";
 
+import { OpcuaVariable, OpcuaError } from "@effect-opcua/client";
+
 import { Codec } from "./internal/codecs.js";
 import type { NodeIdString } from "./internal/capabilities.js";
 import { chunksOf } from "./internal/collections.js";
@@ -22,30 +24,11 @@ import {
   type NormalizedCreateOptions,
 } from "./internal/monitor-options.js";
 import {
-  decodeError,
-  monitorCreateError,
-  monitorRuntimeError,
-  monitorStartupError,
-  OpcuaAccessDeniedError,
-  OpcuaConfigurationError,
-  OpcuaDecodeError,
-  OpcuaMonitorConfigurationError,
-  OpcuaMonitorCreateError,
-  OpcuaMonitorRuntimeError,
-  OpcuaMonitorStartupError,
-  OpcuaServiceError,
-} from "./OpcuaError.js";
-import {
   isGood,
   normalizeStatusCode,
   type OpcuaStatusInfo,
 } from "./internal/normalize.js";
 import type { OpcuaStructureRuntime } from "./internal/structure-runtime.js";
-import {
-  accessDeniedError,
-  type ReadableVariableDef,
-  type ValueOfVariableDef,
-} from "./OpcuaVariable.js";
 
 export type BufferPolicy =
   | { readonly _tag: "Sliding"; readonly capacity: number }
@@ -126,7 +109,7 @@ export type MonitorItemOverride = Partial<{
   readonly timestamps: MonitorTimestamps;
 }>;
 
-export type AnyVariableDefinition = ReadableVariableDef;
+export type AnyVariableDefinition = OpcuaVariable.ReadableVariableDef;
 export type MonitorItemDictionary = Record<string, AnyVariableDefinition>;
 
 export type MonitorOptions<Items = MonitorItemDictionary> = {
@@ -172,7 +155,7 @@ export type MonitorStartupFailure = {
   readonly key: string;
   readonly nodeId: string;
   readonly requested: EffectiveMonitorItemOptions;
-  readonly error: OpcuaMonitorStartupError;
+  readonly error: OpcuaError.OpcuaMonitorStartupError;
 };
 
 export type MonitorStartupReport<Items = MonitorItemDictionary> = {
@@ -187,8 +170,8 @@ export type MonitorStartupReport<Items = MonitorItemDictionary> = {
 export type MonitorValueForKey<
   Items,
   Key extends keyof Items & string,
-> = Items[Key] extends ReadableVariableDef
-  ? ValueOfVariableDef<Items[Key]>
+> = Items[Key] extends OpcuaVariable.ReadableVariableDef
+  ? OpcuaVariable.ValueOfVariableDef<Items[Key]>
   : never;
 
 type MonitorNodeIdForKey<
@@ -217,7 +200,7 @@ export type MonitorSample<Items = MonitorItemDictionary> = {
       } & MonitorSampleBase<Items, Key>)
     | ({
         readonly _tag: "DecodeError";
-        readonly error: OpcuaDecodeError;
+        readonly error: OpcuaError.OpcuaDecodeError;
         readonly rawValue: unknown;
       } & MonitorSampleBase<Items, Key>);
 }[keyof Items & string];
@@ -226,7 +209,7 @@ export type ActiveMonitor<Items = MonitorItemDictionary> = {
   readonly startup: MonitorStartupReport<Items>;
   readonly samples: Stream.Stream<
     MonitorSample<Items>,
-    OpcuaMonitorRuntimeError
+    OpcuaError.OpcuaMonitorRuntimeError
   >;
 };
 
@@ -236,18 +219,21 @@ export type OpcuaSubscription = {
     options: MonitorOptions<Items>,
   ) => Effect.Effect<
     ActiveMonitor<Items>,
-    OpcuaMonitorCreateError<Items> | OpcuaMonitorConfigurationError,
+    | OpcuaError.OpcuaMonitorCreateError<Items>
+    | OpcuaError.OpcuaMonitorConfigurationError,
     Scope.Scope
   >;
   readonly events: Stream.Stream<OpcuaSubscriptionEvent>;
   readonly unsafeRaw: ClientSubscription;
 };
 
-type ValidateVariable = <const Def extends ReadableVariableDef>(
+type ValidateVariable = <const Def extends OpcuaVariable.ReadableVariableDef>(
   def: Def,
 ) => Effect.Effect<
   unknown,
-  OpcuaAccessDeniedError | OpcuaConfigurationError | OpcuaServiceError
+  | OpcuaError.OpcuaAccessDeniedError
+  | OpcuaError.OpcuaConfigurationError
+  | OpcuaError.OpcuaServiceError
 >;
 
 type MonitorKey<Items> = keyof Items & string;
@@ -260,7 +246,7 @@ type ValidationResult<Items> = {
 type WireMonitorEntry<Items> = {
   readonly key: MonitorKey<Items>;
   readonly nodeId: NodeIdString;
-  readonly def: ReadableVariableDef;
+  readonly def: OpcuaVariable.ReadableVariableDef;
   readonly timestamps: MonitorTimestamps;
 };
 
@@ -303,7 +289,8 @@ export const makeSubscription = (
     options: MonitorOptions<Items>,
   ): Effect.fn.Return<
     ActiveMonitor<Items>,
-    OpcuaMonitorCreateError<Items> | OpcuaMonitorConfigurationError,
+    | OpcuaError.OpcuaMonitorCreateError<Items>
+    | OpcuaError.OpcuaMonitorConfigurationError,
     Scope.Scope
   > {
     const normalized = yield* normalizeMonitorItems(items);
@@ -324,7 +311,7 @@ export const makeSubscription = (
         validation.failed,
       );
       return yield* Effect.fail(
-        monitorCreateError<Items>({
+        OpcuaError.monitorCreateError<Items>({
           subscriptionId: unsafeRaw.subscriptionId,
           startup: report,
           cause: Array.from(validation.failed.values()),
@@ -334,7 +321,7 @@ export const makeSubscription = (
 
     const notificationQueue = yield* makeQueue<
       RawMonitorNotification<Items>,
-      OpcuaMonitorRuntimeError
+      OpcuaError.OpcuaMonitorRuntimeError
     >(options.clientBuffer);
     const createdGroups: Array<ClientMonitoredItemGroup> = [];
     const retainedGroups: Array<RetainedMonitorGroup<Items>> = [];
@@ -385,7 +372,7 @@ export const makeSubscription = (
         finalizingMonitorGroups,
       );
       return yield* Effect.fail(
-        monitorCreateError<Items>({
+        OpcuaError.monitorCreateError<Items>({
           subscriptionId: unsafeRaw.subscriptionId,
           startup: report,
           cause: Array.from(failed.values()),
@@ -544,7 +531,7 @@ const validateAccessChunk = <Items>(
         typeof userAccessLevelValue.value?.value === "number"
           ? (userAccessLevelValue.value.value as number)
           : undefined;
-      const error = accessDeniedError(
+      const error = OpcuaVariable.accessDeniedError(
         item.nodeId,
         "read",
         accessLevelValue.value.value as number,
@@ -697,14 +684,17 @@ const wireMonitorGroup = <Items>(
   events: PubSub.PubSub<OpcuaSubscriptionEvent>,
   group: ClientMonitoredItemGroup,
   entries: ReadonlyArray<WireMonitorEntry<Items> | undefined>,
-  queue: Queue.Queue<RawMonitorNotification<Items>, OpcuaMonitorRuntimeError>,
+  queue: Queue.Queue<
+    RawMonitorNotification<Items>,
+    OpcuaError.OpcuaMonitorRuntimeError
+  >,
   policy: BufferPolicy,
   finalizingMonitorGroups: WeakSet<ClientMonitoredItemGroup>,
 ) => {
   const nodeIds = entries.flatMap((entry) => (entry ? [entry.nodeId] : []));
   const failRuntime = (cause: unknown) => {
     if (finalizingMonitorGroups.has(group)) return;
-    const error = monitorRuntimeError({
+    const error = OpcuaError.monitorRuntimeError({
       subscriptionId: subscription.subscriptionId,
       nodeIds,
       cause,
@@ -777,7 +767,7 @@ const monitorSampleFromDataValue = <Items>(
       return {
         _tag: "DecodeError",
         ...base,
-        error: decodeError({
+        error: OpcuaError.decodeError({
           nodeId: entry.nodeId,
           cause: decoded.failure,
         }),
@@ -811,7 +801,10 @@ const monitorSampleBase = <Items>(
 const offerMonitorNotification = <Items>(
   subscription: ClientSubscription,
   events: PubSub.PubSub<OpcuaSubscriptionEvent>,
-  queue: Queue.Queue<RawMonitorNotification<Items>, OpcuaMonitorRuntimeError>,
+  queue: Queue.Queue<
+    RawMonitorNotification<Items>,
+    OpcuaError.OpcuaMonitorRuntimeError
+  >,
   policy: BufferPolicy,
   notification: RawMonitorNotification<Items>,
 ) => {
@@ -830,7 +823,10 @@ const offerMonitorNotification = <Items>(
 const cleanupMonitor = <Items>(
   createdGroups: Array<ClientMonitoredItemGroup>,
   teardowns: Array<() => void>,
-  queue: Queue.Queue<RawMonitorNotification<Items>, OpcuaMonitorRuntimeError>,
+  queue: Queue.Queue<
+    RawMonitorNotification<Items>,
+    OpcuaError.OpcuaMonitorRuntimeError
+  >,
   finalizingMonitorGroups: WeakSet<ClientMonitoredItemGroup>,
 ) =>
   Effect.gen(function* () {
@@ -870,7 +866,7 @@ const startupFailure = <Items>(
   key: item.key,
   nodeId: item.nodeId,
   requested: item.requested,
-  error: monitorStartupError({
+  error: OpcuaError.monitorStartupError({
     phase,
     key: item.key,
     nodeId: item.nodeId,
