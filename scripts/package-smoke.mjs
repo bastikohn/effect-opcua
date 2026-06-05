@@ -11,7 +11,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const workDir = mkdtempSync(join(tmpdir(), "effect-opcua-client-smoke-"));
+const packageNames = ["@effect-opcua/client", "@effect-opcua/codegen"];
+const workDir = mkdtempSync(join(tmpdir(), "effect-opcua-package-smoke-"));
 const packDir = join(workDir, "pack");
 const consumerDir = join(workDir, "consumer");
 
@@ -27,16 +28,44 @@ try {
   mkdirSync(packDir, { recursive: true });
   mkdirSync(consumerDir, { recursive: true });
 
-  run("pnpm", ["--filter", "@effect-opcua/client", "build"], root);
   run(
     "pnpm",
-    ["--filter", "@effect-opcua/client", "pack", "--pack-destination", packDir],
+    [
+      "--filter",
+      "@effect-opcua/client",
+      "--filter",
+      "@effect-opcua/codegen",
+      "build",
+    ],
     root,
   );
+  for (const packageName of packageNames) {
+    run(
+      "pnpm",
+      ["--filter", packageName, "pack", "--pack-destination", packDir],
+      root,
+    );
+  }
 
-  const tarball = readdirSync(packDir).find((file) => file.endsWith(".tgz"));
-  if (!tarball) throw new Error(`No package tarball found in ${packDir}`);
-  const tarballPath = join(packDir, tarball);
+  const tarballPaths = readdirSync(packDir)
+    .filter((file) => file.endsWith(".tgz"))
+    .map((file) => join(packDir, file));
+  if (tarballPaths.length !== packageNames.length) {
+    throw new Error(
+      `Expected ${packageNames.length} package tarballs in ${packDir}`,
+    );
+  }
+  const clientTarballPath = tarballPaths.find((file) =>
+    file.includes("effect-opcua-client-"),
+  );
+  const codegenTarballPath = tarballPaths.find((file) =>
+    file.includes("effect-opcua-codegen-"),
+  );
+  if (!clientTarballPath || !codegenTarballPath) {
+    throw new Error(`Missing expected package tarballs in ${packDir}`);
+  }
+  const clientTarballSpecifier = `file:${clientTarballPath}`;
+  const codegenTarballSpecifier = `file:${codegenTarballPath}`;
 
   writeFileSync(
     join(consumerDir, "package.json"),
@@ -44,13 +73,39 @@ try {
       {
         private: true,
         type: "module",
+        dependencies: {
+          "@effect-opcua/client": clientTarballSpecifier,
+          "@effect-opcua/codegen": codegenTarballSpecifier,
+          effect: "4.0.0-beta.66",
+          typescript: "^5.0.0",
+        },
         pnpm: {
           onlyBuiltDependencies: ["esbuild", "msgpackr-extract"],
+          overrides: {
+            "@effect-opcua/client": clientTarballSpecifier,
+            "@effect-opcua/codegen>@effect-opcua/client":
+              clientTarballSpecifier,
+          },
         },
       },
       null,
       2,
     ),
+  );
+  writeFileSync(
+    join(consumerDir, ".pnpmfile.cjs"),
+    `module.exports = {
+  hooks: {
+    readPackage(packageJson) {
+      if (packageJson.name === "@effect-opcua/codegen") {
+        packageJson.dependencies ??= {};
+        packageJson.dependencies["@effect-opcua/client"] = ${JSON.stringify(clientTarballSpecifier)};
+      }
+      return packageJson;
+    },
+  },
+};
+`,
   );
   writeFileSync(
     join(consumerDir, "tsconfig.json"),
@@ -86,6 +141,13 @@ import {
   Variant,
   VariantArrayType,
 } from "@effect-opcua/client/node-opcua";
+import {
+  check,
+  defineConfig,
+  generate,
+  type CheckResult,
+  type GenerateResult,
+} from "@effect-opcua/codegen";
 
 const Temperature = Opcua.variable({
   nodeId: "ns=2;s=Machine.Temperature",
@@ -143,6 +205,16 @@ const MainLayer = OpcuaSession.layer().pipe(
 );
 
 const maybeResult: ReadResult<number> | undefined = undefined;
+const codegenConfig = defineConfig({
+  endpointUrl: "opc.tcp://localhost:4840",
+  clientOptions: { endpointMustExist: false },
+  outputDir: "src/generated",
+  roots: [{ path: ["Machine"] }],
+});
+const checkEffect = check(codegenConfig);
+const generateEffect = generate(codegenConfig);
+declare const checkResult: CheckResult;
+declare const generateResult: GenerateResult;
 const rawVariant = new Variant({
   dataType: DataType.Double,
   arrayType: VariantArrayType.Scalar,
@@ -154,6 +226,10 @@ void program;
 void generatedStyleProgram;
 void MainLayer;
 void maybeResult;
+void checkEffect;
+void generateEffect;
+void checkResult.ok;
+void generateResult.writtenFiles;
 void rawVariant;
 void StatusCodes.Good;
 if (OpcuaError.isOpcuaError(maybeError)) {
@@ -164,8 +240,12 @@ if (OpcuaError.isOpcuaError(maybeError)) {
   writeFileSync(
     join(consumerDir, "runtime.mjs"),
     `const root = await import("@effect-opcua/client");
+const codegen = await import("@effect-opcua/codegen");
 const raw = await import("@effect-opcua/client/node-opcua");
 const packageJson = await import("@effect-opcua/client/package.json", {
+  with: { type: "json" },
+});
+const codegenPackageJson = await import("@effect-opcua/codegen/package.json", {
   with: { type: "json" },
 });
 
@@ -213,7 +293,21 @@ if (variant.dataType !== raw.DataType.Double) {
   throw new Error("node-opcua Variant constructor did not load");
 }
 if (packageJson.default?.name !== "@effect-opcua/client") {
-  throw new Error("package.json subpath did not load");
+  throw new Error("client package.json subpath did not load");
+}
+
+const codegenKeys = Object.keys(codegen).sort();
+const expectedCodegenKeys = [
+  "CodegenError",
+  "check",
+  "defineConfig",
+  "generate",
+];
+if (JSON.stringify(codegenKeys) !== JSON.stringify(expectedCodegenKeys)) {
+  throw new Error(\`unexpected codegen exports: \${codegenKeys.join(", ")}\`);
+}
+if (codegenPackageJson.default?.name !== "@effect-opcua/codegen") {
+  throw new Error("codegen package.json subpath did not load");
 }
 
 for (const specifier of [
@@ -226,6 +320,8 @@ for (const specifier of [
   "@effect-opcua/client/OpcuaSubscription",
   "@effect-opcua/client/internal/browse",
   "@effect-opcua/client/internal/metadata",
+  "@effect-opcua/codegen/config",
+  "@effect-opcua/codegen/internal/types",
 ]) {
   try {
     await import(specifier);
@@ -237,18 +333,7 @@ for (const specifier of [
 `,
   );
 
-  run(
-    "pnpm",
-    [
-      "add",
-      "--allow-build=esbuild",
-      "--allow-build=msgpackr-extract",
-      tarballPath,
-      "effect@4.0.0-beta.66",
-      "typescript@^5.0.0",
-    ],
-    consumerDir,
-  );
+  run("pnpm", ["install", "--ignore-scripts"], consumerDir);
   run("pnpm", ["exec", "tsc", "--noEmit"], consumerDir);
   run("node", ["runtime.mjs"], consumerDir);
 } finally {

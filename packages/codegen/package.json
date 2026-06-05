@@ -1,16 +1,30 @@
 {
   "name": "@effect-opcua/codegen",
   "version": "0.0.0",
-  "private": true,
   "description": "Effect OPC-UA client code generator",
+  "license": "Apache-2.0",
   "sideEffects": false,
   "type": "module",
   "files": [
+    "LICENSE",
     "README.md",
     "dist",
-    "package.json",
-    "src"
+    "package.json"
   ],
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bastikohn/effect-opcua.git",
+    "directory": "packages/codegen"
+  },
+  "bugs": {
+    "url": "https://github.com/bastikohn/effect-opcua/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.mts",
@@ -20,7 +34,7 @@
     "./internal/*": null
   },
   "bin": {
-    "effect-opcua-codegen": "./dist/cli.mjs"
+    "effect-opcua-codegen": "dist/cli.mjs"
   },
   "main": "./dist/index.mjs",
   "module": "./dist/index.mjs",
