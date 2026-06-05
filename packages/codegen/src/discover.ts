@@ -28,7 +28,7 @@ type OpcuaError = Client.OpcuaError.OpcuaError;
 type OpcuaBrowseReference = OpcuaSession.OpcuaBrowseReference;
 type OpcuaDataTypeDefinitionResult = OpcuaSession.OpcuaDataTypeDefinitionResult;
 type OpcuaNodeMetadata = OpcuaSession.OpcuaNodeMetadata;
-type OpcuaSessionService = OpcuaSession.OpcuaSessionService;
+type OpcuaSessionService = OpcuaSession.Service;
 
 type NodeDraft = Omit<DiscoveredNode, "path" | "allPaths"> & {
   path: readonly string[];

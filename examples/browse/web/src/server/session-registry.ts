@@ -3,7 +3,7 @@ import {
   OpcuaError,
   OpcuaSession,
   type OpcuaSubscription,
-  type ReadableVariableDef,
+  type OpcuaVariable,
 } from "@effect-opcua/client";
 import {
   UserTokenType,
@@ -14,7 +14,7 @@ import { Context, Effect, Exit, Layer, Scope, Semaphore } from "effect";
 import type { ConnectRequest } from "../shared/rpc.js";
 import { WebRpcError, type WebRpcErrorCategory } from "../shared/rpc.js";
 
-type OpcuaSessionService = OpcuaSession.OpcuaSessionService;
+type OpcuaSessionService = OpcuaSession.Service;
 
 export type BrowserOpcuaSession = Pick<
   OpcuaSessionService,
@@ -367,6 +367,9 @@ const userIdentity = (auth: ConnectRequest["auth"]): UserIdentityInfo =>
       }
     : { type: UserTokenType.Anonymous };
 
-export type MonitorableSession = Pick<OpcuaSubscription, "monitor">;
+export type MonitorableSession = Pick<
+  OpcuaSubscription.OpcuaSubscription,
+  "monitor"
+>;
 
-export type ReadableVariable = ReadableVariableDef;
+export type ReadableVariable = OpcuaVariable.ReadableVariableDef;

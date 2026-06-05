@@ -19,7 +19,7 @@ import {
   type TelemetryStaging,
 } from "./telemetry-snapshot.js";
 
-type OpcuaSessionService = OpcuaSession.OpcuaSessionService;
+type OpcuaSessionService = OpcuaSession.Service;
 type ReadManyResult<Items> = OpcuaSession.ReadManyResult<Items>;
 
 export type DemoMachineTelemetryCoreService = {

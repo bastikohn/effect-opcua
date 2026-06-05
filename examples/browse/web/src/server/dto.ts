@@ -1,7 +1,7 @@
 import {
   Opcua,
   OpcuaSession,
-  type MonitorStartupFailure,
+  type OpcuaSubscription,
 } from "@effect-opcua/client";
 import { Duration, Effect, Result, Stream } from "effect";
 
@@ -28,6 +28,7 @@ type OpcuaBrowseReference = OpcuaSession.OpcuaBrowseReference;
 type OpcuaMetadataReadFailure = OpcuaSession.OpcuaMetadataReadFailure;
 type OpcuaNodeMetadata = OpcuaSession.OpcuaNodeMetadata;
 type OpcuaNodeMetadataResult = OpcuaSession.OpcuaNodeMetadataResult;
+type MonitorStartupFailure = OpcuaSubscription.MonitorStartupFailure;
 
 export type BrowsePage = {
   readonly response: BrowseResponse;

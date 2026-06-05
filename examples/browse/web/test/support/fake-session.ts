@@ -240,7 +240,7 @@ export const makeFakeSession = (
           }),
         events: Stream.empty,
         unsafeRaw: undefined,
-      } as unknown as OpcuaSubscription),
+      } as unknown as OpcuaSubscription.OpcuaSubscription),
   };
 };
 

@@ -39,7 +39,7 @@ import { getCommandSpec } from "./command-specs.js";
 import { makeCommandId } from "./ids.js";
 import { resolveCommandTimeout, resolveObservedTimeout } from "./timeouts.js";
 
-type OpcuaSessionService = OpcuaSession.OpcuaSessionService;
+type OpcuaSessionService = OpcuaSession.Service;
 
 export type DemoMachineCommandCoreService = {
   readonly readStatus: Effect.Effect<CommandStatusBuffer>;

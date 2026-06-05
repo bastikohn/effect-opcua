@@ -21,7 +21,7 @@ import {
 } from "../src/contract/errors.js";
 import { makeLiveTestContext } from "./live.js";
 
-type OpcuaSessionService = OpcuaSession.OpcuaSessionService;
+type OpcuaSessionService = OpcuaSession.Service;
 
 const { runLive } = makeLiveTestContext("demo-machine", 1);
 

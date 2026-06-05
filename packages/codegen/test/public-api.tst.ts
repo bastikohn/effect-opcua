@@ -14,7 +14,7 @@ import {
   type GenerateResult,
 } from "@effect-opcua/codegen";
 
-declare const subscription: OpcuaSubscription;
+declare const subscription: OpcuaSubscription.OpcuaSubscription;
 
 describe("codegen public API", () => {
   it("keeps the root package surface small", () => {

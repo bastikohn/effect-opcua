@@ -2,11 +2,8 @@ import {
   Opcua,
   OpcuaClient,
   OpcuaSession,
-  type MonitorSample,
-  type NodeIdString,
-  type OpcuaDynamicValue,
-  type ReadResult,
-  type WriteResult,
+  type OpcuaSubscription,
+  type OpcuaVariable,
 } from "@effect-opcua/client";
 import {
   Cause,
@@ -19,6 +16,11 @@ import {
 } from "effect";
 
 type OpcuaBrowseReference = OpcuaSession.OpcuaBrowseReference;
+type MonitorSample = OpcuaSubscription.MonitorSample;
+type NodeIdString = string;
+type OpcuaDynamicValue = OpcuaVariable.OpcuaDynamicValue;
+type ReadResult<A> = OpcuaVariable.ReadResult<A>;
+type WriteResult = OpcuaVariable.WriteResult;
 
 export type TreeEntryId = string;
 
