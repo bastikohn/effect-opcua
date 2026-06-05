@@ -1,7 +1,7 @@
 import {
   Opcua,
   OpcuaSession,
-  type OpcuaSession as OpcuaSessionService,
+  type OpcuaSessionService,
   type ReadManyResult,
 } from "@effect-opcua/client";
 import {

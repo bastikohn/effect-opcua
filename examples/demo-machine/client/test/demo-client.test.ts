@@ -4,10 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option, Queue, Result, Scope, Stream } from "effect";
 import type { Duration } from "effect";
-import {
-  OpcuaSession,
-  type OpcuaSession as OpcuaSessionService,
-} from "@effect-opcua/client";
+import { OpcuaSession, type OpcuaSessionService } from "@effect-opcua/client";
 
 import * as Root from "../src/index.js";
 import * as Generated from "../src/generated/index.js";

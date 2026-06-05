@@ -2,7 +2,7 @@ import {
   OpcuaClient,
   OpcuaError,
   OpcuaSession,
-  type OpcuaSession as OpcuaSessionService,
+  type OpcuaSessionService,
   type OpcuaSubscription,
   type ReadableVariableDef,
 } from "@effect-opcua/client";

@@ -77,7 +77,7 @@ import {
   OpcuaClient,
   OpcuaError,
   OpcuaSession,
-  type OpcuaSession as OpcuaSessionService,
+  type OpcuaSessionService,
   type ReadResult,
 } from "@effect-opcua/client";
 import {

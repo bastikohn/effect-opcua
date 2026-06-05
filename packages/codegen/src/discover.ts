@@ -4,7 +4,7 @@ import {
   type OpcuaBrowseReference,
   type OpcuaDataTypeDefinitionResult,
   type OpcuaNodeMetadata,
-  type OpcuaSession as OpcuaSessionService,
+  type OpcuaSessionService,
 } from "@effect-opcua/client";
 import type * as Client from "@effect-opcua/client";
 

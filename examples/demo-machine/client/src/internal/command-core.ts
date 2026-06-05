@@ -2,7 +2,7 @@ import {
   Opcua,
   OpcuaError,
   OpcuaSession,
-  type OpcuaSession as OpcuaSessionService,
+  type OpcuaSessionService,
 } from "@effect-opcua/client";
 import {
   Context,

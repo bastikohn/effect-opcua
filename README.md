@@ -34,3 +34,13 @@ pnpm typecheck
 pnpm build
 pnpm test
 ```
+
+## Releases
+
+Releases are managed with Changesets. Add a changeset for user-visible changes
+to published packages, then merge the generated `Version packages` PR.
+
+Publishing uses npm trusted publishing from `.github/workflows/release.yml`, so
+no long-lived `NPM_TOKEN` is required. Configure npm trusted publishing for
+`@effect-opcua/client` against this repository and workflow before the first
+release.

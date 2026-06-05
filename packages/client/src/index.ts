@@ -1,6 +1,6 @@
 export * as Opcua from "./Opcua.js";
 export * as OpcuaClient from "./OpcuaClient.js";
-export * as OpcuaSession from "./OpcuaSession.js";
+export * as OpcuaSession from "./OpcuaSession.public.js";
 export * as OpcuaError from "./OpcuaError.js";
 
 export type { OpcuaClientService } from "./OpcuaClient.js";
