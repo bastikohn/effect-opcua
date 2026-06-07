@@ -24,7 +24,7 @@ describe("browse", () => {
   it("browses normalized child references from ObjectsFolder", async () => {
     const result = await runLive(
       Effect.gen(function* () {
-        const session = yield* OpcuaSession.OpcuaSession;
+        const session = yield* OpcuaSession.Session;
         return yield* session.browseChildren("i=85");
       }),
     );
@@ -56,7 +56,7 @@ describe("browse", () => {
   it("keeps lower-level browse raw fields opt-in", async () => {
     const result = await runLive(
       Effect.gen(function* () {
-        const session = yield* OpcuaSession.OpcuaSession;
+        const session = yield* OpcuaSession.Session;
         return yield* session.browse({
           nodeId: "ns=1;s=DemoFillingCell",
           resultMask: makeResultMask("BrowseName"),
@@ -76,7 +76,7 @@ describe("browse", () => {
   it("discovers variable nodes through browseChildren", async () => {
     const result = await runLive(
       Effect.gen(function* () {
-        const session = yield* OpcuaSession.OpcuaSession;
+        const session = yield* OpcuaSession.Session;
         return yield* session.browseChildren(demoNodeId("State"), {
           nodeClassMask: makeNodeClassMask("Variable"),
         });
@@ -107,7 +107,7 @@ describe("browse", () => {
     await expect(
       runLive(
         Effect.gen(function* () {
-          const session = yield* OpcuaSession.OpcuaSession;
+          const session = yield* OpcuaSession.Session;
           return yield* session.browse({ nodeId: " " });
         }),
       ),
@@ -115,7 +115,7 @@ describe("browse", () => {
 
     const missing = await runLive(
       Effect.gen(function* () {
-        const session = yield* OpcuaSession.OpcuaSession;
+        const session = yield* OpcuaSession.Session;
         return yield* session.browse({ nodeId: "ns=1;s=missing" });
       }),
     );

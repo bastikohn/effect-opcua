@@ -198,14 +198,14 @@ export const validateOptionsShape = (
   });
 
 export const normalizeServiceOptions = <Key extends string>({
-  service,
+  serviceLimits,
   defaults,
   serviceOperation,
   defaultsOperation,
   allowedKeys,
   fallback,
 }: {
-  readonly service: unknown;
+  readonly serviceLimits: unknown;
   readonly defaults: unknown;
   readonly serviceOperation: string;
   readonly defaultsOperation: string;
@@ -222,17 +222,19 @@ export const normalizeServiceOptions = <Key extends string>({
 
     const serviceError = serviceOptionsError(
       serviceOperation,
-      service,
+      serviceLimits,
       allowedKeys,
     );
     if (serviceError) return Effect.fail(serviceError);
 
-    const serviceRecord = service as Partial<Record<Key, number>> | undefined;
+    const serviceLimitsRecord = serviceLimits as
+      | Partial<Record<Key, number>>
+      | undefined;
     const defaultsRecord = defaults as Partial<Record<Key, number>> | undefined;
     const normalized = { ...fallback };
     for (const key of allowedKeys) {
       normalized[key] =
-        serviceRecord?.[key] ?? defaultsRecord?.[key] ?? fallback[key];
+        serviceLimitsRecord?.[key] ?? defaultsRecord?.[key] ?? fallback[key];
     }
     return Effect.succeed(normalized);
   });

@@ -153,7 +153,10 @@ describe("keyed batch APIs", () => {
             { pressure: Pressure, temperature: Temperature } as const,
             {
               validation: "none",
-              service: { maxNodesPerRead: 1, maxConcurrentRequests: 2 },
+              serviceLimitsOverrides: {
+                maxNodesPerRequest: 1,
+                maxConcurrentRequests: 2,
+              },
             },
           );
           return { values, calls: fake.calls };
@@ -198,9 +201,9 @@ describe("keyed batch APIs", () => {
         Effect.gen(function* () {
           const fake = yield* makeFakeSession({
             batching: {
-              read: { maxNodesPerRead: 2 },
-              write: { maxNodesPerWrite: 2 },
-              call: { maxMethodsPerCall: 2 },
+              readLimits: { maxNodesPerRequest: 2 },
+              writeLimits: { maxNodesPerRequest: 2 },
+              callLimits: { maxNodesPerRequest: 2 },
             },
           });
           yield* fake.session.readMany({ a: A, b: B, c: C } as const, {
@@ -235,11 +238,11 @@ describe("keyed batch APIs", () => {
       Effect.scoped(
         Effect.gen(function* () {
           const fake = yield* makeFakeSession({
-            batching: { read: { maxNodesPerRead: 3 } },
+            batching: { readLimits: { maxNodesPerRequest: 3 } },
           });
           yield* fake.session.readMany({ a: A, b: B, c: C } as const, {
             validation: "none",
-            service: { maxNodesPerRead: 1 },
+            serviceLimitsOverrides: { maxNodesPerRequest: 1 },
           });
           return fake.calls;
         }),
@@ -364,7 +367,12 @@ describe("keyed batch APIs", () => {
               first: [Echo, { Value: 1 }],
               second: [Echo, { Value: 2 }, { includeRaw: true }],
             } as const,
-            { service: { maxMethodsPerCall: 1, maxConcurrentRequests: 1 } },
+            {
+              serviceLimitsOverrides: {
+                maxNodesPerRequest: 1,
+                maxConcurrentRequests: 1,
+              },
+            } as const,
           );
           return { calls, serviceCalls: fake.calls.calls };
         }),

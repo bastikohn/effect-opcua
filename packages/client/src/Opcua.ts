@@ -33,7 +33,6 @@ export {
   type InputOfMethodDef,
   type MethodArg,
   type MethodArgSelector,
-  type MethodCallOptions,
   type MethodDef,
   type OutputOfMethodDef,
 } from "./OpcuaMethod.js";

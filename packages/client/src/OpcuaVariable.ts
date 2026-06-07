@@ -126,6 +126,16 @@ export type AnyReadResult =
   | ReadResult<unknown, string>
   | ReadResult<OpcuaDynamicValue, string>;
 
+export type ReadManyResult<Items> = {
+  readonly [Key in keyof Items]: Items[Key] extends VariableDef<
+    infer Id,
+    infer A,
+    "read" | "readWrite"
+  >
+    ? ReadResult<A, Id>
+    : never;
+};
+
 export type WriteResult<Id extends string = string> =
   | {
       readonly _tag: "Written";
@@ -137,6 +147,35 @@ export type WriteResult<Id extends string = string> =
       readonly nodeId: Id;
       readonly status: OpcuaStatusInfo;
     };
+
+export type WriteManyResult<Items> = {
+  readonly [Key in keyof Items]: Items[Key] extends readonly [
+    infer Def extends WritableVariableDef,
+    unknown,
+  ]
+    ? Def extends VariableDef<infer Id, unknown, VariableAccess>
+      ? WriteResult<Id>
+      : never
+    : never;
+};
+
+export type WriteManyItem<
+  Def extends WritableVariableDef = WritableVariableDef,
+> = readonly [def: Def, value: ValueOfVariableDef<Def>];
+
+export type AnyWriteManyRecord = Record<
+  string,
+  readonly [WritableVariableDef, unknown]
+>;
+
+export type WriteManyInput<Items extends AnyWriteManyRecord> = {
+  readonly [Key in keyof Items]: Items[Key] extends readonly [
+    infer Def extends WritableVariableDef,
+    unknown,
+  ]
+    ? readonly [def: Def, value: ValueOfVariableDef<Def>]
+    : never;
+};
 
 export type VariableMetadata = {
   readonly nodeId: NodeIdString;

@@ -786,7 +786,7 @@ describe("monitoring", () => {
   it("streams typed and dynamic monitored samples from a named item dictionary", async () => {
     const values = await runLive(
       Effect.gen(function* () {
-        const session = yield* OpcuaSession.OpcuaSession;
+        const session = yield* OpcuaSession.Session;
         const subscription = yield* session.makeSubscription({
           publishingInterval: Duration.millis(100),
         });
@@ -814,7 +814,7 @@ describe("monitoring", () => {
   it("returns a keyed strict startup report for valid variables", async () => {
     const result = await runLive(
       Effect.gen(function* () {
-        const session = yield* OpcuaSession.OpcuaSession;
+        const session = yield* OpcuaSession.Session;
         const subscription = yield* session.makeSubscription({
           publishingInterval: Duration.millis(100),
         });
@@ -854,7 +854,7 @@ describe("monitoring", () => {
   it("returns best-effort monitors with active and failed startup entries", async () => {
     const result = await runLive(
       Effect.gen(function* () {
-        const session = yield* OpcuaSession.OpcuaSession;
+        const session = yield* OpcuaSession.Session;
         const subscription = yield* session.makeSubscription({
           publishingInterval: Duration.millis(100),
         });
@@ -885,7 +885,7 @@ describe("monitoring", () => {
     await expect(
       runLive(
         Effect.gen(function* () {
-          const session = yield* OpcuaSession.OpcuaSession;
+          const session = yield* OpcuaSession.Session;
           const subscription = yield* session.makeSubscription({
             publishingInterval: Duration.millis(100),
           });
@@ -915,7 +915,7 @@ describe("monitoring", () => {
     await expect(
       runLive(
         Effect.gen(function* () {
-          const session = yield* OpcuaSession.OpcuaSession;
+          const session = yield* OpcuaSession.Session;
           const subscription = yield* session.makeSubscription({
             publishingInterval: Duration.millis(100),
           });
@@ -945,7 +945,7 @@ describe("monitoring", () => {
     });
     const result = await runLive(
       Effect.gen(function* () {
-        const session = yield* OpcuaSession.OpcuaSession;
+        const session = yield* OpcuaSession.Session;
         const subscription = yield* session.makeSubscription({
           publishingInterval: Duration.millis(100),
         });
@@ -972,7 +972,7 @@ describe("monitoring", () => {
     await expect(
       runLive(
         Effect.gen(function* () {
-          const session = yield* OpcuaSession.OpcuaSession;
+          const session = yield* OpcuaSession.Session;
           const subscription = yield* session.makeSubscription({
             publishingInterval: Duration.millis(100),
           });

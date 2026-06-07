@@ -52,7 +52,7 @@ describe("values", () => {
     const tankLevel = demoNodeId("Filling.Tank.LevelMl");
     const result = await runLive(
       Effect.gen(function* () {
-        const session = yield* OpcuaSession.OpcuaSession;
+        const session = yield* OpcuaSession.Session;
         return {
           dynamic: yield* session.read(Opcua.variable({ nodeId: tankLevel })),
           number: yield* session.read(
@@ -243,7 +243,7 @@ describe("values", () => {
 
     const result = await runLive(
       Effect.gen(function* () {
-        const session = yield* OpcuaSession.OpcuaSession;
+        const session = yield* OpcuaSession.Session;
         const submitted = yield* session.write(submit, {
           commandId,
           commandKind: GlobalCommandKind.Machine_Configure,
@@ -287,7 +287,7 @@ describe("values", () => {
   it("returns write statuses as data", async () => {
     const result = await runLive(
       Effect.gen(function* () {
-        const session = yield* OpcuaSession.OpcuaSession;
+        const session = yield* OpcuaSession.Session;
         return yield* session.write(
           Opcua.variable({
             nodeId: demoNodeId("Commands.SubmitRequest"),
@@ -342,7 +342,7 @@ describe("values", () => {
     await expect(
       runLive(
         Effect.gen(function* () {
-          const session = yield* OpcuaSession.OpcuaSession;
+          const session = yield* OpcuaSession.Session;
           return yield* session.write(
             Opcua.variable({
               nodeId: demoNodeId("Filling.Tank.LevelMl"),
@@ -414,7 +414,7 @@ describe("values", () => {
     await expect(
       runLive(
         Effect.gen(function* () {
-          const session = yield* OpcuaSession.OpcuaSession;
+          const session = yield* OpcuaSession.Session;
           return yield* session.read(
             Opcua.variable({
               nodeId: demoNodeId("Filling.Tank.LevelMl"),

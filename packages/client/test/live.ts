@@ -40,7 +40,7 @@ export const makeLiveTestContext = (suite: string, offset: number) => {
     );
 
   const runLive = <A, E>(
-    effect: Effect.Effect<A, E, OpcuaSession.OpcuaSession | Scope.Scope>,
+    effect: Effect.Effect<A, E, OpcuaSession.Session | Scope.Scope>,
   ) =>
     Effect.runPromise(
       Effect.scoped(effect).pipe(

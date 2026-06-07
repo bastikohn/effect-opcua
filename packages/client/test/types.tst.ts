@@ -3,7 +3,7 @@ import { describe, expect, it } from "tstyche";
 
 import { Opcua, OpcuaClient, OpcuaSession } from "@effect-opcua/client";
 
-declare const session: OpcuaSession.Service;
+declare const session: OpcuaSession.SessionService;
 
 describe("Opcua", () => {
   it("checks variable definition types", () => {

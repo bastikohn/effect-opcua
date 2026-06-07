@@ -42,6 +42,9 @@ import {
 } from "./internal/normalize.js";
 import type { OpcuaStructureRuntime } from "./internal/structure-runtime.js";
 import { isPlainRecord, isRecord } from "./internal/predicates.js";
+import { MethodCallOptions } from "./internal/session-operations.js";
+
+export { MethodCallOptions };
 
 export type MethodArgSelector =
   | { readonly _tag: "Name"; readonly name: string }
@@ -140,10 +143,6 @@ export type MethodArgumentResult = {
   readonly diagnosticInfo?: unknown;
 };
 
-export type MethodCallOptions = {
-  readonly includeRaw?: boolean;
-};
-
 export type MethodCallResult<
   Output,
   ObjectId extends string,
@@ -187,6 +186,46 @@ export type ResolvedMethod<Spec extends AnyMethodDef = AnyMethodDef> = {
     readonly inputArguments: ReadonlyArray<Argument>;
     readonly outputArguments: ReadonlyArray<Argument>;
   };
+};
+
+export type CallManyItem<Def extends AnyMethodDef = AnyMethodDef> =
+  | readonly [def: Def, input: InputOfMethodDef<Def>]
+  | readonly [
+      def: Def,
+      input: InputOfMethodDef<Def>,
+      options: MethodCallOptions,
+    ];
+
+export type AnyCallManyRecord = Record<
+  string,
+  | readonly [AnyMethodDef, unknown]
+  | readonly [AnyMethodDef, unknown, MethodCallOptions]
+>;
+
+export type CallManyInput<Items extends AnyCallManyRecord> = {
+  readonly [Key in keyof Items]: Items[Key] extends readonly [
+    infer Def extends AnyMethodDef,
+    unknown,
+    MethodCallOptions,
+  ]
+    ? readonly [
+        def: Def,
+        input: InputOfMethodDef<Def>,
+        options: MethodCallOptions,
+      ]
+    : Items[Key] extends readonly [infer Def extends AnyMethodDef, unknown]
+      ? readonly [def: Def, input: InputOfMethodDef<Def>]
+      : never;
+};
+
+export type CallManyResult<Items> = {
+  readonly [Key in keyof Items]: Items[Key] extends readonly [
+    infer Def extends AnyMethodDef,
+    unknown,
+    ...ReadonlyArray<unknown>,
+  ]
+    ? MethodCallResult<OutputOfMethodDef<Def>, Def["objectId"], Def["methodId"]>
+    : never;
 };
 
 export type AnyResolvedMethod = ResolvedMethod<AnyMethodDef>;
