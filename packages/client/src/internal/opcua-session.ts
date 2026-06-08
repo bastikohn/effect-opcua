@@ -19,14 +19,14 @@ import {
   browseOptionsError,
   browseWithMaxReferences,
   normalizeBrowseResult,
-} from "./browse.js";
+} from "./browse/operations.js";
 import {
   type OpcuaSessionEvent,
   type OpcuaSubscriptionEvent,
   wireSessionEvents,
   wireSubscriptionEvents,
 } from "./events.js";
-import { makeMetadataService } from "./metadata.js";
+import { makeMetadataService } from "./metadata/service.js";
 import { makeStructureRuntime } from "./structures/runtime.js";
 import {
   callManyWithState,
@@ -38,7 +38,7 @@ import { validateSubscriptionOptions } from "./subscription-options.js";
 import {
   readDataTypeDefinition as readDataTypeDefinitionImpl,
   readManyDataTypeDefinitions as readManyDataTypeDefinitionsImpl,
-} from "./data-type-definition.js";
+} from "./data-types/read.js";
 
 import {
   DEFAULT_BROWSE_DIRECTION,

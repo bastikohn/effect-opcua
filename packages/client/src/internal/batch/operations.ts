@@ -15,7 +15,7 @@ import {
   type KeyedEntry,
 } from "./keyed.js";
 import { isPlainRecord } from "../common/predicates.js";
-import type { makeMetadataService } from "../metadata.js";
+import type { makeMetadataService } from "../metadata/service.js";
 import type { makeStructureRuntime } from "../structures/runtime.js";
 import type { NodeIdString } from "../common/node-id.js";
 

@@ -19,14 +19,14 @@ import type {
   OpcuaBrowseContinuation,
   OpcuaBrowseOptions,
   OpcuaBrowseResult,
-} from "./internal/browse.js";
+} from "./internal/browse/operations.js";
 import type { OpcuaSessionEvent } from "./internal/events.js";
 import type {
   OpcuaAccessBits,
   OpcuaMetadataReadFailure,
   OpcuaNodeMetadata,
   OpcuaNodeMetadataResult,
-} from "./internal/metadata.js";
+} from "./internal/metadata/service.js";
 import type { NodeIdString } from "./internal/common/node-id.js";
 import type {
   OpcuaDataTypeDefinition,
@@ -35,7 +35,7 @@ import type {
   OpcuaEnumField,
   OpcuaStructureDefinition,
   OpcuaStructureField,
-} from "./internal/data-type-definition.js";
+} from "./internal/data-types/read.js";
 import { make } from "./internal/opcua-session.js";
 import type {
   CallManyOptions,
@@ -51,7 +51,7 @@ export type {
   OpcuaBrowseOptions,
   OpcuaBrowseReference,
   OpcuaBrowseResult,
-} from "./internal/browse.js";
+} from "./internal/browse/operations.js";
 export type {
   OpcuaAccessBits,
   OpcuaMetadataReadFailure,
