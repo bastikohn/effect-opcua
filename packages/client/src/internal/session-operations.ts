@@ -1,7 +1,9 @@
 import { coerceNodeId, type ClientSession, type NodeId } from "node-opcua";
 import { Effect } from "effect";
 
-import { OpcuaError, OpcuaMethod, OpcuaVariable } from "@effect-opcua/client";
+import * as OpcuaError from "../OpcuaError.js";
+import * as OpcuaMethod from "../OpcuaMethod.js";
+import * as OpcuaVariable from "../OpcuaVariable.js";
 import {
   normalizeServiceOptions,
   runKeyedBatchOperation,

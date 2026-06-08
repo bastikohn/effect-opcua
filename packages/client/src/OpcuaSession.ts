@@ -8,12 +8,10 @@ import {
   type Stream,
 } from "effect";
 
-import {
-  OpcuaVariable,
-  OpcuaMethod,
-  OpcuaSubscription,
-  OpcuaError,
-} from "@effect-opcua/client";
+import type * as OpcuaError from "./OpcuaError.js";
+import type * as OpcuaMethod from "./OpcuaMethod.js";
+import type * as OpcuaSubscription from "./OpcuaSubscription.js";
+import type * as OpcuaVariable from "./OpcuaVariable.js";
 
 import type {
   OpcuaBrowseChildrenOptions,

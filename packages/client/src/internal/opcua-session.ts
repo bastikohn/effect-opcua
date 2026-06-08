@@ -5,14 +5,12 @@ import {
 } from "node-opcua";
 import { Effect, PubSub, Scope, Semaphore, Stream } from "effect";
 
-import {
-  OpcuaClient,
-  OpcuaSession,
-  OpcuaError,
-  OpcuaMethod,
-  OpcuaSubscription,
-  OpcuaVariable,
-} from "@effect-opcua/client";
+import * as OpcuaClient from "../OpcuaClient.js";
+import * as OpcuaError from "../OpcuaError.js";
+import * as OpcuaMethod from "../OpcuaMethod.js";
+import * as OpcuaSession from "../OpcuaSession.js";
+import * as OpcuaSubscription from "../OpcuaSubscription.js";
+import * as OpcuaVariable from "../OpcuaVariable.js";
 
 import {
   browseContinuationError,

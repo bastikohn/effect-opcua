@@ -9,7 +9,8 @@ import {
 } from "node-opcua";
 import { Duration, Effect, PubSub, Queue, Result, Scope, Stream } from "effect";
 
-import { OpcuaVariable, OpcuaError } from "@effect-opcua/client";
+import * as OpcuaError from "./OpcuaError.js";
+import * as OpcuaVariable from "./OpcuaVariable.js";
 
 import { Codec } from "./internal/codecs.js";
 import type { NodeIdString } from "./internal/capabilities.js";

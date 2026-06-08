@@ -1,7 +1,7 @@
 import { OPCUAClient, type OPCUAClientOptions } from "node-opcua";
 import { type Config, Context, Effect, Layer, PubSub, Stream } from "effect";
 
-import { OpcuaError } from "@effect-opcua/client";
+import * as OpcuaError from "./OpcuaError.js";
 
 import { EVENT_BUFFER_SIZE } from "./internal/constants.js";
 import {
