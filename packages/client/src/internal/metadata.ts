@@ -29,14 +29,16 @@ import {
   OpcuaMethodNotExecutableError,
   OpcuaServiceError,
 } from "../OpcuaError.js";
+import type {
+  AnyMethodDef,
+  MethodArg,
+  MethodMetadata,
+} from "../OpcuaMethod.js";
 import {
   methodArgumentMetadataFromRaw,
   readBooleanAttribute,
   resolveMethodMapping,
-  type AnyMethodDef,
-  type MethodArg,
-  type MethodMetadata,
-} from "../OpcuaMethod.js";
+} from "./method/arguments.js";
 import { isGood } from "./values/normalize.js";
 import {
   normalizeLocalizedText,

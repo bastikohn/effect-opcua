@@ -11,6 +11,7 @@ import * as OpcuaMethod from "../OpcuaMethod.js";
 import * as OpcuaSession from "../OpcuaSession.js";
 import * as OpcuaSubscription from "../OpcuaSubscription.js";
 import * as OpcuaVariable from "../OpcuaVariable.js";
+import * as MethodOperations from "./method/operations.js";
 import * as VariableOperations from "./variable/operations.js";
 
 import {
@@ -243,8 +244,11 @@ export const makeSession: (
     const call: OpcuaSession.SessionService["call"] = (def, input, options) =>
       Effect.gen(function* () {
         const methodMetadata = yield* metadata.method(def);
-        const method = yield* OpcuaMethod.resolveMethod(def, methodMetadata);
-        return yield* OpcuaMethod.callResolvedMethod(
+        const method = yield* MethodOperations.resolveMethod(
+          def,
+          methodMetadata,
+        );
+        return yield* MethodOperations.callResolvedMethod(
           unsafeRaw,
           method,
           input,

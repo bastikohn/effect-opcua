@@ -4,6 +4,8 @@ import { Effect } from "effect";
 import * as OpcuaError from "../OpcuaError.js";
 import * as OpcuaMethod from "../OpcuaMethod.js";
 import * as OpcuaVariable from "../OpcuaVariable.js";
+import * as MethodArguments from "./method/arguments.js";
+import * as MethodOperations from "./method/operations.js";
 import * as VariableOperations from "./variable/operations.js";
 import {
   normalizeServiceOptions,
@@ -183,7 +185,7 @@ export const callManyWithState = <const Items extends AnyCallManyRecord>(
           const methodMetadata = yield* state.metadata.method(
             entry.normalized.def,
           );
-          const method = yield* OpcuaMethod.resolveMethod(
+          const method = yield* MethodOperations.resolveMethod(
             entry.normalized.def,
             methodMetadata,
           );
@@ -199,7 +201,7 @@ export const callManyWithState = <const Items extends AnyCallManyRecord>(
         }),
       ),
     execute: (entries, normalizedOptions) =>
-      OpcuaMethod.callMethods(
+      MethodOperations.callMethods(
         state.unsafeRaw,
         entries.map((entry) => entry.normalized),
         state.structureRuntime,
@@ -297,7 +299,7 @@ const normalizeCallManyItem = (
         }),
       );
     }
-    const optionsError = OpcuaMethod.methodCallOptionsError(
+    const optionsError = MethodArguments.methodCallOptionsError(
       "callMany.items.options",
       def.objectId,
       def.methodId,
