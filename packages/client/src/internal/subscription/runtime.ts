@@ -3,7 +3,6 @@ import { Effect, PubSub } from "effect";
 
 import * as OpcuaError from "../../OpcuaError.js";
 import type * as OpcuaSession from "../../OpcuaSession.js";
-import type { OpcuaSubscription } from "../../OpcuaSubscription.js";
 import { EVENT_BUFFER_SIZE } from "../common/constants.js";
 import type { OpcuaSubscriptionEvent } from "../events/model.js";
 import { wireSubscriptionEvents } from "../events/wire.js";

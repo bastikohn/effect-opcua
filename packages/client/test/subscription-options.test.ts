@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Duration, Effect } from "effect";
 
 import { OpcuaError } from "@effect-opcua/client";
-import { validateSubscriptionOptions } from "../src/internal/subscription-options.js";
+import { validateSubscriptionOptions } from "../src/internal/subscription/options.js";
 import { makeFakeSession } from "./support/fake-session.js";
 
 const invalidSubscriptionOptions = (options: unknown) =>

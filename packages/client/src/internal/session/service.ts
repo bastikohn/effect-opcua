@@ -2,7 +2,6 @@ import { resolveNodeId, type ClientSession } from "node-opcua";
 import { Effect, PubSub, Scope, Semaphore, Stream } from "effect";
 
 import * as OpcuaError from "../../OpcuaError.js";
-import * as OpcuaMethod from "../../OpcuaMethod.js";
 import * as OpcuaSession from "../../OpcuaSession.js";
 import * as OpcuaVariable from "../../OpcuaVariable.js";
 import * as MethodOperations from "../method/operations.js";

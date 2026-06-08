@@ -3,7 +3,7 @@ import { Schema } from "effect";
 
 import { Opcua } from "@effect-opcua/client";
 import { DataType, coerceNodeId } from "@effect-opcua/client/node-opcua";
-import { validateStructureMetadata } from "../src/internal/structure-runtime.js";
+import { validateStructureMetadata } from "../src/internal/structures/runtime.js";
 
 const ScanSettings = Opcua.structure({
   name: "ScanSettings",

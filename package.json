@@ -10,7 +10,7 @@
   },
   "scripts": {
     "build": "pnpm -r --filter='@effect-opcua/*' build",
-    "check": "pnpm lint && pnpm format && pnpm typecheck && pnpm test:types && pnpm test",
+    "check": "pnpm lint && pnpm format && pnpm typecheck && pnpm test:types && pnpm check:client-lines && node scripts/check-client-boundaries.mjs && pnpm test",
     "check:client-lines": "node scripts/check-client-file-lines.mjs",
     "check:ci": "pnpm check && pnpm build && pnpm smoke:packages",
     "check:release": "pnpm check:ci && node scripts/publish-public-packages.mjs --dry-run",

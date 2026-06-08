@@ -17,7 +17,7 @@ import {
   type OpcuaSubscription,
   type OpcuaVariable,
 } from "@effect-opcua/client";
-import type { OpcuaSubscriptionEvent } from "../src/internal/events.js";
+import type { OpcuaSubscriptionEvent } from "../src/internal/events/model.js";
 import {
   AccessLevelFlag,
   DataType,
@@ -26,7 +26,7 @@ import {
   Variant,
   type ClientSubscription,
 } from "@effect-opcua/client/node-opcua";
-import type { OpcuaStructureRuntime } from "../src/internal/structure-runtime.js";
+import type { OpcuaStructureRuntime } from "../src/internal/structures/runtime.js";
 import { makeSubscription } from "../src/OpcuaSubscription.js";
 import { makeLiveTestContext } from "./live.js";
 import {

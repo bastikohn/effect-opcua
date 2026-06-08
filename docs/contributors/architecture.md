@@ -60,13 +60,19 @@ Use internal modules for reusable mechanics such as:
 - option validation: `internal/common/options.ts`
 - plain record and integer predicates: `internal/common/predicates.ts`
 - node-id helpers: `internal/common/node-id.ts`
+- client lifecycle: `internal/client/make.ts`
+- session lifecycle and service assembly: `internal/session/make.ts` and
+  `internal/session/service.ts`
 - metadata discovery and cache invalidation: `internal/metadata/*`
 - keyed batch normalization: `internal/batch/keyed.ts`
 - browse result normalization: `internal/browse/operations.ts`
 - value and status normalization: `internal/values/*`
 - structure runtime initialization: `internal/structures/runtime.ts`
-- monitor option normalization: `internal/monitoring/options.ts`
-- event wiring: `internal/events/wire.ts`
+- subscription lifecycle and options: `internal/subscription/*`
+- monitor option normalization, request creation, sample decoding, and runtime:
+  `internal/monitoring/*`
+- event model and wiring: `internal/events/model.ts` and
+  `internal/events/wire.ts`
 
 Keep public modules small and definition-oriented. A public module should define
 the user-facing types, constructors, and service functions for one feature area.
