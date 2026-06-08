@@ -11,6 +11,7 @@ import * as OpcuaMethod from "../OpcuaMethod.js";
 import * as OpcuaSession from "../OpcuaSession.js";
 import * as OpcuaSubscription from "../OpcuaSubscription.js";
 import * as OpcuaVariable from "../OpcuaVariable.js";
+import * as VariableOperations from "./variable/operations.js";
 
 import {
   browseContinuationError,
@@ -125,7 +126,7 @@ export const makeSession: (
     const read: OpcuaSession.SessionService["read"] = (def) =>
       Effect.gen(function* () {
         yield* metadata.variable(def);
-        const result = yield* OpcuaVariable.readVariable(
+        const result = yield* VariableOperations.readVariable(
           unsafeRaw,
           def,
           structureRuntime,
@@ -144,7 +145,7 @@ export const makeSession: (
     const write: OpcuaSession.SessionService["write"] = (def, value) =>
       Effect.gen(function* () {
         const variableMetadata = yield* metadata.variable(def);
-        const result = yield* OpcuaVariable.writeVariable(
+        const result = yield* VariableOperations.writeVariable(
           unsafeRaw,
           def,
           variableMetadata,

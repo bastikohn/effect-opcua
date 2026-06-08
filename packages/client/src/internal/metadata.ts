@@ -49,9 +49,8 @@ import {
   codecMetadata,
   variableAccessCapabilities,
   variableMetadataFromRaw,
-  type AnyVariableDef,
-  type VariableMetadata,
-} from "../OpcuaVariable.js";
+} from "./variable/operations.js";
+import type { AnyVariableDef, VariableMetadata } from "../OpcuaVariable.js";
 
 export type MetadataService = {
   readonly namespaceArray: () => Effect.Effect<

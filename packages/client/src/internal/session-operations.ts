@@ -4,6 +4,7 @@ import { Effect } from "effect";
 import * as OpcuaError from "../OpcuaError.js";
 import * as OpcuaMethod from "../OpcuaMethod.js";
 import * as OpcuaVariable from "../OpcuaVariable.js";
+import * as VariableOperations from "./variable/operations.js";
 import {
   normalizeServiceOptions,
   runKeyedBatchOperation,
@@ -102,12 +103,12 @@ export const readManyWithState = <
         return entries;
       }),
     execute: (entries, normalizedOptions) => {
-      const prepared: ReadonlyArray<OpcuaVariable.PreparedReadVariable> =
+      const prepared: ReadonlyArray<VariableOperations.PreparedReadVariable> =
         entries.map((entry) => ({
           def: entry.normalized.def,
           rawNodeId: entry.normalized.rawNodeId,
         }));
-      return OpcuaVariable.readPreparedVariables(
+      return VariableOperations.readPreparedVariables(
         state.unsafeRaw,
         prepared,
         state.structureRuntime,
@@ -139,7 +140,7 @@ export const writeManyWithState = <const Items extends AnyWriteManyRecord>(
           state.metadata.variable(entry.normalized.def),
           (
             metadata,
-          ): KeyedEntry<string, OpcuaVariable.PreparedWriteVariable> => ({
+          ): KeyedEntry<string, VariableOperations.PreparedWriteVariable> => ({
             key: entry.key,
             index: entry.index,
             normalized: {
@@ -152,7 +153,7 @@ export const writeManyWithState = <const Items extends AnyWriteManyRecord>(
         ),
       ),
     execute: (entries, normalizedOptions) =>
-      OpcuaVariable.writePreparedVariables(
+      VariableOperations.writePreparedVariables(
         state.unsafeRaw,
         entries.map((entry) => entry.normalized),
         state.structureRuntime,

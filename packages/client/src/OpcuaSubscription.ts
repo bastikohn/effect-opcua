@@ -13,6 +13,7 @@ import * as OpcuaError from "./OpcuaError.js";
 import * as OpcuaVariable from "./OpcuaVariable.js";
 
 import { Codec } from "./internal/values/codec.js";
+import * as VariableOperations from "./internal/variable/operations.js";
 import type { NodeIdString } from "./internal/common/node-id.js";
 import { chunksOf } from "./internal/common/collections.js";
 import { EventBus, type OpcuaSubscriptionEvent } from "./internal/events.js";
@@ -533,7 +534,7 @@ const validateAccessChunk = <Items>(
         typeof userAccessLevelValue.value?.value === "number"
           ? (userAccessLevelValue.value.value as number)
           : undefined;
-      const error = OpcuaVariable.accessDeniedError(
+      const error = VariableOperations.accessDeniedError(
         item.nodeId,
         "read",
         accessLevelValue.value.value as number,
