@@ -18,7 +18,7 @@ import {
   type OpcuaLocalizedTextInfo,
   type OpcuaQualifiedNameInfo,
   type OpcuaStatusInfo,
-} from "./normalize.js";
+} from "./values/normalize.js";
 import type { NodeIdString } from "./common/node-id.js";
 import { nonNegativeIntegerOption } from "./common/options.js";
 

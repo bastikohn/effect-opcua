@@ -10,7 +10,7 @@ import {
   type StatusCode,
   type Variant,
 } from "node-opcua";
-import { Effect, Result } from "effect";
+import { Effect } from "effect";
 
 import { runChunked, type BatchOptions } from "./internal/batch.js";
 import type { NodeIdString } from "./internal/common/node-id.js";
@@ -19,7 +19,7 @@ import {
   dynamic,
   type CodecType,
   type OpcuaCodec,
-} from "./internal/codecs.js";
+} from "./internal/values/codec.js";
 import {
   configurationError,
   isConfigurationError,
@@ -39,8 +39,9 @@ import {
   type OpcuaLocalizedTextInfo,
   type OpcuaNodeIdInfo,
   type OpcuaStatusInfo,
-} from "./internal/normalize.js";
-import type { OpcuaStructureRuntime } from "./internal/structure-runtime.js";
+} from "./internal/values/normalize.js";
+import { resultFromStatusAndDecode } from "./internal/values/result.js";
+import type { OpcuaStructureRuntime } from "./internal/structures/runtime.js";
 import { isPlainRecord, isRecord } from "./internal/common/predicates.js";
 import type { MethodCallOptions } from "./internal/session-operations.js";
 
@@ -635,51 +636,44 @@ export const methodResultFromRaw = <const Spec extends AnyMethodDef>(
       : undefined;
     const status = normalizeStatusCode(result.statusCode);
     const inputArgumentResults = normalizeInputArgumentResults(method, result);
-    if (!isGood(result.statusCode)) {
-      return {
+    return yield* resultFromStatusAndDecode<
+      Record<string, unknown>,
+      typeof status,
+      MethodCallResult<
+        OutputOfMethodDef<Spec>,
+        Spec["objectId"],
+        Spec["methodId"]
+      >
+    >({
+      statusCode: result.statusCode,
+      status,
+      decode: outputObjectFromResult(method, result, structureRuntime),
+      nonGoodStatus: (status) => ({
         _tag: "NonGoodStatus",
         objectId: method.objectId,
         methodId: method.methodId,
         status,
         inputArgumentResults,
         unsafeRaw,
-      } as MethodCallResult<
-        OutputOfMethodDef<Spec>,
-        Spec["objectId"],
-        Spec["methodId"]
-      >;
-    }
-
-    const output = yield* Effect.result(
-      outputObjectFromResult(method, result, structureRuntime),
-    );
-    if (Result.isFailure(output)) {
-      return {
+      }),
+      decodeError: (error, status) => ({
         _tag: "DecodeError",
         objectId: method.objectId,
         methodId: method.methodId,
         status,
-        error: output.failure,
+        error,
         unsafeRaw,
-      } as MethodCallResult<
-        OutputOfMethodDef<Spec>,
-        Spec["objectId"],
-        Spec["methodId"]
-      >;
-    }
-    return {
-      _tag: "Called",
-      objectId: method.objectId,
-      methodId: method.methodId,
-      output: output.success as OutputOfMethodDef<Spec>,
-      status,
-      inputArgumentResults,
-      unsafeRaw,
-    } as MethodCallResult<
-      OutputOfMethodDef<Spec>,
-      Spec["objectId"],
-      Spec["methodId"]
-    >;
+      }),
+      value: (output) => ({
+        _tag: "Called",
+        objectId: method.objectId,
+        methodId: method.methodId,
+        output: output as OutputOfMethodDef<Spec>,
+        status,
+        inputArgumentResults,
+        unsafeRaw,
+      }),
+    });
   }) as Effect.Effect<
     MethodCallResult<
       OutputOfMethodDef<Spec>,

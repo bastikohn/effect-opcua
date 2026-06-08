@@ -11,7 +11,7 @@ import {
   type Variant,
   type WriteValueOptions,
 } from "node-opcua";
-import { Effect, Result } from "effect";
+import { Effect } from "effect";
 
 import { runChunked, type BatchOptions } from "./internal/batch.js";
 import type {
@@ -24,7 +24,7 @@ import {
   type AnySchema,
   type CodecType,
   type OpcuaCodec,
-} from "./internal/codecs.js";
+} from "./internal/values/codec.js";
 import {
   accessDeniedError as makeAccessDeniedError,
   serviceError,
@@ -41,15 +41,16 @@ import {
   type OpcuaNodeIdInfo,
   type OpcuaStatusInfo,
   type OpcuaVariantInfo,
-} from "./internal/normalize.js";
-import type { OpcuaStructureRuntime } from "./internal/structure-runtime.js";
+} from "./internal/values/normalize.js";
+import { resultFromStatusAndDecode } from "./internal/values/result.js";
+import type { OpcuaStructureRuntime } from "./internal/structures/runtime.js";
 
 export type { AnySchema, CodecType, OpcuaCodec };
 export type {
   NodeIdString,
   ExpandedNodeIdString,
 } from "./internal/common/node-id.js";
-export type { OpcuaDynamicValue } from "./internal/normalize.js";
+export type { OpcuaDynamicValue } from "./internal/values/normalize.js";
 
 export type VariableAccess = "read" | "write" | "readWrite";
 
@@ -317,26 +318,28 @@ export const sampleFromDataValue = <const Id extends string, A>(
   dataValue: DataValue,
   structureRuntime: OpcuaStructureRuntime,
 ) =>
-  Effect.gen(function* () {
+  Effect.suspend(() => {
     const base = sampleBase(def.nodeId, dataValue, def.includeRaw ?? false);
-    if (!isGood(dataValue.statusCode)) {
-      return { _tag: "NonGoodStatus", ...base } as ReadResult<A, Id>;
-    }
-    const decoded = yield* Effect.result(
-      Codec.decode(def.codec, dataValue.value, dataValue, structureRuntime),
-    );
-    if (Result.isFailure(decoded)) {
-      return {
-        _tag: "DecodeError",
-        ...base,
-        error: decoded.failure,
-      } as ReadResult<A, Id>;
-    }
-    return {
-      _tag: "Value",
-      ...base,
-      value: decoded.success as unknown as A,
-    } as ReadResult<A, Id>;
+    return resultFromStatusAndDecode<A, typeof base, ReadResult<A, Id>>({
+      statusCode: dataValue.statusCode,
+      status: base,
+      decode: Codec.decode(
+        def.codec,
+        dataValue.value,
+        dataValue,
+        structureRuntime,
+      ),
+      nonGoodStatus: (base) =>
+        ({ _tag: "NonGoodStatus", ...base }) as ReadResult<A, Id>,
+      decodeError: (error, base) =>
+        ({ _tag: "DecodeError", ...base, error }) as ReadResult<A, Id>,
+      value: (value) =>
+        ({
+          _tag: "Value",
+          ...base,
+          value: value as unknown as A,
+        }) as ReadResult<A, Id>,
+    });
   });
 
 export const writeVariable = <const Id extends string, A>(

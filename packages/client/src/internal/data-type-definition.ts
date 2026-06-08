@@ -16,7 +16,7 @@ import { Effect } from "effect";
 
 import type { NodeIdString } from "./common/node-id.js";
 import type { MetadataService, OpcuaNodeMetadataResult } from "./metadata.js";
-import { isGood, normalizeStatusCode } from "./normalize.js";
+import { isGood, normalizeStatusCode } from "./values/normalize.js";
 import { serviceError, type OpcuaError } from "../OpcuaError.js";
 
 type DynamicStructureSchema = Parameters<

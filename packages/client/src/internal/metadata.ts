@@ -18,7 +18,7 @@ import {
 import { Effect } from "effect";
 
 import type { NodeIdString } from "./common/node-id.js";
-import { Codec } from "./codecs.js";
+import { Codec } from "./values/codec.js";
 import {
   configurationError,
   isConfigurationError,
@@ -37,13 +37,13 @@ import {
   type MethodArg,
   type MethodMetadata,
 } from "../OpcuaMethod.js";
-import { isGood } from "./normalize.js";
+import { isGood } from "./values/normalize.js";
 import {
   normalizeLocalizedText,
   normalizeQualifiedName,
   normalizeStatusCode,
-} from "./normalize.js";
-import type { OpcuaStructureRuntime } from "./structure-runtime.js";
+} from "./values/normalize.js";
+import type { OpcuaStructureRuntime } from "./structures/runtime.js";
 import {
   accessDeniedError,
   codecMetadata,

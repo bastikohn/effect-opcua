@@ -5,7 +5,7 @@ import type {
   NodeIdString,
   VariableCapability,
 } from "./internal/common/node-id.js";
-import type { OpcuaStatusInfo } from "./internal/normalize.js";
+import type { OpcuaStatusInfo } from "./internal/values/normalize.js";
 
 export type OpcuaErrorReason =
   | {

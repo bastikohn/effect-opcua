@@ -12,7 +12,7 @@ import { Duration, Effect, PubSub, Queue, Result, Scope, Stream } from "effect";
 import * as OpcuaError from "./OpcuaError.js";
 import * as OpcuaVariable from "./OpcuaVariable.js";
 
-import { Codec } from "./internal/codecs.js";
+import { Codec } from "./internal/values/codec.js";
 import type { NodeIdString } from "./internal/common/node-id.js";
 import { chunksOf } from "./internal/common/collections.js";
 import { EventBus, type OpcuaSubscriptionEvent } from "./internal/events.js";
@@ -28,8 +28,9 @@ import {
   isGood,
   normalizeStatusCode,
   type OpcuaStatusInfo,
-} from "./internal/normalize.js";
-import type { OpcuaStructureRuntime } from "./internal/structure-runtime.js";
+} from "./internal/values/normalize.js";
+import { resultFromStatusAndDecode } from "./internal/values/result.js";
+import type { OpcuaStructureRuntime } from "./internal/structures/runtime.js";
 
 export type BufferPolicy =
   | { readonly _tag: "Sliding"; readonly capacity: number }
@@ -751,35 +752,36 @@ const monitorSampleFromDataValue = <Items>(
   dataValue: DataValue,
   structureRuntime: OpcuaStructureRuntime,
 ): Effect.Effect<MonitorSample<Items>> =>
-  Effect.gen(function* () {
+  Effect.suspend(() => {
     const base = monitorSampleBase(entry, dataValue);
-    if (!isGood(dataValue.statusCode)) {
-      return { _tag: "Status", ...base } as MonitorSample<Items>;
-    }
-    const decoded = yield* Effect.result(
-      Codec.decode(
+    return resultFromStatusAndDecode<
+      unknown,
+      typeof base,
+      MonitorSample<Items>
+    >({
+      statusCode: dataValue.statusCode,
+      status: base,
+      decode: Codec.decode(
         entry.def.codec,
         dataValue.value,
         dataValue,
         structureRuntime,
       ),
-    );
-    if (Result.isFailure(decoded)) {
-      return {
-        _tag: "DecodeError",
-        ...base,
-        error: OpcuaError.decodeError({
-          nodeId: entry.nodeId,
-          cause: decoded.failure,
-        }),
-        rawValue: dataValue.value?.value,
-      } as MonitorSample<Items>;
-    }
-    return {
-      _tag: "Value",
-      ...base,
-      value: decoded.success,
-    } as MonitorSample<Items>;
+      nonGoodStatus: (base) =>
+        ({ _tag: "Status", ...base }) as MonitorSample<Items>,
+      decodeError: (error, base) =>
+        ({
+          _tag: "DecodeError",
+          ...base,
+          error: OpcuaError.decodeError({
+            nodeId: entry.nodeId,
+            cause: error,
+          }),
+          rawValue: dataValue.value?.value,
+        }) as MonitorSample<Items>,
+      value: (value) =>
+        ({ _tag: "Value", ...base, value }) as MonitorSample<Items>,
+    });
   });
 
 const monitorSampleBase = <Items>(

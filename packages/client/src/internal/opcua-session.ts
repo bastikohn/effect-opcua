@@ -25,7 +25,7 @@ import {
   wireSubscriptionEvents,
 } from "./events.js";
 import { makeMetadataService } from "./metadata.js";
-import { makeStructureRuntime } from "./structure-runtime.js";
+import { makeStructureRuntime } from "./structures/runtime.js";
 import {
   callManyWithState,
   readManyWithState,
