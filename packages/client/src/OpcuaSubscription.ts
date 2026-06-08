@@ -16,7 +16,8 @@ import { Codec } from "./internal/values/codec.js";
 import * as VariableOperations from "./internal/variable/operations.js";
 import type { NodeIdString } from "./internal/common/node-id.js";
 import { chunksOf } from "./internal/common/collections.js";
-import { EventBus, type OpcuaSubscriptionEvent } from "./internal/events.js";
+import type { OpcuaSubscriptionEvent } from "./internal/events/model.js";
+import { EventBus } from "./internal/events/wire.js";
 import {
   applyMonitorOptions,
   makeQueue,

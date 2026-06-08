@@ -20,7 +20,7 @@ import type {
   OpcuaBrowseOptions,
   OpcuaBrowseResult,
 } from "./internal/browse/operations.js";
-import type { OpcuaSessionEvent } from "./internal/events.js";
+import type { OpcuaSessionEvent } from "./internal/events/model.js";
 import type {
   OpcuaAccessBits,
   OpcuaMetadataReadFailure,
@@ -36,7 +36,7 @@ import type {
   OpcuaStructureDefinition,
   OpcuaStructureField,
 } from "./internal/data-types/read.js";
-import { make } from "./internal/opcua-session.js";
+import { make } from "./internal/session/make.js";
 import type {
   CallManyOptions,
   ReadManyOptions,
