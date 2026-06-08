@@ -18,7 +18,7 @@ import {
   type OpcuaNodeIdInfo,
   type OpcuaStatusInfo,
 } from "./internal/values/normalize.js";
-import type { MethodCallOptions } from "./internal/session-operations.js";
+import type { MethodCallOptions } from "./internal/batch/operations.js";
 
 export type { MethodCallOptions };
 

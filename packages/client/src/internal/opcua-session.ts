@@ -33,7 +33,7 @@ import {
   readManyWithState,
   writeManyWithState,
   type SessionOperationsState,
-} from "./session-operations.js";
+} from "./batch/operations.js";
 import { validateSubscriptionOptions } from "./subscription-options.js";
 import {
   readDataTypeDefinition as readDataTypeDefinitionImpl,

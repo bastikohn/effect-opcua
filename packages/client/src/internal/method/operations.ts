@@ -10,11 +10,11 @@ import {
   methodNotExecutableError,
   serviceError,
 } from "../../OpcuaError.js";
-import { runChunked, type BatchOptions } from "../batch.js";
+import { runChunked, type BatchOptions } from "../batch/chunk.js";
 import { normalizeStatusCode } from "../values/normalize.js";
 import { resultFromStatusAndDecode } from "../values/result.js";
 import type { OpcuaStructureRuntime } from "../structures/runtime.js";
-import type { MethodCallOptions } from "../session-operations.js";
+import type { MethodCallOptions } from "../batch/operations.js";
 import {
   normalizeInputArgumentResults,
   outputObjectFromResult,

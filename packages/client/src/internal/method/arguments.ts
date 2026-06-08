@@ -28,7 +28,7 @@ import {
   normalizeStatusCode,
 } from "../values/normalize.js";
 import type { OpcuaStructureRuntime } from "../structures/runtime.js";
-import type { MethodCallOptions } from "../session-operations.js";
+import type { MethodCallOptions } from "../batch/operations.js";
 import type {
   AnyMethodDef,
   InputOfMethodDef,

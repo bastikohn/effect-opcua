@@ -42,7 +42,7 @@ import type {
   ReadManyOptions,
   SessionBatchingOptions,
   WriteManyOptions,
-} from "./internal/session-operations.js";
+} from "./internal/batch/operations.js";
 
 export type {
   OpcuaBrowseChildrenOptions,

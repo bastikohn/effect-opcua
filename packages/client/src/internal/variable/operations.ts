@@ -12,7 +12,7 @@ import {
 } from "node-opcua";
 import { Effect } from "effect";
 
-import { runChunked, type BatchOptions } from "../batch.js";
+import { runChunked, type BatchOptions } from "../batch/chunk.js";
 import type { NodeIdString, VariableCapability } from "../common/node-id.js";
 import { Codec, type OpcuaCodec } from "../values/codec.js";
 import {
