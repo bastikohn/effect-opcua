@@ -13,7 +13,7 @@ import {
 import { Effect, Result } from "effect";
 
 import { runChunked, type BatchOptions } from "./internal/batch.js";
-import type { NodeIdString } from "./internal/capabilities.js";
+import type { NodeIdString } from "./internal/common/node-id.js";
 import {
   Codec,
   dynamic,
@@ -41,7 +41,7 @@ import {
   type OpcuaStatusInfo,
 } from "./internal/normalize.js";
 import type { OpcuaStructureRuntime } from "./internal/structure-runtime.js";
-import { isPlainRecord, isRecord } from "./internal/predicates.js";
+import { isPlainRecord, isRecord } from "./internal/common/predicates.js";
 import type { MethodCallOptions } from "./internal/session-operations.js";
 
 export type { MethodCallOptions };

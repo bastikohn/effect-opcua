@@ -13,8 +13,8 @@ import * as OpcuaError from "./OpcuaError.js";
 import * as OpcuaVariable from "./OpcuaVariable.js";
 
 import { Codec } from "./internal/codecs.js";
-import type { NodeIdString } from "./internal/capabilities.js";
-import { chunksOf } from "./internal/collections.js";
+import type { NodeIdString } from "./internal/common/node-id.js";
+import { chunksOf } from "./internal/common/collections.js";
 import { EventBus, type OpcuaSubscriptionEvent } from "./internal/events.js";
 import {
   applyMonitorOptions,

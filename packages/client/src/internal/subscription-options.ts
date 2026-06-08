@@ -1,4 +1,4 @@
-import { Duration, Effect } from "effect";
+import { Effect } from "effect";
 
 import {
   DEFAULT_LIFETIME_COUNT,
@@ -6,12 +6,14 @@ import {
   DEFAULT_MAX_NOTIFICATIONS_PER_PUBLISH,
   DEFAULT_PRIORITY,
   DEFAULT_PUBLISHING_ENABLED,
-} from "./constants.js";
+} from "./common/constants.js";
 import {
-  isPlainRecord,
-  nonNegativeInteger,
-  positiveInteger,
-} from "./predicates.js";
+  durationToMillis,
+  nonNegativeIntegerOption,
+  positiveIntegerOption,
+  unknownKeys,
+} from "./common/options.js";
+import { isPlainRecord } from "./common/predicates.js";
 import {
   configurationError,
   type OpcuaConfigurationError,
@@ -43,22 +45,23 @@ export const validateSubscriptionOptions = (
     if (!isPlainRecord(options)) {
       return Effect.fail(subscriptionOptionsError("options must be an object"));
     }
-    const unknown = Object.keys(options).filter(
-      (key) => !allowedSubscriptionOptionKeys.has(key),
-    );
+    const unknown = unknownKeys(options, allowedSubscriptionOptionKeys);
     if (unknown.length > 0) {
       return Effect.fail(
         subscriptionOptionsError(`unsupported option: ${unknown.join(", ")}`),
       );
     }
 
-    const publishingInterval = durationMillis(options.publishingInterval);
+    const publishingInterval = durationToMillis(options.publishingInterval, {
+      notDuration: "publishingInterval must be a Duration",
+      invalidDuration: "publishingInterval must be finite and non-negative",
+    });
     if (typeof publishingInterval === "string") {
       return Effect.fail(subscriptionOptionsError(publishingInterval));
     }
 
     const lifetimeCount = options.lifetimeCount ?? DEFAULT_LIFETIME_COUNT;
-    if (!positiveInteger(lifetimeCount)) {
+    if (!positiveIntegerOption(lifetimeCount)) {
       return Effect.fail(
         subscriptionOptionsError("lifetimeCount must be a positive integer"),
       );
@@ -66,7 +69,7 @@ export const validateSubscriptionOptions = (
 
     const maxKeepAliveCount =
       options.maxKeepAliveCount ?? DEFAULT_MAX_KEEP_ALIVE_COUNT;
-    if (!positiveInteger(maxKeepAliveCount)) {
+    if (!positiveIntegerOption(maxKeepAliveCount)) {
       return Effect.fail(
         subscriptionOptionsError(
           "maxKeepAliveCount must be a positive integer",
@@ -77,7 +80,7 @@ export const validateSubscriptionOptions = (
     const maxNotificationsPerPublish =
       options.maxNotificationsPerPublish ??
       DEFAULT_MAX_NOTIFICATIONS_PER_PUBLISH;
-    if (!nonNegativeInteger(maxNotificationsPerPublish)) {
+    if (!nonNegativeIntegerOption(maxNotificationsPerPublish)) {
       return Effect.fail(
         subscriptionOptionsError(
           "maxNotificationsPerPublish must be a non-negative integer",
@@ -94,7 +97,7 @@ export const validateSubscriptionOptions = (
     }
 
     const priority = options.priority ?? DEFAULT_PRIORITY;
-    if (!nonNegativeInteger(priority) || priority > 255) {
+    if (!nonNegativeIntegerOption(priority) || priority > 255) {
       return Effect.fail(
         subscriptionOptionsError(
           "priority must be an integer between 0 and 255",
@@ -111,17 +114,6 @@ export const validateSubscriptionOptions = (
       priority,
     });
   });
-
-const durationMillis = (duration: Duration.Duration) => {
-  if (!Duration.isDuration(duration)) {
-    return "publishingInterval must be a Duration";
-  }
-  const millis = Duration.toMillis(duration);
-  if (!Number.isFinite(millis) || millis < 0) {
-    return "publishingInterval must be finite and non-negative";
-  }
-  return millis;
-};
 
 const subscriptionOptionsError = (cause: unknown) =>
   configurationError({

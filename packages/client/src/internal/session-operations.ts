@@ -11,10 +11,10 @@ import {
   validateUniqueTargets,
   type KeyedEntry,
 } from "./keyed-batch.js";
-import { isPlainRecord } from "./predicates.js";
+import { isPlainRecord } from "./common/predicates.js";
 import type { makeMetadataService } from "./metadata.js";
 import type { makeStructureRuntime } from "./structure-runtime.js";
-import type { NodeIdString } from "./capabilities.js";
+import type { NodeIdString } from "./common/node-id.js";
 
 export type ServiceLimits = {
   readonly maxNodesPerRequest: number;

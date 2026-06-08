@@ -5,7 +5,7 @@ import type {
 } from "node-opcua";
 import { Effect, PubSub } from "effect";
 
-import type { NodeIdString } from "./capabilities.js";
+import type { NodeIdString } from "./common/node-id.js";
 
 export type OpcuaClientEvent =
   | { readonly _tag: "Connected"; readonly endpointUrl: string }

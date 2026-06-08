@@ -17,7 +17,7 @@ import {
 } from "node-opcua";
 import { Effect } from "effect";
 
-import type { NodeIdString } from "./capabilities.js";
+import type { NodeIdString } from "./common/node-id.js";
 import { Codec } from "./codecs.js";
 import {
   configurationError,

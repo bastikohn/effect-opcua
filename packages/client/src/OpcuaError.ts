@@ -4,7 +4,7 @@ import { Data } from "effect";
 import type {
   NodeIdString,
   VariableCapability,
-} from "./internal/capabilities.js";
+} from "./internal/common/node-id.js";
 import type { OpcuaStatusInfo } from "./internal/normalize.js";
 
 export type OpcuaErrorReason =

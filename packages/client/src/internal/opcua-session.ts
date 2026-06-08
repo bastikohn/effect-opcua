@@ -46,7 +46,7 @@ import {
   DEFAULT_BROWSE_REFERENCE_TYPE_ID,
   DEFAULT_BROWSE_RESULT_MASK,
   EVENT_BUFFER_SIZE,
-} from "./constants.js";
+} from "./common/constants.js";
 
 export const make = Effect.fnUntraced(function* (
   options?: OpcuaSession.SessionOptions,

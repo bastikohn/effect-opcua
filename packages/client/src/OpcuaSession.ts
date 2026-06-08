@@ -27,7 +27,7 @@ import type {
   OpcuaNodeMetadata,
   OpcuaNodeMetadataResult,
 } from "./internal/metadata.js";
-import type { NodeIdString } from "./internal/capabilities.js";
+import type { NodeIdString } from "./internal/common/node-id.js";
 import type {
   OpcuaDataTypeDefinition,
   OpcuaDataTypeDefinitionResult,

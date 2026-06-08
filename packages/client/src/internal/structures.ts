@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 
-import type { NodeIdString } from "./capabilities.js";
+import type { NodeIdString } from "./common/node-id.js";
 
 export type StructureDef<A> = {
   readonly _tag: "Structure";

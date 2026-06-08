@@ -12,7 +12,7 @@ import {
 } from "node-opcua";
 import { Effect } from "effect";
 
-import type { NodeIdString } from "./capabilities.js";
+import type { NodeIdString } from "./common/node-id.js";
 import { encodeWithSchema, decodeWithSchema } from "./codecs.js";
 import {
   configurationError,
@@ -27,7 +27,7 @@ import {
   type StructureArrayDef,
   type StructureDef,
 } from "./structures.js";
-import { isPlainRecord } from "./predicates.js";
+import { isPlainRecord } from "./common/predicates.js";
 import { structureBodyFromExtensionObject } from "./structure-adapter.js";
 
 export type OpcuaStructureRuntime = {

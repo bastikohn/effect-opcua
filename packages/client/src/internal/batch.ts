@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 
-import { chunksOf } from "./collections.js";
-import { positiveInteger } from "./predicates.js";
+import { chunksOf } from "./common/collections.js";
+import { positiveIntegerOrDefault } from "./common/options.js";
 
 export type BatchOptions = {
   readonly maxItemsPerRequest?: number;
@@ -42,8 +42,3 @@ const normalizeBatchOptions = (options: BatchOptions | undefined) => ({
     DEFAULT_MAX_CONCURRENT_REQUESTS,
   ),
 });
-
-const positiveIntegerOrDefault = (
-  value: number | undefined,
-  fallback: number,
-) => (positiveInteger(value) ? Math.floor(value) : fallback);

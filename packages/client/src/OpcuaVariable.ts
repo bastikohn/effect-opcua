@@ -17,7 +17,7 @@ import { runChunked, type BatchOptions } from "./internal/batch.js";
 import type {
   NodeIdString,
   VariableCapability,
-} from "./internal/capabilities.js";
+} from "./internal/common/node-id.js";
 import {
   Codec,
   dynamic,
@@ -48,7 +48,7 @@ export type { AnySchema, CodecType, OpcuaCodec };
 export type {
   NodeIdString,
   ExpandedNodeIdString,
-} from "./internal/capabilities.js";
+} from "./internal/common/node-id.js";
 export type { OpcuaDynamicValue } from "./internal/normalize.js";
 
 export type VariableAccess = "read" | "write" | "readWrite";

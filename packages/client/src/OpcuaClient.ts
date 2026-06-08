@@ -3,7 +3,7 @@ import { type Config, Context, Effect, Layer, PubSub, Stream } from "effect";
 
 import * as OpcuaError from "./OpcuaError.js";
 
-import { EVENT_BUFFER_SIZE } from "./internal/constants.js";
+import { EVENT_BUFFER_SIZE } from "./internal/common/constants.js";
 import {
   EventBus,
   type OpcuaClientEvent,

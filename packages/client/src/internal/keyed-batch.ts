@@ -1,7 +1,8 @@
 import { Effect } from "effect";
 
 import { configurationError, type OpcuaError } from "../OpcuaError.js";
-import { isPlainRecord, positiveInteger } from "./predicates.js";
+import { positiveIntegerOption, unknownKeys } from "./common/options.js";
+import { isPlainRecord } from "./common/predicates.js";
 
 export type KeyedEntry<Key extends string, Normalized> = {
   readonly key: Key;
@@ -259,8 +260,7 @@ const optionsShapeError = (
       cause: "options must be an object",
     });
   }
-  const allowed = new Set(allowedKeys);
-  const unknown = Object.keys(value).filter((key) => !allowed.has(key));
+  const unknown = unknownKeys(value, allowedKeys);
   return unknown.length > 0
     ? configurationError({
         operation,
@@ -281,18 +281,15 @@ const serviceOptionsError = (
       cause: "service options must be an object",
     });
   }
-  const allowed = new Set(allowedKeys);
-  for (const key of Object.keys(value)) {
-    if (!allowed.has(key)) {
-      return configurationError({
-        operation,
-        cause: `unsupported service option: ${key}`,
-      });
-    }
+  for (const key of unknownKeys(value, allowedKeys)) {
+    return configurationError({
+      operation,
+      cause: `unsupported service option: ${key}`,
+    });
   }
   for (const key of allowedKeys) {
     const optionValue = value[key];
-    if (optionValue !== undefined && !positiveInteger(optionValue)) {
+    if (optionValue !== undefined && !positiveIntegerOption(optionValue)) {
       return configurationError({
         operation,
         cause: `${key} must be a positive integer`,

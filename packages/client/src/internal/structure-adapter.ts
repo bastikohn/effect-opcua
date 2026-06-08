@@ -1,6 +1,6 @@
 import { ExtensionObject } from "node-opcua";
 
-import { isPlainRecord } from "./predicates.js";
+import { isPlainRecord } from "./common/predicates.js";
 
 export type StructureBody = Readonly<Record<string, unknown>>;
 

@@ -24,7 +24,7 @@ import {
   type StructureArrayDef,
   type StructureDef,
 } from "./structures.js";
-import type { NodeIdString } from "./capabilities.js";
+import type { NodeIdString } from "./common/node-id.js";
 
 // Sync encode/decode helpers only support schemas without contextual services.
 export type AnySchema = Schema.Codec<unknown, unknown, never, never>;

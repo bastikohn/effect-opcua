@@ -6,10 +6,15 @@ import {
   coerceNodeId,
   type NodeId,
 } from "node-opcua";
-import { Duration, Effect, Queue } from "effect";
+import { Effect, Queue, type Duration } from "effect";
 
-import type { NodeIdString } from "./capabilities.js";
-import { isPlainRecord, positiveInteger } from "./predicates.js";
+import type { NodeIdString } from "./common/node-id.js";
+import {
+  durationToMillis,
+  positiveIntegerOption,
+  unknownKeys,
+} from "./common/options.js";
+import { isPlainRecord } from "./common/predicates.js";
 import {
   monitorConfigurationError,
   type OpcuaMonitorConfigurationError,
@@ -210,9 +215,7 @@ export const validateMonitorOptions = <Items>(
             ),
           );
         }
-        const unknown = Object.keys(override).filter(
-          (name) => !allowedOverrideKeys.has(name),
-        );
+        const unknown = unknownKeys(override, allowedOverrideKeys);
         if (unknown.length > 0) {
           return Effect.fail(
             makeMonitorConfigurationErrorForOperation(
@@ -236,9 +239,7 @@ export const validateMonitorOptions = <Items>(
           }),
         );
       }
-      const unknown = Object.keys(create).filter(
-        (name) => !allowedCreateKeys.has(name),
-      );
+      const unknown = unknownKeys(create, allowedCreateKeys);
       if (unknown.length > 0) {
         return Effect.fail(
           makeMonitorConfigurationErrorForOperation("monitor.options.create", {
@@ -252,14 +253,14 @@ export const validateMonitorOptions = <Items>(
       create?.maxItemsPerRequest ?? defaultCreate.maxItemsPerRequest;
     const maxConcurrentRequests =
       create?.maxConcurrentRequests ?? defaultCreate.maxConcurrentRequests;
-    if (!positiveInteger(maxItemsPerRequest)) {
+    if (!positiveIntegerOption(maxItemsPerRequest)) {
       return Effect.fail(
         makeMonitorConfigurationErrorForOperation("monitor.options.create", {
           cause: "maxItemsPerRequest must be a positive integer",
         }),
       );
     }
-    if (!positiveInteger(maxConcurrentRequests)) {
+    if (!positiveIntegerOption(maxConcurrentRequests)) {
       return Effect.fail(
         makeMonitorConfigurationErrorForOperation("monitor.options.create", {
           cause: "maxConcurrentRequests must be a positive integer",
@@ -309,7 +310,10 @@ const normalizeEffectiveOptions = <Items>(
     const error = effectiveOptionsError(options, item.key, item.nodeId);
     if (error) return Effect.fail(error);
     const requested = {
-      samplingInterval: durationMillis(options.samplingInterval),
+      samplingInterval: durationToMillis(options.samplingInterval, {
+        notDuration: "samplingInterval must be a Duration",
+        invalidDuration: "samplingInterval must be finite and non-negative",
+      }) as number,
       queueSize: options.queueSize,
       discardOldest: options.discardOldest,
       filter: options.filter,
@@ -341,28 +345,21 @@ const effectiveOptionsError = (
   key?: string,
   nodeId?: NodeIdString,
 ) => {
-  if (!Duration.isDuration(options.samplingInterval)) {
+  const samplingInterval = durationToMillis(options.samplingInterval, {
+    notDuration: "samplingInterval must be a Duration",
+    invalidDuration: "samplingInterval must be finite and non-negative",
+  });
+  if (typeof samplingInterval === "string") {
     return makeMonitorConfigurationErrorForOperation(
       "monitor.options.samplingInterval",
       {
         key,
         nodeId,
-        cause: "samplingInterval must be a Duration",
+        cause: samplingInterval,
       },
     );
   }
-  const samplingInterval = durationMillis(options.samplingInterval);
-  if (!Number.isFinite(samplingInterval) || samplingInterval < 0) {
-    return makeMonitorConfigurationErrorForOperation(
-      "monitor.options.samplingInterval",
-      {
-        key,
-        nodeId,
-        cause: "samplingInterval must be finite and non-negative",
-      },
-    );
-  }
-  if (!positiveInteger(options.queueSize)) {
+  if (!positiveIntegerOption(options.queueSize)) {
     return makeMonitorConfigurationErrorForOperation(
       "monitor.options.queueSize",
       {
@@ -406,7 +403,7 @@ const bufferPolicyError = (policy: BufferPolicy) => {
   if (
     !policy ||
     (policy._tag !== "Sliding" && policy._tag !== "Dropping") ||
-    !positiveInteger(policy.capacity)
+    !positiveIntegerOption(policy.capacity)
   ) {
     return makeMonitorConfigurationErrorForOperation(
       "monitor.options.clientBuffer",
@@ -558,9 +555,6 @@ const isMonitorDeadband = (value: unknown): value is MonitorDeadband => {
       return false;
   }
 };
-
-const durationMillis = (duration: Duration.Duration) =>
-  Duration.toMillis(duration);
 
 const makeMonitorConfigurationErrorForOperation = (
   operation: string,
