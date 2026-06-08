@@ -4,7 +4,6 @@ import { Effect, PubSub, Scope, Semaphore, Stream } from "effect";
 import * as OpcuaError from "../../OpcuaError.js";
 import * as OpcuaMethod from "../../OpcuaMethod.js";
 import * as OpcuaSession from "../../OpcuaSession.js";
-import * as OpcuaSubscription from "../../OpcuaSubscription.js";
 import * as OpcuaVariable from "../../OpcuaVariable.js";
 import * as MethodOperations from "../method/operations.js";
 import * as VariableOperations from "../variable/operations.js";
@@ -140,15 +139,9 @@ export const makeSession: (
     const makeSubscription: OpcuaSession.SessionService["makeSubscription"] = (
       options,
     ) =>
-      Effect.gen(function* () {
-        const subscription = yield* makeSubscriptionRuntime(unsafeRaw, options);
-        return OpcuaSubscription.makeSubscription(
-          subscription.unsafeRaw,
-          subscription.events,
-          structureRuntime,
-          (def) => metadata.variable(def),
-        );
-      });
+      makeSubscriptionRuntime(unsafeRaw, options, structureRuntime, (def) =>
+        metadata.variable(def),
+      );
 
     const call: OpcuaSession.SessionService["call"] = (def, input, options) =>
       Effect.gen(function* () {

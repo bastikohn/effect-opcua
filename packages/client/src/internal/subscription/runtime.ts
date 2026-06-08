@@ -3,14 +3,22 @@ import { Effect, PubSub } from "effect";
 
 import * as OpcuaError from "../../OpcuaError.js";
 import type * as OpcuaSession from "../../OpcuaSession.js";
+import type { OpcuaSubscription } from "../../OpcuaSubscription.js";
 import { EVENT_BUFFER_SIZE } from "../common/constants.js";
 import type { OpcuaSubscriptionEvent } from "../events/model.js";
 import { wireSubscriptionEvents } from "../events/wire.js";
+import {
+  makeSubscriptionService,
+  type ValidateVariable,
+} from "../monitoring/runtime.js";
+import type { OpcuaStructureRuntime } from "../structures/runtime.js";
 import { validateSubscriptionOptions } from "./options.js";
 
 export const makeSubscriptionRuntime = Effect.fnUntraced(function* (
   unsafeRawSession: ClientSession,
   options: OpcuaSession.SubscriptionOptions,
+  structureRuntime: OpcuaStructureRuntime,
+  validateVariable: ValidateVariable,
 ) {
   const normalized = yield* validateSubscriptionOptions(options);
   const events = yield* PubSub.sliding<OpcuaSubscriptionEvent>({
@@ -54,7 +62,12 @@ export const makeSubscriptionRuntime = Effect.fnUntraced(function* (
       ),
   );
   yield* wireSubscriptionEvents(unsafeRaw, events);
-  return { events, unsafeRaw } as const;
+  return makeSubscriptionService(
+    unsafeRaw,
+    events,
+    structureRuntime,
+    validateVariable,
+  );
 });
 
 export { validateSubscriptionOptions };
