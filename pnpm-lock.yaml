@@ -135,6 +135,9 @@ importers:
       "@effect-opcua/client":
         specifier: workspace:*
         version: link:../client
+      "@effect/platform-node":
+        specifier: 4.0.0-beta.66
+        version: 4.0.0-beta.66(effect@4.0.0-beta.66)(ioredis@5.11.0)
       effect:
         specifier: 4.0.0-beta.66
         version: 4.0.0-beta.66

@@ -1,81 +1,83 @@
 #!/usr/bin/env node
+import { NodeRuntime, NodeServices } from "@effect/platform-node";
 import { Effect } from "effect";
+import { CliError, Command, Flag } from "effect/unstable/cli";
 
-import { loadConfig } from "./config.js";
-import {
-  checkFromNormalizedConfig,
-  generateFromNormalizedConfig,
-} from "./generate.js";
 import { displayPath } from "./diagnostics.js";
 import type { CodegenIssue } from "./types.js";
 
-type CliOptions = {
-  readonly configPath: string;
-  readonly verbose: boolean;
-  readonly check: boolean;
-};
+const configPath = Flag.string("config").pipe(
+  Flag.withDescription("Path to the codegen config"),
+  Flag.withDefault("effect-opcua.codegen.ts"),
+);
 
-const main = async () => {
-  const options = parseArgs(process.argv.slice(2));
-  if (options instanceof Error) {
-    process.stderr.write(`${options.message}\n`);
-    process.exitCode = 2;
-    return;
-  }
-  const effect = Effect.gen(function* () {
-    const config = yield* loadConfig(options.configPath);
-    return options.check
-      ? yield* checkFromNormalizedConfig(config)
-      : yield* generateFromNormalizedConfig(config);
-  });
+const verbose = Flag.boolean("verbose").pipe(
+  Flag.withDescription("Print informational diagnostics"),
+);
 
-  try {
-    const result = await Effect.runPromise(Effect.scoped(effect));
-    printIssues(result.issues, options.verbose);
-    if ("ok" in result) {
-      if (!result.ok) {
-        process.stderr.write(
-          `Generated output is stale (${result.staleFiles.length} stale, ${result.missingFiles.length} missing).\n`,
+const check = Flag.boolean("check").pipe(
+  Flag.withDescription("Check generated output without writing files"),
+);
+
+const command = Command.make(
+  "effect-opcua-codegen",
+  { configPath, verbose, check },
+  ({ configPath, verbose, check }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { loadConfig } = yield* loadConfigModule;
+        const config = yield* loadConfig(configPath);
+        const generator = yield* loadGenerateModule;
+        const result = check
+          ? yield* generator.checkFromNormalizedConfig(config)
+          : yield* generator.generateFromNormalizedConfig(config);
+
+        printIssues(result.issues, verbose);
+        if ("ok" in result) {
+          if (!result.ok) {
+            process.stderr.write(
+              `Generated output is stale (${result.staleFiles.length} stale, ${result.missingFiles.length} missing).\n`,
+            );
+            process.exitCode = 1;
+            return;
+          }
+          process.stdout.write("Generated output is up to date.\n");
+          return;
+        }
+        process.stdout.write(
+          `Generated ${result.writtenFiles.length} files.\n`,
         );
-        process.exitCode = 1;
+      }),
+    ),
+).pipe(Command.withDescription("Generate an Effect OPC-UA client model"));
+
+const main = command.pipe(
+  Command.run({ version: "0.0.0" }),
+  Effect.catch((error) =>
+    Effect.sync(() => {
+      if (CliError.isCliError(error) && error._tag === "ShowHelp") {
+        process.exitCode = 2;
         return;
       }
-      process.stdout.write("Generated output is up to date.\n");
-      return;
-    }
-    process.stdout.write(`Generated ${result.writtenFiles.length} files.\n`);
-  } catch (error) {
-    process.stderr.write(`${formatError(error)}\n`);
-    process.exitCode = 2;
-  }
-};
+      const message = CliError.isCliError(error)
+        ? error.message
+        : formatError(error);
+      process.stderr.write(`${message}\n`);
+      process.exitCode = 2;
+    }),
+  ),
+  Effect.provide(NodeServices.layer),
+);
 
-const parseArgs = (args: readonly string[]): CliOptions | Error => {
-  let configPath = "effect-opcua.codegen.ts";
-  let verbose = false;
-  let check = false;
-  for (let index = 0; index < args.length; index++) {
-    const arg = args[index];
-    switch (arg) {
-      case "--config": {
-        const value = args[index + 1];
-        if (!value) return new Error("--config requires a path");
-        configPath = value;
-        index++;
-        break;
-      }
-      case "--verbose":
-        verbose = true;
-        break;
-      case "--check":
-        check = true;
-        break;
-      default:
-        return new Error(`Unsupported argument: ${arg}`);
-    }
-  }
-  return { configPath, verbose, check };
-};
+const loadConfigModule = Effect.tryPromise({
+  try: () => import("./config.js"),
+  catch: (cause) => cause,
+});
+
+const loadGenerateModule = Effect.tryPromise({
+  try: () => import("./generate.js"),
+  catch: (cause) => cause,
+});
 
 const printIssues = (issues: readonly CodegenIssue[], verbose: boolean) => {
   const visible = verbose
@@ -143,4 +145,4 @@ const isTagged = (value: unknown, tag: string) =>
   "_tag" in value &&
   (value as { readonly _tag?: unknown })._tag === tag;
 
-await main();
+NodeRuntime.runMain(main, { disableErrorReporting: true });

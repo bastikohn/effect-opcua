@@ -37,7 +37,7 @@ import type {
   OpcuaStructureField,
 } from "./internal/data-type-definition.js";
 import { make } from "./internal/opcua-session.js";
-import {
+import type {
   CallManyOptions,
   ReadManyOptions,
   SessionBatchingOptions,
@@ -65,7 +65,7 @@ export type {
   OpcuaStructureField,
 };
 
-export { SessionBatchingOptions };
+export type { SessionBatchingOptions };
 
 interface VariableService {
   readonly read: <const Def extends OpcuaVariable.ReadableVariableDef>(
@@ -192,6 +192,10 @@ export interface SessionService
 export class Session extends Context.Service<Session, SessionService>()(
   "@effect-opcua/client/OpcuaSession",
 ) {}
+
+export type Service = SessionService;
+export type ReadManyResult<Items> = OpcuaVariable.ReadManyResult<Items>;
+export { Session as OpcuaSession };
 
 export const read = <const Def extends OpcuaVariable.ReadableVariableDef>(
   def: Def,

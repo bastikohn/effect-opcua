@@ -42,9 +42,9 @@ import {
 } from "./internal/normalize.js";
 import type { OpcuaStructureRuntime } from "./internal/structure-runtime.js";
 import { isPlainRecord, isRecord } from "./internal/predicates.js";
-import { MethodCallOptions } from "./internal/session-operations.js";
+import type { MethodCallOptions } from "./internal/session-operations.js";
 
-export { MethodCallOptions };
+export type { MethodCallOptions };
 
 export type MethodArgSelector =
   | { readonly _tag: "Name"; readonly name: string }

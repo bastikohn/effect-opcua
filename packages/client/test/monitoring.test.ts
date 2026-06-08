@@ -14,8 +14,8 @@ import {
 import {
   Opcua,
   OpcuaSession,
-  OpcuaSubscription,
-  OpcuaVariable,
+  type OpcuaSubscription,
+  type OpcuaVariable,
 } from "@effect-opcua/client";
 import type { OpcuaSubscriptionEvent } from "../src/internal/events.js";
 import {
@@ -27,6 +27,7 @@ import {
   type ClientSubscription,
 } from "@effect-opcua/client/node-opcua";
 import type { OpcuaStructureRuntime } from "../src/internal/structure-runtime.js";
+import { makeSubscription } from "../src/OpcuaSubscription.js";
 import { makeLiveTestContext } from "./live.js";
 import {
   GlobalCommandSubmitRequest,
@@ -197,7 +198,7 @@ const makeFakeSubscription = (options?: {
         }
       },
     } as unknown as ClientSubscription;
-    const subscription = OpcuaSubscription.makeSubscription(
+    const subscription = makeSubscription(
       raw,
       events,
       fakeStructureRuntime,
