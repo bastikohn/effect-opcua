@@ -8,12 +8,10 @@ import {
   type Stream,
 } from "effect";
 
-import {
-  OpcuaVariable,
-  OpcuaMethod,
-  OpcuaSubscription,
-  OpcuaError,
-} from "@effect-opcua/client";
+import type * as OpcuaError from "./OpcuaError.js";
+import type * as OpcuaMethod from "./OpcuaMethod.js";
+import type * as OpcuaSubscription from "./OpcuaSubscription.js";
+import type * as OpcuaVariable from "./OpcuaVariable.js";
 
 import type {
   OpcuaBrowseChildrenOptions,
@@ -39,6 +37,12 @@ import type {
   OpcuaStructureField,
 } from "./internal/data-type-definition.js";
 import { make } from "./internal/opcua-session.js";
+import {
+  CallManyOptions,
+  ReadManyOptions,
+  SessionBatchingOptions,
+  WriteManyOptions,
+} from "./internal/session-operations.js";
 
 export type {
   OpcuaBrowseChildrenOptions,
@@ -61,148 +65,9 @@ export type {
   OpcuaStructureField,
 };
 
-export type ReadManyServiceOptions = {
-  readonly maxNodesPerRead?: number;
-  readonly maxConcurrentRequests?: number;
-};
+export { SessionBatchingOptions };
 
-export type WriteManyServiceOptions = {
-  readonly maxNodesPerWrite?: number;
-  readonly maxConcurrentRequests?: number;
-};
-
-export type CallManyServiceOptions = {
-  readonly maxMethodsPerCall?: number;
-  readonly maxConcurrentRequests?: number;
-};
-
-export type OpcuaSessionBatchingOptions = {
-  readonly read?: ReadManyServiceOptions;
-  readonly write?: WriteManyServiceOptions;
-  readonly call?: CallManyServiceOptions;
-};
-
-export type Options = {
-  readonly userIdentity?: UserIdentityInfo;
-  readonly batching?: OpcuaSessionBatchingOptions;
-};
-
-export type OpcuaSubscriptionOptions = {
-  readonly publishingInterval: Duration.Duration;
-  readonly lifetimeCount?: number;
-  readonly maxKeepAliveCount?: number;
-  readonly maxNotificationsPerPublish?: number;
-  readonly publishingEnabled?: boolean;
-  readonly priority?: number;
-};
-
-export type ReadManyOptions = {
-  readonly validation?: "strict" | "none";
-  readonly service?: ReadManyServiceOptions;
-};
-
-export type WriteManyOptions = {
-  readonly service?: WriteManyServiceOptions;
-};
-
-export type CallManyOptions = {
-  readonly service?: CallManyServiceOptions;
-};
-
-export type ReadManyResult<Items> = {
-  readonly [Key in keyof Items]: Items[Key] extends OpcuaVariable.VariableDef<
-    infer Id,
-    infer A,
-    "read" | "readWrite"
-  >
-    ? OpcuaVariable.ReadResult<A, Id>
-    : never;
-};
-
-export type WriteManyItem<
-  Def extends OpcuaVariable.WritableVariableDef =
-    OpcuaVariable.WritableVariableDef,
-> = readonly [def: Def, value: OpcuaVariable.ValueOfVariableDef<Def>];
-
-type AnyWriteManyRecord = Record<
-  string,
-  readonly [OpcuaVariable.WritableVariableDef, unknown]
->;
-
-export type WriteManyInput<Items extends AnyWriteManyRecord> = {
-  readonly [Key in keyof Items]: Items[Key] extends readonly [
-    infer Def extends OpcuaVariable.WritableVariableDef,
-    unknown,
-  ]
-    ? readonly [def: Def, value: OpcuaVariable.ValueOfVariableDef<Def>]
-    : never;
-};
-
-export type WriteManyResult<Items> = {
-  readonly [Key in keyof Items]: Items[Key] extends readonly [
-    infer Def extends OpcuaVariable.WritableVariableDef,
-    unknown,
-  ]
-    ? Def extends OpcuaVariable.VariableDef<
-        infer Id,
-        unknown,
-        OpcuaVariable.VariableAccess
-      >
-      ? OpcuaVariable.WriteResult<Id>
-      : never
-    : never;
-};
-
-export type CallManyItem<
-  Def extends OpcuaMethod.AnyMethodDef = OpcuaMethod.AnyMethodDef,
-> =
-  | readonly [def: Def, input: OpcuaMethod.InputOfMethodDef<Def>]
-  | readonly [
-      def: Def,
-      input: OpcuaMethod.InputOfMethodDef<Def>,
-      options: OpcuaMethod.MethodCallOptions,
-    ];
-
-type AnyCallManyRecord = Record<
-  string,
-  | readonly [OpcuaMethod.AnyMethodDef, unknown]
-  | readonly [OpcuaMethod.AnyMethodDef, unknown, OpcuaMethod.MethodCallOptions]
->;
-
-export type CallManyInput<Items extends AnyCallManyRecord> = {
-  readonly [Key in keyof Items]: Items[Key] extends readonly [
-    infer Def extends OpcuaMethod.AnyMethodDef,
-    unknown,
-    OpcuaMethod.MethodCallOptions,
-  ]
-    ? readonly [
-        def: Def,
-        input: OpcuaMethod.InputOfMethodDef<Def>,
-        options: OpcuaMethod.MethodCallOptions,
-      ]
-    : Items[Key] extends readonly [
-          infer Def extends OpcuaMethod.AnyMethodDef,
-          unknown,
-        ]
-      ? readonly [def: Def, input: OpcuaMethod.InputOfMethodDef<Def>]
-      : never;
-};
-
-export type CallManyResult<Items> = {
-  readonly [Key in keyof Items]: Items[Key] extends readonly [
-    infer Def extends OpcuaMethod.AnyMethodDef,
-    unknown,
-    ...ReadonlyArray<unknown>,
-  ]
-    ? OpcuaMethod.MethodCallResult<
-        OpcuaMethod.OutputOfMethodDef<Def>,
-        Def["objectId"],
-        Def["methodId"]
-      >
-    : never;
-};
-
-export type Service = {
+interface VariableService {
   readonly read: <const Def extends OpcuaVariable.ReadableVariableDef>(
     def: Def,
   ) => Effect.Effect<
@@ -212,6 +77,15 @@ export type Service = {
     >,
     OpcuaError.OpcuaError
   >;
+  readonly readMany: <
+    const Items extends Record<string, OpcuaVariable.ReadableVariableDef>,
+  >(
+    items: Items,
+    options?: ReadManyOptions,
+  ) => Effect.Effect<
+    OpcuaVariable.ReadManyResult<Items>,
+    OpcuaError.OpcuaError
+  >;
   readonly write: <const Def extends OpcuaVariable.WritableVariableDef>(
     def: Def,
     value: OpcuaVariable.ValueOfVariableDef<Def>,
@@ -219,6 +93,35 @@ export type Service = {
     OpcuaVariable.WriteResult<OpcuaVariable.NodeIdOfVariableDef<Def>>,
     OpcuaError.OpcuaError
   >;
+  readonly writeMany: <const Items extends OpcuaVariable.AnyWriteManyRecord>(
+    items: Items & OpcuaVariable.WriteManyInput<Items>,
+    options?: WriteManyOptions,
+  ) => Effect.Effect<
+    OpcuaVariable.WriteManyResult<Items>,
+    OpcuaError.OpcuaError
+  >;
+}
+
+export type SubscriptionOptions = {
+  readonly publishingInterval: Duration.Duration;
+  readonly lifetimeCount?: number;
+  readonly maxKeepAliveCount?: number;
+  readonly maxNotificationsPerPublish?: number;
+  readonly publishingEnabled?: boolean;
+  readonly priority?: number;
+};
+
+interface SubscriptionService {
+  readonly makeSubscription: (
+    options: SubscriptionOptions,
+  ) => Effect.Effect<
+    OpcuaSubscription.OpcuaSubscription,
+    OpcuaError.OpcuaError,
+    Scope.Scope
+  >;
+}
+
+interface MethodService {
   readonly call: <const Spec extends OpcuaMethod.AnyMethodDef>(
     def: Spec,
     input: OpcuaMethod.InputOfMethodDef<Spec>,
@@ -231,20 +134,13 @@ export type Service = {
     >,
     OpcuaError.OpcuaError
   >;
-  readonly readMany: <
-    const Items extends Record<string, OpcuaVariable.ReadableVariableDef>,
-  >(
-    items: Items,
-    options?: ReadManyOptions,
-  ) => Effect.Effect<ReadManyResult<Items>, OpcuaError.OpcuaError>;
-  readonly writeMany: <const Items extends AnyWriteManyRecord>(
-    items: Items & WriteManyInput<Items>,
-    options?: WriteManyOptions,
-  ) => Effect.Effect<WriteManyResult<Items>, OpcuaError.OpcuaError>;
-  readonly callMany: <const Items extends AnyCallManyRecord>(
-    items: Items & CallManyInput<Items>,
+  readonly callMany: <const Items extends OpcuaMethod.AnyCallManyRecord>(
+    items: Items & OpcuaMethod.CallManyInput<Items>,
     options?: CallManyOptions,
-  ) => Effect.Effect<CallManyResult<Items>, OpcuaError.OpcuaError>;
+  ) => Effect.Effect<OpcuaMethod.CallManyResult<Items>, OpcuaError.OpcuaError>;
+}
+
+interface BrowseService {
   readonly browse: (
     input: OpcuaBrowseOptions,
   ) => Effect.Effect<OpcuaBrowseResult, OpcuaError.OpcuaError>;
@@ -258,6 +154,9 @@ export type Service = {
     nodeId: NodeIdString,
     options?: OpcuaBrowseChildrenOptions,
   ) => Effect.Effect<OpcuaBrowseChildrenResult, OpcuaError.OpcuaError>;
+}
+
+interface MetadataService {
   readonly readNamespaceArray: () => Effect.Effect<
     readonly string[],
     OpcuaError.OpcuaError
@@ -277,94 +176,98 @@ export type Service = {
     readonly OpcuaDataTypeDefinitionResult[],
     OpcuaError.OpcuaError
   >;
-  readonly makeSubscription: (
-    options: OpcuaSubscriptionOptions,
-  ) => Effect.Effect<
-    OpcuaSubscription.OpcuaSubscription,
-    OpcuaError.OpcuaError,
-    Scope.Scope
-  >;
+}
+
+export interface SessionService
+  extends
+    VariableService,
+    SubscriptionService,
+    MethodService,
+    BrowseService,
+    MetadataService {
   readonly events: Stream.Stream<OpcuaSessionEvent>;
   readonly unsafeRaw: ClientSession;
-};
+}
 
-export class OpcuaSession extends Context.Service<OpcuaSession, Service>()(
+export class Session extends Context.Service<Session, SessionService>()(
   "@effect-opcua/client/OpcuaSession",
 ) {}
 
 export const read = <const Def extends OpcuaVariable.ReadableVariableDef>(
   def: Def,
-) => OpcuaSession.use((session) => session.read(def));
-
-export const write = <const Def extends OpcuaVariable.WritableVariableDef>(
-  def: Def,
-  value: OpcuaVariable.ValueOfVariableDef<Def>,
-) => OpcuaSession.use((session) => session.write(def, value));
-
-export const call = <const Spec extends OpcuaMethod.AnyMethodDef>(
-  def: Spec,
-  input: OpcuaMethod.InputOfMethodDef<Spec>,
-  options?: OpcuaMethod.MethodCallOptions,
-) => OpcuaSession.use((session) => session.call(def, input, options));
+) => Session.use((session) => session.read(def));
 
 export const readMany = <
   const Items extends Record<string, OpcuaVariable.ReadableVariableDef>,
 >(
   items: Items,
   options?: ReadManyOptions,
-) => OpcuaSession.use((session) => session.readMany(items, options));
+) => Session.use((session) => session.readMany(items, options));
 
-export const writeMany = <const Items extends AnyWriteManyRecord>(
-  items: Items & WriteManyInput<Items>,
+export const write = <const Def extends OpcuaVariable.WritableVariableDef>(
+  def: Def,
+  value: OpcuaVariable.ValueOfVariableDef<Def>,
+) => Session.use((session) => session.write(def, value));
+
+export const writeMany = <const Items extends OpcuaVariable.AnyWriteManyRecord>(
+  items: Items & OpcuaVariable.WriteManyInput<Items>,
   options?: WriteManyOptions,
-) => OpcuaSession.use((session) => session.writeMany(items, options));
-
-export const callMany = <const Items extends AnyCallManyRecord>(
-  items: Items & CallManyInput<Items>,
-  options?: CallManyOptions,
-) => OpcuaSession.use((session) => session.callMany(items, options));
+) => Session.use((session) => session.writeMany(items, options));
 
 export const makeSubscription = (
-  options: Parameters<Service["makeSubscription"]>[0],
-) => OpcuaSession.use((session) => session.makeSubscription(options));
+  options: Parameters<SessionService["makeSubscription"]>[0],
+) => Session.use((session) => session.makeSubscription(options));
+
+export const callMany = <const Items extends OpcuaMethod.AnyCallManyRecord>(
+  items: Items & OpcuaMethod.CallManyInput<Items>,
+  options?: CallManyOptions,
+) => Session.use((session) => session.callMany(items, options));
+
+export const call = <const Spec extends OpcuaMethod.AnyMethodDef>(
+  def: Spec,
+  input: OpcuaMethod.InputOfMethodDef<Spec>,
+  options?: OpcuaMethod.MethodCallOptions,
+) => Session.use((session) => session.call(def, input, options));
 
 export const browse = (input: OpcuaBrowseOptions) =>
-  OpcuaSession.use((session) => session.browse(input));
+  Session.use((session) => session.browse(input));
 
 export const browseNext = (
-  continuation: Parameters<Service["browseNext"]>[0],
-) => OpcuaSession.use((session) => session.browseNext(continuation));
+  continuation: Parameters<SessionService["browseNext"]>[0],
+) => Session.use((session) => session.browseNext(continuation));
 
 export const releaseBrowseContinuation = (
   continuation: OpcuaBrowseContinuation,
-) =>
-  OpcuaSession.use((session) =>
-    session.releaseBrowseContinuation(continuation),
-  );
+) => Session.use((session) => session.releaseBrowseContinuation(continuation));
 
 export const browseChildren = (
   nodeId: NodeIdString,
   options?: OpcuaBrowseChildrenOptions,
-) => OpcuaSession.use((session) => session.browseChildren(nodeId, options));
+) => Session.use((session) => session.browseChildren(nodeId, options));
 
 export const readNamespaceArray = () =>
-  OpcuaSession.use((session) => session.readNamespaceArray());
+  Session.use((session) => session.readNamespaceArray());
 
 export const readNodeMetadata = (nodeId: string) =>
-  OpcuaSession.use((session) => session.readNodeMetadata(nodeId));
+  Session.use((session) => session.readNodeMetadata(nodeId));
 
 export const readManyNodeMetadata = (nodeIds: readonly string[]) =>
-  OpcuaSession.use((session) => session.readManyNodeMetadata(nodeIds));
+  Session.use((session) => session.readManyNodeMetadata(nodeIds));
 
 export const readDataTypeDefinition = (dataTypeNodeId: string) =>
-  OpcuaSession.use((session) => session.readDataTypeDefinition(dataTypeNodeId));
+  Session.use((session) => session.readDataTypeDefinition(dataTypeNodeId));
 
 export const readManyDataTypeDefinitions = (
   dataTypeNodeIds: readonly string[],
 ) =>
-  OpcuaSession.use((session) =>
+  Session.use((session) =>
     session.readManyDataTypeDefinitions(dataTypeNodeIds),
   );
 
-export const layer = (options?: Options) =>
-  Layer.effect(OpcuaSession, make(options));
+export type SessionOptions = {
+  readonly userIdentity?: UserIdentityInfo;
+  readonly batching?: SessionBatchingOptions;
+};
+
+export const layer = (options?: SessionOptions) =>
+  Layer.effect(Session, make(options));

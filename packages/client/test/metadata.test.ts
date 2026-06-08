@@ -38,7 +38,7 @@ describe("metadata", () => {
   it("reads namespace array values from the demo server", async () => {
     const namespaces = await runLive(
       Effect.gen(function* () {
-        const session = yield* OpcuaSession.OpcuaSession;
+        const session = yield* OpcuaSession.Session;
         return yield* session.readNamespaceArray();
       }),
     );
@@ -51,7 +51,7 @@ describe("metadata", () => {
     const nodeId = demoNodeId("Filling.Tank.LevelMl");
     const metadata = await runLive(
       Effect.gen(function* () {
-        const session = yield* OpcuaSession.OpcuaSession;
+        const session = yield* OpcuaSession.Session;
         return yield* session.readNodeMetadata(nodeId);
       }),
     );

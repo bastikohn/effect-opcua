@@ -69,7 +69,7 @@ describe("lifecycle", () => {
         }),
       ).pipe(Scope.provide(scope)),
     );
-    const client = Context.get(context, OpcuaClient.OpcuaClient);
+    const client = Context.get(context, OpcuaClient.Client);
     const events = await Effect.runPromise(
       client.events.pipe(
         Stream.take(1),
@@ -155,19 +155,19 @@ describe("lifecycle", () => {
     const rawClient = {
       createSession: async () => rawSession,
     };
-    const client: OpcuaClient.Service = {
+    const client: OpcuaClient.ClientService = {
       events: Stream.empty,
-      unsafeRaw: rawClient as never,
+      unsafeRawClient: rawClient as never,
     };
     const scope = await Effect.runPromise(Scope.make());
     const sessionLayer = OpcuaSession.layer().pipe(
-      Layer.provide(Layer.succeed(OpcuaClient.OpcuaClient, client)),
+      Layer.provide(Layer.succeed(OpcuaClient.Client, client)),
     );
 
     const context = await Effect.runPromise(
       Layer.build(sessionLayer).pipe(Scope.provide(scope)),
     );
-    const session = Context.get(context, OpcuaSession.OpcuaSession);
+    const session = Context.get(context, OpcuaSession.Session);
     const events = Effect.runFork(Stream.runDrain(session.events));
 
     await Effect.runPromise(Scope.close(scope, Exit.void));
@@ -194,13 +194,13 @@ describe("lifecycle", () => {
         return rawSession;
       },
     };
-    const client: OpcuaClient.Service = {
+    const client: OpcuaClient.ClientService = {
       events: Stream.empty,
-      unsafeRaw: rawClient as never,
+      unsafeRawClient: rawClient as never,
     };
     const scope = await Effect.runPromise(Scope.make());
     const sessionLayer = OpcuaSession.layer().pipe(
-      Layer.provide(Layer.succeed(OpcuaClient.OpcuaClient, client)),
+      Layer.provide(Layer.succeed(OpcuaClient.Client, client)),
     );
 
     const fiber = Effect.runFork(

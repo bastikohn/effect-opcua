@@ -1,7 +1,9 @@
 import { coerceNodeId, type ClientSession, type NodeId } from "node-opcua";
 import { Effect } from "effect";
 
-import { configurationError, type OpcuaError } from "../OpcuaError.js";
+import * as OpcuaError from "../OpcuaError.js";
+import * as OpcuaMethod from "../OpcuaMethod.js";
+import * as OpcuaVariable from "../OpcuaVariable.js";
 import {
   normalizeServiceOptions,
   runKeyedBatchOperation,
@@ -13,82 +15,77 @@ import { isPlainRecord } from "./predicates.js";
 import type { makeMetadataService } from "./metadata.js";
 import type { makeStructureRuntime } from "./structure-runtime.js";
 import type { NodeIdString } from "./capabilities.js";
-import {
-  callMethods,
-  methodCallOptionsError,
-  resolveMethod,
-  type AnyMethodDef,
-  type AnyResolvedMethod,
-  type MethodCallEntry,
-  type MethodCallOptions,
-} from "../OpcuaMethod.js";
-import {
-  readPreparedVariables,
-  writePreparedVariables,
-  type AnyVariableDef,
-  type PreparedReadVariable,
-  type PreparedWriteVariable,
-  type ReadableVariableDef,
-  type VariableAccess,
-  type WritableVariableDef,
-} from "../OpcuaVariable.js";
-import type {
-  CallManyInput,
-  CallManyOptions,
-  CallManyResult,
-  OpcuaSessionBatchingOptions,
-  ReadManyOptions,
-  ReadManyResult,
-  WriteManyInput,
-  WriteManyOptions,
-  WriteManyResult,
-} from "../OpcuaSession.js";
+
+export type ServiceLimits = {
+  readonly maxNodesPerRequest: number;
+  readonly maxConcurrentRequests: number;
+};
+
+type ServiceOptions = {
+  readonly service?: Partial<ServiceLimits>;
+  readonly serviceLimitsOverrides?: Partial<ServiceLimits>;
+};
+
+export type ReadManyOptions = ServiceOptions & {
+  readonly validation?: "strict" | "none";
+};
+
+export type WriteManyOptions = ServiceOptions;
+export type CallManyOptions = ServiceOptions;
+export type MethodCallOptions = {
+  readonly includeRaw?: boolean;
+};
 
 export type SessionOperationsState = {
   readonly unsafeRaw: ClientSession;
   readonly metadata: ReturnType<typeof makeMetadataService>;
   readonly structureRuntime: ReturnType<typeof makeStructureRuntime>;
-  readonly batching?: OpcuaSessionBatchingOptions;
+  readonly batching?: SessionBatchingOptions;
+};
+export type SessionBatchingOptions = {
+  readonly readLimits?: Partial<ServiceLimits>;
+  readonly writeLimits?: Partial<ServiceLimits>;
+  readonly callLimits?: Partial<ServiceLimits>;
 };
 
 type AnyWriteManyRecord = Record<
   string,
-  readonly [WritableVariableDef, unknown]
+  readonly [OpcuaVariable.WritableVariableDef, unknown]
 >;
 
 type AnyCallManyRecord = Record<
   string,
-  | readonly [AnyMethodDef, unknown]
-  | readonly [AnyMethodDef, unknown, MethodCallOptions]
+  | readonly [OpcuaMethod.AnyMethodDef, unknown]
+  | readonly [OpcuaMethod.AnyMethodDef, unknown, MethodCallOptions]
 >;
 
 type NormalizedReadItem = {
-  readonly def: ReadableVariableDef;
+  readonly def: OpcuaVariable.ReadableVariableDef;
   readonly nodeId: NodeIdString;
   readonly rawNodeId: NodeId;
 };
 
 type NormalizedWriteItem = {
-  readonly def: WritableVariableDef;
+  readonly def: OpcuaVariable.WritableVariableDef;
   readonly value: unknown;
   readonly nodeId: NodeIdString;
   readonly rawNodeId: NodeId;
 };
 
 type NormalizedCallItem = {
-  readonly def: AnyMethodDef;
+  readonly def: OpcuaMethod.AnyMethodDef;
   readonly input: unknown;
   readonly options?: MethodCallOptions;
 };
 
 export const readManyWithState = <
-  const Items extends Record<string, ReadableVariableDef>,
+  const Items extends Record<string, OpcuaVariable.ReadableVariableDef>,
 >(
   state: SessionOperationsState,
   items: Items,
   options?: ReadManyOptions,
-): Effect.Effect<ReadManyResult<Items>, OpcuaError> =>
-  runKeyedBatchOperation(items, options, state.batching?.read, {
+): Effect.Effect<OpcuaVariable.ReadManyResult<Items>, OpcuaError.OpcuaError> =>
+  runKeyedBatchOperation(items, options, state.batching?.readLimits, {
     operation: "readMany",
     normalizeOptions: normalizeReadManyOptions,
     normalizeItem: normalizeReadManyItem,
@@ -105,31 +102,33 @@ export const readManyWithState = <
         return entries;
       }),
     execute: (entries, normalizedOptions) => {
-      const prepared: ReadonlyArray<PreparedReadVariable> = entries.map(
-        (entry) => ({
+      const prepared: ReadonlyArray<OpcuaVariable.PreparedReadVariable> =
+        entries.map((entry) => ({
           def: entry.normalized.def,
           rawNodeId: entry.normalized.rawNodeId,
-        }),
-      );
-      return readPreparedVariables(
+        }));
+      return OpcuaVariable.readPreparedVariables(
         state.unsafeRaw,
         prepared,
         state.structureRuntime,
         {
-          maxItemsPerRequest: normalizedOptions.maxNodesPerRead,
+          maxItemsPerRequest: normalizedOptions.maxNodesPerRequest,
           maxConcurrentRequests: normalizedOptions.maxConcurrentRequests,
         },
       );
     },
     toPublicResult: (_entry, raw) => Effect.succeed(raw),
-  }) as Effect.Effect<ReadManyResult<Items>, OpcuaError>;
+  }) as Effect.Effect<
+    OpcuaVariable.ReadManyResult<Items>,
+    OpcuaError.OpcuaError
+  >;
 
 export const writeManyWithState = <const Items extends AnyWriteManyRecord>(
   state: SessionOperationsState,
-  items: Items & WriteManyInput<Items>,
+  items: Items & OpcuaVariable.WriteManyInput<Items>,
   options?: WriteManyOptions,
-): Effect.Effect<WriteManyResult<Items>, OpcuaError> =>
-  runKeyedBatchOperation(items, options, state.batching?.write, {
+): Effect.Effect<OpcuaVariable.WriteManyResult<Items>, OpcuaError.OpcuaError> =>
+  runKeyedBatchOperation(items, options, state.batching?.writeLimits, {
     operation: "writeMany",
     normalizeOptions: normalizeWriteManyOptions,
     normalizeItem: normalizeWriteManyItem,
@@ -138,7 +137,9 @@ export const writeManyWithState = <const Items extends AnyWriteManyRecord>(
       Effect.forEach(entries, (entry) =>
         Effect.map(
           state.metadata.variable(entry.normalized.def),
-          (metadata): KeyedEntry<string, PreparedWriteVariable> => ({
+          (
+            metadata,
+          ): KeyedEntry<string, OpcuaVariable.PreparedWriteVariable> => ({
             key: entry.key,
             index: entry.index,
             normalized: {
@@ -151,24 +152,27 @@ export const writeManyWithState = <const Items extends AnyWriteManyRecord>(
         ),
       ),
     execute: (entries, normalizedOptions) =>
-      writePreparedVariables(
+      OpcuaVariable.writePreparedVariables(
         state.unsafeRaw,
         entries.map((entry) => entry.normalized),
         state.structureRuntime,
         {
-          maxItemsPerRequest: normalizedOptions.maxNodesPerWrite,
+          maxItemsPerRequest: normalizedOptions.maxNodesPerRequest,
           maxConcurrentRequests: normalizedOptions.maxConcurrentRequests,
         },
       ),
     toPublicResult: (_entry, raw) => Effect.succeed(raw),
-  }) as Effect.Effect<WriteManyResult<Items>, OpcuaError>;
+  }) as Effect.Effect<
+    OpcuaVariable.WriteManyResult<Items>,
+    OpcuaError.OpcuaError
+  >;
 
 export const callManyWithState = <const Items extends AnyCallManyRecord>(
   state: SessionOperationsState,
-  items: Items & CallManyInput<Items>,
+  items: Items & OpcuaMethod.CallManyInput<Items>,
   options?: CallManyOptions,
-): Effect.Effect<CallManyResult<Items>, OpcuaError> =>
-  runKeyedBatchOperation(items, options, state.batching?.call, {
+): Effect.Effect<OpcuaMethod.CallManyResult<Items>, OpcuaError.OpcuaError> =>
+  runKeyedBatchOperation(items, options, state.batching?.callLimits, {
     operation: "callMany",
     normalizeOptions: normalizeCallManyOptions,
     normalizeItem: normalizeCallManyItem,
@@ -178,7 +182,7 @@ export const callManyWithState = <const Items extends AnyCallManyRecord>(
           const methodMetadata = yield* state.metadata.method(
             entry.normalized.def,
           );
-          const method = yield* resolveMethod(
+          const method = yield* OpcuaMethod.resolveMethod(
             entry.normalized.def,
             methodMetadata,
           );
@@ -189,31 +193,31 @@ export const callManyWithState = <const Items extends AnyCallManyRecord>(
               method,
               input: entry.normalized.input,
               options: entry.normalized.options,
-            } as MethodCallEntry<AnyResolvedMethod>,
+            } as OpcuaMethod.MethodCallEntry<OpcuaMethod.AnyResolvedMethod>,
           };
         }),
       ),
     execute: (entries, normalizedOptions) =>
-      callMethods(
+      OpcuaMethod.callMethods(
         state.unsafeRaw,
         entries.map((entry) => entry.normalized),
         state.structureRuntime,
         {
-          maxItemsPerRequest: normalizedOptions.maxMethodsPerCall,
+          maxItemsPerRequest: normalizedOptions.maxNodesPerRequest,
           maxConcurrentRequests: normalizedOptions.maxConcurrentRequests,
         },
       ),
     toPublicResult: (_entry, raw) => Effect.succeed(raw),
-  }) as Effect.Effect<CallManyResult<Items>, OpcuaError>;
+  }) as Effect.Effect<OpcuaMethod.CallManyResult<Items>, OpcuaError.OpcuaError>;
 
 const normalizeReadManyItem = (
   key: string,
-  value: ReadableVariableDef,
-): Effect.Effect<NormalizedReadItem, OpcuaError> =>
+  value: OpcuaVariable.ReadableVariableDef,
+): Effect.Effect<NormalizedReadItem, OpcuaError.OpcuaError> =>
   Effect.suspend(() => {
     if (!isReadableVariableDef(value)) {
       return Effect.fail(
-        configurationError({
+        OpcuaError.configurationError({
           operation: "readMany.items",
           key,
           cause: "items must be readable variable definitions",
@@ -221,7 +225,8 @@ const normalizeReadManyItem = (
       );
     }
     const rawNodeId = coerceNodeIdForKey("readMany.items", key, value.nodeId);
-    if (rawNodeId instanceof Error) return Effect.fail(rawNodeId as OpcuaError);
+    if (rawNodeId instanceof Error)
+      return Effect.fail(rawNodeId as OpcuaError.OpcuaError);
     return Effect.succeed({
       def: value,
       nodeId: rawNodeId.toString(),
@@ -231,12 +236,12 @@ const normalizeReadManyItem = (
 
 const normalizeWriteManyItem = (
   key: string,
-  tuple: readonly [WritableVariableDef, unknown],
-): Effect.Effect<NormalizedWriteItem, OpcuaError> =>
+  tuple: readonly [OpcuaVariable.WritableVariableDef, unknown],
+): Effect.Effect<NormalizedWriteItem, OpcuaError.OpcuaError> =>
   Effect.suspend(() => {
     if (!Array.isArray(tuple) || tuple.length !== 2) {
       return Effect.fail(
-        configurationError({
+        OpcuaError.configurationError({
           operation: "writeMany.items",
           key,
           cause: "write entries must be [definition, value] tuples",
@@ -246,7 +251,7 @@ const normalizeWriteManyItem = (
     const [def, value] = tuple;
     if (!isWritableVariableDef(def)) {
       return Effect.fail(
-        configurationError({
+        OpcuaError.configurationError({
           operation: "writeMany.items",
           key,
           cause: "write entries must use writable variable definitions",
@@ -254,7 +259,8 @@ const normalizeWriteManyItem = (
       );
     }
     const rawNodeId = coerceNodeIdForKey("writeMany.items", key, def.nodeId);
-    if (rawNodeId instanceof Error) return Effect.fail(rawNodeId as OpcuaError);
+    if (rawNodeId instanceof Error)
+      return Effect.fail(rawNodeId as OpcuaError.OpcuaError);
     return Effect.succeed({
       def,
       value,
@@ -266,13 +272,13 @@ const normalizeWriteManyItem = (
 const normalizeCallManyItem = (
   key: string,
   tuple:
-    | readonly [AnyMethodDef, unknown]
-    | readonly [AnyMethodDef, unknown, MethodCallOptions],
-): Effect.Effect<NormalizedCallItem, OpcuaError> =>
+    | readonly [OpcuaMethod.AnyMethodDef, unknown]
+    | readonly [OpcuaMethod.AnyMethodDef, unknown, MethodCallOptions],
+): Effect.Effect<NormalizedCallItem, OpcuaError.OpcuaError> =>
   Effect.suspend(() => {
     if (!Array.isArray(tuple) || (tuple.length !== 2 && tuple.length !== 3)) {
       return Effect.fail(
-        configurationError({
+        OpcuaError.configurationError({
           operation: "callMany.items",
           key,
           cause:
@@ -283,14 +289,14 @@ const normalizeCallManyItem = (
     const [def, input, itemOptions] = tuple;
     if (!isMethodDef(def)) {
       return Effect.fail(
-        configurationError({
+        OpcuaError.configurationError({
           operation: "callMany.items",
           key,
           cause: "call entries must use method definitions",
         }),
       );
     }
-    const optionsError = methodCallOptionsError(
+    const optionsError = OpcuaMethod.methodCallOptionsError(
       "callMany.items.options",
       def.objectId,
       def.methodId,
@@ -319,21 +325,30 @@ const validateUniqueNodeIds =
       errorContext: (_entry, nodeId) => ({ nodeId }),
     });
 
+const validateBatchOptionsShape = (
+  operation: string,
+  options: ServiceOptions | undefined,
+  keys: ReadonlyArray<string> = [],
+) =>
+  validateOptionsShape(operation, options, [
+    ...keys,
+    "service",
+    "serviceLimitsOverrides",
+  ]);
+
+const serviceOptions = (options: ServiceOptions | undefined) =>
+  options?.service ?? options?.serviceLimitsOverrides;
+
 const normalizeReadManyOptions = (
   options: ReadManyOptions | undefined,
-  defaults: OpcuaSessionBatchingOptions["read"] | undefined,
+  defaults: SessionBatchingOptions["readLimits"] | undefined,
 ): Effect.Effect<
-  {
-    readonly validation: "strict" | "none";
-    readonly maxNodesPerRead: number;
-    readonly maxConcurrentRequests: number;
-  },
-  OpcuaError
+  ServiceLimits & { readonly validation: "strict" | "none" },
+  OpcuaError.OpcuaError
 > =>
   Effect.gen(function* () {
-    yield* validateOptionsShape("readMany.options", options, [
+    yield* validateBatchOptionsShape("readMany.options", options, [
       "validation",
-      "service",
     ]);
     if (
       options?.validation !== undefined &&
@@ -341,7 +356,7 @@ const normalizeReadManyOptions = (
       options.validation !== "none"
     ) {
       return yield* Effect.fail(
-        configurationError({
+        OpcuaError.configurationError({
           operation: "readMany.options.validation",
           cause: 'validation must be "strict" or "none"',
         }),
@@ -349,15 +364,15 @@ const normalizeReadManyOptions = (
     }
 
     const service = yield* normalizeServiceOptions<
-      "maxNodesPerRead" | "maxConcurrentRequests"
+      "maxNodesPerRequest" | "maxConcurrentRequests"
     >({
-      service: options?.service,
+      serviceLimits: serviceOptions(options),
       defaults,
       serviceOperation: "readMany.options.service",
       defaultsOperation: "OpcuaSession.batching.read",
-      allowedKeys: ["maxNodesPerRead", "maxConcurrentRequests"],
+      allowedKeys: ["maxNodesPerRequest", "maxConcurrentRequests"],
       fallback: {
-        maxNodesPerRead: 250,
+        maxNodesPerRequest: 250,
         maxConcurrentRequests: 1,
       },
     });
@@ -369,26 +384,20 @@ const normalizeReadManyOptions = (
 
 const normalizeWriteManyOptions = (
   options: WriteManyOptions | undefined,
-  defaults: OpcuaSessionBatchingOptions["write"] | undefined,
-): Effect.Effect<
-  {
-    readonly maxNodesPerWrite: number;
-    readonly maxConcurrentRequests: number;
-  },
-  OpcuaError
-> =>
+  defaults: SessionBatchingOptions["writeLimits"] | undefined,
+): Effect.Effect<ServiceLimits, OpcuaError.OpcuaError> =>
   Effect.gen(function* () {
-    yield* validateOptionsShape("writeMany.options", options, ["service"]);
+    yield* validateBatchOptionsShape("writeMany.options", options);
     return yield* normalizeServiceOptions<
-      "maxNodesPerWrite" | "maxConcurrentRequests"
+      "maxNodesPerRequest" | "maxConcurrentRequests"
     >({
-      service: options?.service,
+      serviceLimits: serviceOptions(options),
       defaults,
       serviceOperation: "writeMany.options.service",
       defaultsOperation: "OpcuaSession.batching.write",
-      allowedKeys: ["maxNodesPerWrite", "maxConcurrentRequests"],
+      allowedKeys: ["maxNodesPerRequest", "maxConcurrentRequests"],
       fallback: {
-        maxNodesPerWrite: 250,
+        maxNodesPerRequest: 250,
         maxConcurrentRequests: 1,
       },
     });
@@ -396,26 +405,20 @@ const normalizeWriteManyOptions = (
 
 const normalizeCallManyOptions = (
   options: CallManyOptions | undefined,
-  defaults: OpcuaSessionBatchingOptions["call"] | undefined,
-): Effect.Effect<
-  {
-    readonly maxMethodsPerCall: number;
-    readonly maxConcurrentRequests: number;
-  },
-  OpcuaError
-> =>
+  defaults: SessionBatchingOptions["callLimits"] | undefined,
+): Effect.Effect<ServiceLimits, OpcuaError.OpcuaError> =>
   Effect.gen(function* () {
-    yield* validateOptionsShape("callMany.options", options, ["service"]);
+    yield* validateBatchOptionsShape("callMany.options", options);
     return yield* normalizeServiceOptions<
-      "maxMethodsPerCall" | "maxConcurrentRequests"
+      "maxNodesPerRequest" | "maxConcurrentRequests"
     >({
-      service: options?.service,
+      serviceLimits: serviceOptions(options),
       defaults,
       serviceOperation: "callMany.options.service",
       defaultsOperation: "OpcuaSession.batching.call",
-      allowedKeys: ["maxMethodsPerCall", "maxConcurrentRequests"],
+      allowedKeys: ["maxNodesPerRequest", "maxConcurrentRequests"],
       fallback: {
-        maxMethodsPerCall: 50,
+        maxNodesPerRequest: 50,
         maxConcurrentRequests: 1,
       },
     });
@@ -429,30 +432,36 @@ const coerceNodeIdForKey = (
   try {
     return coerceNodeId(nodeId);
   } catch (cause) {
-    return configurationError({ operation, key, nodeId, cause });
+    return OpcuaError.configurationError({ operation, key, nodeId, cause });
   }
 };
 
-const isReadableVariableDef = (value: unknown): value is ReadableVariableDef =>
+const isReadableVariableDef = (
+  value: unknown,
+): value is OpcuaVariable.ReadableVariableDef =>
   isVariableDef(value) &&
   (value.access === "read" || value.access === "readWrite");
 
-const isWritableVariableDef = (value: unknown): value is WritableVariableDef =>
+const isWritableVariableDef = (
+  value: unknown,
+): value is OpcuaVariable.WritableVariableDef =>
   isVariableDef(value) &&
   (value.access === "write" || value.access === "readWrite");
 
-const isVariableDef = (value: unknown): value is AnyVariableDef =>
+const isVariableDef = (value: unknown): value is OpcuaVariable.AnyVariableDef =>
   isPlainRecord(value) &&
   value._tag === "VariableDef" &&
   typeof value.nodeId === "string" &&
   isVariableAccess(value.access) &&
   isPlainRecord(value.codec);
 
-const isMethodDef = (value: unknown): value is AnyMethodDef =>
+const isMethodDef = (value: unknown): value is OpcuaMethod.AnyMethodDef =>
   isPlainRecord(value) &&
   value._tag === "MethodDef" &&
   typeof value.objectId === "string" &&
   typeof value.methodId === "string";
 
-const isVariableAccess = (value: unknown): value is VariableAccess =>
+const isVariableAccess = (
+  value: unknown,
+): value is OpcuaVariable.VariableAccess =>
   value === "read" || value === "write" || value === "readWrite";

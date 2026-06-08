@@ -16,7 +16,7 @@ import {
   configurationError,
   type OpcuaConfigurationError,
 } from "../OpcuaError.js";
-import type { OpcuaSubscriptionOptions } from "../OpcuaSession.js";
+import type { SubscriptionOptions } from "../OpcuaSession.js";
 
 export type NormalizedSubscriptionOptions = {
   readonly publishingInterval: number;
@@ -37,7 +37,7 @@ const allowedSubscriptionOptionKeys = new Set([
 ]);
 
 export const validateSubscriptionOptions = (
-  options: OpcuaSubscriptionOptions,
+  options: SubscriptionOptions,
 ): Effect.Effect<NormalizedSubscriptionOptions, OpcuaConfigurationError> =>
   Effect.suspend(() => {
     if (!isPlainRecord(options)) {

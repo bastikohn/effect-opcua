@@ -51,7 +51,7 @@ export type FakeMethodDefinition = {
 };
 
 export type FakeSessionOptions = {
-  readonly batching?: OpcuaSession.OpcuaSessionBatchingOptions;
+  readonly batching?: OpcuaSession.SessionBatchingOptions;
   readonly namespaceArray?: ReadonlyArray<string>;
   readonly nodeMetadata?: Readonly<Record<string, FakeNodeMetadata>>;
   readonly missingNodeIds?: ReadonlyArray<string>;

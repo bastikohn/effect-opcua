@@ -42,9 +42,9 @@ const Reset = Opcua.method({
 
 const MainLayer = OpcuaSession.layer({
   batching: {
-    read: { maxNodesPerRead: 250, maxConcurrentRequests: 1 },
-    write: { maxNodesPerWrite: 100, maxConcurrentRequests: 1 },
-    call: { maxMethodsPerCall: 50, maxConcurrentRequests: 1 },
+    readLimits: { maxNodesPerRequest: 250, maxConcurrentRequests: 1 },
+    writeLimits: { maxNodesPerRequest: 100, maxConcurrentRequests: 1 },
+    callLimits: { maxNodesPerRequest: 50, maxConcurrentRequests: 1 },
   },
 }).pipe(
   Layer.provide(
