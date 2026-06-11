@@ -35,6 +35,9 @@ pnpm build
 pnpm test
 ```
 
+The public contributor commands intentionally stay on `pnpm`. Some scripts use
+Vite+ internally for linting, formatting, and workspace task orchestration.
+
 ## Releases
 
 Releases are managed with Changesets. Add a changeset for user-visible changes
