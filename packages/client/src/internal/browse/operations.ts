@@ -1,5 +1,4 @@
 import {
-  BrowseDirection,
   NodeClass,
   type BrowseDescriptionOptions,
   type BrowseResult,
@@ -8,73 +7,29 @@ import {
 } from "node-opcua";
 
 import { configurationError } from "../../OpcuaError.js";
+import type {
+  OpcuaBrowseContinuation,
+  OpcuaBrowseOptions,
+  OpcuaBrowseReference,
+  OpcuaBrowseResult,
+} from "../../OpcuaSession.js";
 import {
   isGood,
   normalizeExpandedNodeId,
   normalizeLocalizedText,
   normalizeQualifiedName,
   normalizeStatusCode,
-  type OpcuaExpandedNodeIdInfo,
-  type OpcuaLocalizedTextInfo,
-  type OpcuaQualifiedNameInfo,
-  type OpcuaStatusInfo,
 } from "../values/normalize.js";
 import type { NodeIdString } from "../common/node-id.js";
 import { nonNegativeIntegerOption } from "../common/options.js";
-
-export type OpcuaBrowseReference = {
-  readonly nodeId: OpcuaExpandedNodeIdInfo;
-  readonly referenceTypeId?: NodeIdString;
-  readonly isForward?: boolean;
-  readonly nodeClass?: string;
-  readonly browseName?: OpcuaQualifiedNameInfo;
-  readonly displayName?: OpcuaLocalizedTextInfo;
-  readonly typeDefinition?: OpcuaExpandedNodeIdInfo;
-  readonly unsafeRaw?: ReferenceDescription;
-};
-
-export type OpcuaBrowseContinuation = {
-  readonly nodeId: NodeIdString;
-  readonly unsafeRaw: Buffer;
-};
-
-export type OpcuaBrowseResult =
-  | {
-      readonly _tag: "Browsed";
-      readonly nodeId: NodeIdString;
-      readonly status: OpcuaStatusInfo;
-      readonly references: ReadonlyArray<OpcuaBrowseReference>;
-      readonly continuation?: OpcuaBrowseContinuation;
-      readonly unsafeRaw?: BrowseResult;
-    }
-  | {
-      readonly _tag: "NonGoodStatus";
-      readonly nodeId: NodeIdString;
-      readonly status: OpcuaStatusInfo;
-      readonly unsafeRaw?: BrowseResult;
-    };
-
-export type OpcuaBrowseChildrenResult = OpcuaBrowseResult;
-
-export type OpcuaBrowseOptions = {
-  readonly nodeId: NodeIdString;
-  readonly referenceTypeId?: NodeIdString;
-  readonly browseDirection?: BrowseDirection;
-  readonly includeSubtypes?: boolean;
-  readonly nodeClassMask?: number;
-  readonly resultMask?: number;
-  readonly maxReferencesPerNode?: number;
-  readonly includeRaw?: boolean;
-};
-
-export type OpcuaBrowseChildrenOptions = {
-  readonly mode?: "all" | "page";
-  readonly maxReferencesPerNode?: number;
-  readonly referenceTypeId?: string;
-  readonly includeSubtypes?: boolean;
-  readonly nodeClassMask?: number;
-  readonly includeRaw?: boolean;
-};
+export type {
+  OpcuaBrowseChildrenOptions,
+  OpcuaBrowseChildrenResult,
+  OpcuaBrowseContinuation,
+  OpcuaBrowseOptions,
+  OpcuaBrowseReference,
+  OpcuaBrowseResult,
+} from "../../OpcuaSession.js";
 
 export const browseOptionsError = (input: OpcuaBrowseOptions) => {
   if (input.nodeId.trim() === "") {

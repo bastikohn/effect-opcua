@@ -16,75 +16,31 @@ import { Effect } from "effect";
 
 import type { NodeIdString } from "../common/node-id.js";
 import type {
+  OpcuaDataTypeDefinition,
+  OpcuaDataTypeDefinitionResult,
+  OpcuaEnumDefinition,
+  OpcuaEnumField,
+  OpcuaStructureDefinition,
+  OpcuaStructureField,
+} from "../../OpcuaSession.js";
+import type {
   MetadataService,
   OpcuaNodeMetadataResult,
 } from "../metadata/service.js";
 import { isGood, normalizeStatusCode } from "../values/normalize.js";
 import { serviceError, type OpcuaError } from "../../OpcuaError.js";
+export type {
+  OpcuaDataTypeDefinition,
+  OpcuaDataTypeDefinitionResult,
+  OpcuaEnumDefinition,
+  OpcuaEnumField,
+  OpcuaStructureDefinition,
+  OpcuaStructureField,
+} from "../../OpcuaSession.js";
 
 type DynamicStructureSchema = Parameters<
   typeof convertStructureTypeSchemaToStructureDefinition
 >[0];
-
-export type OpcuaDataTypeDefinitionResult =
-  | {
-      readonly _tag: "Success";
-      readonly dataTypeNodeId: string;
-      readonly definition: OpcuaDataTypeDefinition;
-    }
-  | {
-      readonly _tag: "Missing";
-      readonly dataTypeNodeId: string;
-      readonly reason: string;
-    }
-  | {
-      readonly _tag: "Unsupported";
-      readonly dataTypeNodeId: string;
-      readonly reason: string;
-    }
-  | {
-      readonly _tag: "Failure";
-      readonly dataTypeNodeId: string;
-      readonly reason: string;
-    };
-
-export type OpcuaDataTypeDefinition =
-  | OpcuaStructureDefinition
-  | OpcuaEnumDefinition;
-
-export type OpcuaStructureDefinition = {
-  readonly _tag: "Structure";
-  readonly dataTypeNodeId: string;
-  readonly name: string;
-  readonly structureType:
-    | "Structure"
-    | "StructureWithOptionalFields"
-    | "Union"
-    | "Unknown";
-  readonly fields: readonly OpcuaStructureField[];
-};
-
-export type OpcuaStructureField = {
-  readonly name: string;
-  readonly dataTypeNodeId: string;
-  readonly valueRank?: number;
-  readonly arrayDimensions?: readonly number[];
-  readonly isOptional?: boolean;
-  readonly description?: string;
-};
-
-export type OpcuaEnumDefinition = {
-  readonly _tag: "Enum";
-  readonly dataTypeNodeId: string;
-  readonly name: string;
-  readonly fields: readonly OpcuaEnumField[];
-};
-
-export type OpcuaEnumField = {
-  readonly name: string;
-  readonly value: number;
-  readonly description?: string;
-};
 
 export const readDataTypeDefinition = (
   session: ClientSession,

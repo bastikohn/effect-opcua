@@ -10,7 +10,7 @@ import {
   type ValidateVariable,
 } from "./internal/monitoring/runtime.js";
 import type { OpcuaStructureRuntime } from "./internal/structures/runtime.js";
-import type { OpcuaStatusInfo } from "./internal/values/normalize.js";
+import type { OpcuaStatusInfo } from "./OpcuaVariable.js";
 
 export type BufferPolicy =
   | { readonly _tag: "Sliding"; readonly capacity: number }

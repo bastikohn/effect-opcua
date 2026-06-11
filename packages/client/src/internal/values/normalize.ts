@@ -15,85 +15,24 @@ import {
   extensionObjectTypeName,
   isNodeOpcuaExtensionObject,
 } from "../structures/adapter.js";
-
-export type OpcuaStatusInfo = {
-  readonly text: string;
-  readonly code: number;
-  readonly isGood: boolean;
-  readonly isUncertain: boolean;
-  readonly isBad: boolean;
-};
-
-export type OpcuaVariantInfo = {
-  readonly dataType: string;
-  readonly arrayType: "Scalar" | "Array" | "Matrix";
-  readonly valueRank?: number;
-  readonly arrayDimensions?: ReadonlyArray<number>;
-};
-
-export type OpcuaDynamicValue =
-  | null
-  | boolean
-  | number
-  | string
-  | ReadonlyArray<OpcuaDynamicValue>
-  | { readonly _tag: "DateTime"; readonly iso: string }
-  | { readonly _tag: "ByteString"; readonly base64: string }
-  | { readonly _tag: "Int64"; readonly text: string }
-  | { readonly _tag: "UInt64"; readonly text: string }
-  | {
-      readonly _tag: "LocalizedText";
-      readonly text: string;
-      readonly locale?: string;
-    }
-  | {
-      readonly _tag: "QualifiedName";
-      readonly namespaceIndex: number;
-      readonly name: string;
-      readonly text: string;
-    }
-  | {
-      readonly _tag: "NodeId";
-      readonly text: string;
-      readonly namespace: number;
-      readonly identifierType: string;
-      readonly value: unknown;
-    }
-  | {
-      readonly _tag: "ExtensionObject";
-      readonly typeName?: string;
-      readonly value: Readonly<Record<string, OpcuaDynamicValue>>;
-    }
-  | {
-      readonly _tag: "Object";
-      readonly typeName?: string;
-      readonly value: Readonly<Record<string, OpcuaDynamicValue>>;
-    };
-
-export type OpcuaNodeIdInfo = {
-  readonly text: string;
-  readonly namespace: number;
-  readonly namespaceUri?: string;
-  readonly identifierType: string;
-  readonly value: unknown;
-};
-
-export type OpcuaExpandedNodeIdInfo = OpcuaNodeIdInfo & {
-  readonly serverIndex?: number;
-  readonly isLocal: boolean;
-  readonly isRemote: boolean;
-};
-
-export type OpcuaQualifiedNameInfo = {
-  readonly namespaceIndex: number;
-  readonly name: string;
-  readonly text: string;
-};
-
-export type OpcuaLocalizedTextInfo = {
-  readonly text: string;
-  readonly locale?: string;
-};
+import type {
+  OpcuaDynamicValue,
+  OpcuaExpandedNodeIdInfo,
+  OpcuaLocalizedTextInfo,
+  OpcuaNodeIdInfo,
+  OpcuaQualifiedNameInfo,
+  OpcuaStatusInfo,
+  OpcuaVariantInfo,
+} from "../../OpcuaVariable.js";
+export type {
+  OpcuaDynamicValue,
+  OpcuaExpandedNodeIdInfo,
+  OpcuaLocalizedTextInfo,
+  OpcuaNodeIdInfo,
+  OpcuaQualifiedNameInfo,
+  OpcuaStatusInfo,
+  OpcuaVariantInfo,
+} from "../../OpcuaVariable.js";
 
 export const normalizeNodeId = (nodeId: NodeId): OpcuaNodeIdInfo => ({
   text: nodeId.toString(),

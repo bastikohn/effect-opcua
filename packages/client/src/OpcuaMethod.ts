@@ -6,21 +6,22 @@ import {
   type NodeId,
 } from "node-opcua";
 
-import type { NodeIdString } from "./internal/common/node-id.js";
 import {
   dynamic,
   type CodecType,
   type OpcuaCodec,
 } from "./internal/values/codec.js";
-import {
-  type OpcuaDynamicValue,
-  type OpcuaLocalizedTextInfo,
-  type OpcuaNodeIdInfo,
-  type OpcuaStatusInfo,
-} from "./internal/values/normalize.js";
-import type { MethodCallOptions } from "./internal/batch/operations.js";
+import type {
+  NodeIdString,
+  OpcuaDynamicValue,
+  OpcuaLocalizedTextInfo,
+  OpcuaNodeIdInfo,
+  OpcuaStatusInfo,
+} from "./OpcuaVariable.js";
 
-export type { MethodCallOptions };
+export type MethodCallOptions = {
+  readonly includeRaw?: boolean;
+};
 
 export type MethodArgSelector =
   | { readonly _tag: "Name"; readonly name: string }

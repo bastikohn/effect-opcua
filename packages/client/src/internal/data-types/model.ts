@@ -5,4 +5,4 @@ export type {
   OpcuaEnumField,
   OpcuaStructureDefinition,
   OpcuaStructureField,
-} from "./read.js";
+} from "../../OpcuaSession.js";

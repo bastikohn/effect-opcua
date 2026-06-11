@@ -19,6 +19,13 @@ import { Effect } from "effect";
 
 import type { NodeIdString } from "../common/node-id.js";
 import { Codec } from "../values/codec.js";
+import type {
+  OpcuaAccessBits,
+  OpcuaMetadataAttribute,
+  OpcuaMetadataReadFailure,
+  OpcuaNodeMetadata,
+  OpcuaNodeMetadataResult,
+} from "../../OpcuaSession.js";
 import {
   configurationError,
   isConfigurationError,
@@ -53,6 +60,13 @@ import {
   variableMetadataFromRaw,
 } from "../variable/operations.js";
 import type { AnyVariableDef, VariableMetadata } from "../../OpcuaVariable.js";
+export type {
+  OpcuaAccessBits,
+  OpcuaMetadataAttribute,
+  OpcuaMetadataReadFailure,
+  OpcuaNodeMetadata,
+  OpcuaNodeMetadataResult,
+} from "../../OpcuaSession.js";
 
 export type MetadataService = {
   readonly namespaceArray: () => Effect.Effect<
@@ -88,67 +102,6 @@ export type MetadataService = {
   ) => Effect.Effect<DataType, OpcuaServiceError | OpcuaConfigurationError>;
   readonly invalidate: Effect.Effect<void>;
 };
-
-export type OpcuaAccessBits = {
-  readonly readable: boolean;
-  readonly writable: boolean;
-};
-
-export type OpcuaNodeMetadata = {
-  readonly nodeId: string;
-
-  readonly nodeClass?: string;
-  readonly browseName?: string;
-  readonly browseNameNamespaceIndex?: number;
-
-  readonly displayName?: string;
-  readonly description?: string;
-
-  readonly dataType?: string;
-  readonly valueRank?: number;
-  readonly arrayDimensions?: readonly number[];
-
-  readonly accessLevel?: OpcuaAccessBits;
-  readonly userAccessLevel?: OpcuaAccessBits;
-
-  readonly namespaceIndex?: number;
-  readonly namespaceUri?: string;
-};
-
-export type OpcuaMetadataAttribute =
-  | "NodeClass"
-  | "BrowseName"
-  | "DisplayName"
-  | "Description"
-  | "DataType"
-  | "ValueRank"
-  | "ArrayDimensions"
-  | "AccessLevel"
-  | "UserAccessLevel";
-
-export type OpcuaMetadataReadFailure =
-  | {
-      readonly _tag: "NonGoodStatus";
-      readonly attribute: OpcuaMetadataAttribute;
-      readonly status: ReturnType<typeof normalizeStatusCode>;
-    }
-  | {
-      readonly _tag: "InvalidValue";
-      readonly attribute: OpcuaMetadataAttribute;
-      readonly message: string;
-    };
-
-export type OpcuaNodeMetadataResult =
-  | {
-      readonly _tag: "Success";
-      readonly nodeId: string;
-      readonly metadata: OpcuaNodeMetadata;
-    }
-  | {
-      readonly _tag: "Failure";
-      readonly nodeId: string;
-      readonly reason: OpcuaMetadataReadFailure;
-    };
 
 type MethodBaseMetadata = {
   readonly objectId: NodeIdString;

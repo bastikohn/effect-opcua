@@ -18,37 +18,30 @@ import { isPlainRecord } from "../common/predicates.js";
 import type { makeMetadataService } from "../metadata/service.js";
 import type { makeStructureRuntime } from "../structures/runtime.js";
 import type { NodeIdString } from "../common/node-id.js";
-
-export type ServiceLimits = {
-  readonly maxNodesPerRequest: number;
-  readonly maxConcurrentRequests: number;
-};
-
-type ServiceOptions = {
-  readonly service?: Partial<ServiceLimits>;
-  readonly serviceLimitsOverrides?: Partial<ServiceLimits>;
-};
-
-export type ReadManyOptions = ServiceOptions & {
-  readonly validation?: "strict" | "none";
-};
-
-export type WriteManyOptions = ServiceOptions;
-export type CallManyOptions = ServiceOptions;
-export type MethodCallOptions = {
-  readonly includeRaw?: boolean;
-};
+import type {
+  CallManyOptions,
+  ReadManyOptions,
+  ServiceOptions,
+  ServiceLimits,
+  SessionBatchingOptions,
+  WriteManyOptions,
+} from "../../OpcuaSession.js";
+import type { MethodCallOptions } from "../../OpcuaMethod.js";
+export type {
+  CallManyOptions,
+  ReadManyOptions,
+  ServiceOptions,
+  ServiceLimits,
+  SessionBatchingOptions,
+  WriteManyOptions,
+} from "../../OpcuaSession.js";
+export type { MethodCallOptions } from "../../OpcuaMethod.js";
 
 export type SessionOperationsState = {
   readonly unsafeRaw: ClientSession;
   readonly metadata: ReturnType<typeof makeMetadataService>;
   readonly structureRuntime: ReturnType<typeof makeStructureRuntime>;
   readonly batching?: SessionBatchingOptions;
-};
-export type SessionBatchingOptions = {
-  readonly readLimits?: Partial<ServiceLimits>;
-  readonly writeLimits?: Partial<ServiceLimits>;
-  readonly callLimits?: Partial<ServiceLimits>;
 };
 
 type AnyWriteManyRecord = Record<

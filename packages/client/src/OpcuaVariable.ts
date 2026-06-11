@@ -1,25 +1,96 @@
 import { DataType, NodeId, type DataValue, type Variant } from "node-opcua";
 
-import type { NodeIdString } from "./internal/common/node-id.js";
 import {
   dynamic,
   type AnySchema,
   type CodecType,
   type OpcuaCodec,
 } from "./internal/values/codec.js";
-import {
-  type OpcuaDynamicValue,
-  type OpcuaNodeIdInfo,
-  type OpcuaStatusInfo,
-  type OpcuaVariantInfo,
-} from "./internal/values/normalize.js";
 
 export type { AnySchema, CodecType, OpcuaCodec };
-export type {
-  NodeIdString,
-  ExpandedNodeIdString,
-} from "./internal/common/node-id.js";
-export type { OpcuaDynamicValue } from "./internal/values/normalize.js";
+
+export type NodeIdString = string;
+export type ExpandedNodeIdString = string;
+export type VariableCapability = "read" | "write";
+
+export type OpcuaStatusInfo = {
+  readonly text: string;
+  readonly code: number;
+  readonly isGood: boolean;
+  readonly isUncertain: boolean;
+  readonly isBad: boolean;
+};
+
+export type OpcuaVariantInfo = {
+  readonly dataType: string;
+  readonly arrayType: "Scalar" | "Array" | "Matrix";
+  readonly valueRank?: number;
+  readonly arrayDimensions?: ReadonlyArray<number>;
+};
+
+export type OpcuaDynamicValue =
+  | null
+  | boolean
+  | number
+  | string
+  | ReadonlyArray<OpcuaDynamicValue>
+  | { readonly _tag: "DateTime"; readonly iso: string }
+  | { readonly _tag: "ByteString"; readonly base64: string }
+  | { readonly _tag: "Int64"; readonly text: string }
+  | { readonly _tag: "UInt64"; readonly text: string }
+  | {
+      readonly _tag: "LocalizedText";
+      readonly text: string;
+      readonly locale?: string;
+    }
+  | {
+      readonly _tag: "QualifiedName";
+      readonly namespaceIndex: number;
+      readonly name: string;
+      readonly text: string;
+    }
+  | {
+      readonly _tag: "NodeId";
+      readonly text: string;
+      readonly namespace: number;
+      readonly identifierType: string;
+      readonly value: unknown;
+    }
+  | {
+      readonly _tag: "ExtensionObject";
+      readonly typeName?: string;
+      readonly value: Readonly<Record<string, OpcuaDynamicValue>>;
+    }
+  | {
+      readonly _tag: "Object";
+      readonly typeName?: string;
+      readonly value: Readonly<Record<string, OpcuaDynamicValue>>;
+    };
+
+export type OpcuaNodeIdInfo = {
+  readonly text: string;
+  readonly namespace: number;
+  readonly namespaceUri?: string;
+  readonly identifierType: string;
+  readonly value: unknown;
+};
+
+export type OpcuaExpandedNodeIdInfo = OpcuaNodeIdInfo & {
+  readonly serverIndex?: number;
+  readonly isLocal: boolean;
+  readonly isRemote: boolean;
+};
+
+export type OpcuaQualifiedNameInfo = {
+  readonly namespaceIndex: number;
+  readonly name: string;
+  readonly text: string;
+};
+
+export type OpcuaLocalizedTextInfo = {
+  readonly text: string;
+  readonly locale?: string;
+};
 
 export type VariableAccess = "read" | "write" | "readWrite";
 

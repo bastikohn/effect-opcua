@@ -14,58 +14,217 @@ import type * as OpcuaSubscription from "./OpcuaSubscription.js";
 import type * as OpcuaVariable from "./OpcuaVariable.js";
 
 import type {
-  OpcuaBrowseChildrenOptions,
-  OpcuaBrowseChildrenResult,
-  OpcuaBrowseContinuation,
-  OpcuaBrowseOptions,
-  OpcuaBrowseResult,
-} from "./internal/browse/operations.js";
+  BrowseDirection,
+  BrowseResult,
+  ReferenceDescription,
+} from "node-opcua";
 import type { OpcuaSessionEvent } from "./internal/events/model.js";
 import type {
-  OpcuaAccessBits,
-  OpcuaMetadataReadFailure,
-  OpcuaNodeMetadata,
-  OpcuaNodeMetadataResult,
-} from "./internal/metadata/service.js";
-import type { NodeIdString } from "./internal/common/node-id.js";
-import type {
-  OpcuaDataTypeDefinition,
-  OpcuaDataTypeDefinitionResult,
-  OpcuaEnumDefinition,
-  OpcuaEnumField,
-  OpcuaStructureDefinition,
-  OpcuaStructureField,
-} from "./internal/data-types/read.js";
+  NodeIdString,
+  OpcuaExpandedNodeIdInfo,
+  OpcuaLocalizedTextInfo,
+  OpcuaQualifiedNameInfo,
+  OpcuaStatusInfo,
+} from "./OpcuaVariable.js";
 import { make } from "./internal/session/make.js";
-import type {
-  CallManyOptions,
-  ReadManyOptions,
-  SessionBatchingOptions,
-  WriteManyOptions,
-} from "./internal/batch/operations.js";
 
-export type {
-  OpcuaBrowseChildrenOptions,
-  OpcuaBrowseChildrenResult,
-  OpcuaBrowseContinuation,
-  OpcuaBrowseOptions,
-  OpcuaBrowseReference,
-  OpcuaBrowseResult,
-} from "./internal/browse/operations.js";
-export type {
-  OpcuaAccessBits,
-  OpcuaMetadataReadFailure,
-  OpcuaNodeMetadata,
-  OpcuaNodeMetadataResult,
-  OpcuaDataTypeDefinition,
-  OpcuaDataTypeDefinitionResult,
-  OpcuaEnumDefinition,
-  OpcuaEnumField,
-  OpcuaStructureDefinition,
-  OpcuaStructureField,
+export type ServiceLimits = {
+  readonly maxNodesPerRequest: number;
+  readonly maxConcurrentRequests: number;
 };
 
-export type { SessionBatchingOptions };
+export type ServiceOptions = {
+  readonly service?: Partial<ServiceLimits>;
+  readonly serviceLimitsOverrides?: Partial<ServiceLimits>;
+};
+
+export type ReadManyOptions = ServiceOptions & {
+  readonly validation?: "strict" | "none";
+};
+
+export type WriteManyOptions = ServiceOptions;
+export type CallManyOptions = ServiceOptions;
+
+export type SessionBatchingOptions = {
+  readonly readLimits?: Partial<ServiceLimits>;
+  readonly writeLimits?: Partial<ServiceLimits>;
+  readonly callLimits?: Partial<ServiceLimits>;
+};
+
+export type OpcuaBrowseReference = {
+  readonly nodeId: OpcuaExpandedNodeIdInfo;
+  readonly referenceTypeId?: NodeIdString;
+  readonly isForward?: boolean;
+  readonly nodeClass?: string;
+  readonly browseName?: OpcuaQualifiedNameInfo;
+  readonly displayName?: OpcuaLocalizedTextInfo;
+  readonly typeDefinition?: OpcuaExpandedNodeIdInfo;
+  readonly unsafeRaw?: ReferenceDescription;
+};
+
+export type OpcuaBrowseContinuation = {
+  readonly nodeId: NodeIdString;
+  readonly unsafeRaw: Buffer;
+};
+
+export type OpcuaBrowseResult =
+  | {
+      readonly _tag: "Browsed";
+      readonly nodeId: NodeIdString;
+      readonly status: OpcuaStatusInfo;
+      readonly references: ReadonlyArray<OpcuaBrowseReference>;
+      readonly continuation?: OpcuaBrowseContinuation;
+      readonly unsafeRaw?: BrowseResult;
+    }
+  | {
+      readonly _tag: "NonGoodStatus";
+      readonly nodeId: NodeIdString;
+      readonly status: OpcuaStatusInfo;
+      readonly unsafeRaw?: BrowseResult;
+    };
+
+export type OpcuaBrowseChildrenResult = OpcuaBrowseResult;
+
+export type OpcuaBrowseOptions = {
+  readonly nodeId: NodeIdString;
+  readonly referenceTypeId?: NodeIdString;
+  readonly browseDirection?: BrowseDirection;
+  readonly includeSubtypes?: boolean;
+  readonly nodeClassMask?: number;
+  readonly resultMask?: number;
+  readonly maxReferencesPerNode?: number;
+  readonly includeRaw?: boolean;
+};
+
+export type OpcuaBrowseChildrenOptions = {
+  readonly mode?: "all" | "page";
+  readonly maxReferencesPerNode?: number;
+  readonly referenceTypeId?: string;
+  readonly includeSubtypes?: boolean;
+  readonly nodeClassMask?: number;
+  readonly includeRaw?: boolean;
+};
+
+export type OpcuaAccessBits = {
+  readonly readable: boolean;
+  readonly writable: boolean;
+};
+
+export type OpcuaNodeMetadata = {
+  readonly nodeId: string;
+
+  readonly nodeClass?: string;
+  readonly browseName?: string;
+  readonly browseNameNamespaceIndex?: number;
+
+  readonly displayName?: string;
+  readonly description?: string;
+
+  readonly dataType?: string;
+  readonly valueRank?: number;
+  readonly arrayDimensions?: readonly number[];
+
+  readonly accessLevel?: OpcuaAccessBits;
+  readonly userAccessLevel?: OpcuaAccessBits;
+
+  readonly namespaceIndex?: number;
+  readonly namespaceUri?: string;
+};
+
+export type OpcuaMetadataAttribute =
+  | "NodeClass"
+  | "BrowseName"
+  | "DisplayName"
+  | "Description"
+  | "DataType"
+  | "ValueRank"
+  | "ArrayDimensions"
+  | "AccessLevel"
+  | "UserAccessLevel";
+
+export type OpcuaMetadataReadFailure =
+  | {
+      readonly _tag: "NonGoodStatus";
+      readonly attribute: OpcuaMetadataAttribute;
+      readonly status: OpcuaStatusInfo;
+    }
+  | {
+      readonly _tag: "InvalidValue";
+      readonly attribute: OpcuaMetadataAttribute;
+      readonly message: string;
+    };
+
+export type OpcuaNodeMetadataResult =
+  | {
+      readonly _tag: "Success";
+      readonly nodeId: string;
+      readonly metadata: OpcuaNodeMetadata;
+    }
+  | {
+      readonly _tag: "Failure";
+      readonly nodeId: string;
+      readonly reason: OpcuaMetadataReadFailure;
+    };
+
+export type OpcuaDataTypeDefinitionResult =
+  | {
+      readonly _tag: "Success";
+      readonly dataTypeNodeId: string;
+      readonly definition: OpcuaDataTypeDefinition;
+    }
+  | {
+      readonly _tag: "Missing";
+      readonly dataTypeNodeId: string;
+      readonly reason: string;
+    }
+  | {
+      readonly _tag: "Unsupported";
+      readonly dataTypeNodeId: string;
+      readonly reason: string;
+    }
+  | {
+      readonly _tag: "Failure";
+      readonly dataTypeNodeId: string;
+      readonly reason: string;
+    };
+
+export type OpcuaDataTypeDefinition =
+  | OpcuaStructureDefinition
+  | OpcuaEnumDefinition;
+
+export type OpcuaStructureDefinition = {
+  readonly _tag: "Structure";
+  readonly dataTypeNodeId: string;
+  readonly name: string;
+  readonly structureType:
+    | "Structure"
+    | "StructureWithOptionalFields"
+    | "Union"
+    | "Unknown";
+  readonly fields: readonly OpcuaStructureField[];
+};
+
+export type OpcuaStructureField = {
+  readonly name: string;
+  readonly dataTypeNodeId: string;
+  readonly valueRank?: number;
+  readonly arrayDimensions?: readonly number[];
+  readonly isOptional?: boolean;
+  readonly description?: string;
+};
+
+export type OpcuaEnumDefinition = {
+  readonly _tag: "Enum";
+  readonly dataTypeNodeId: string;
+  readonly name: string;
+  readonly fields: readonly OpcuaEnumField[];
+};
+
+export type OpcuaEnumField = {
+  readonly name: string;
+  readonly value: number;
+  readonly description?: string;
+};
 
 interface VariableService {
   readonly read: <const Def extends OpcuaVariable.ReadableVariableDef>(
