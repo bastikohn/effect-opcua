@@ -22,8 +22,8 @@
     "clean": "rm -rf dist coverage node_modules"
   },
   "dependencies": {
-    "node-opcua-address-space": "^2.170.0",
-    "node-opcua-certificate-manager": "^2.170.0",
-    "node-opcua": "^2.170.0"
+    "node-opcua-address-space": "^2.173.1",
+    "node-opcua-certificate-manager": "^2.173.0",
+    "node-opcua": "^2.173.1"
   }
 }
