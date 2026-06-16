@@ -82,8 +82,22 @@ describe("metadata enrichment", () => {
       },
     });
 
-    const result = await Effect.runPromise(
+    const metadataOnly = await Effect.runPromise(
       readNode(session, "ns=1;s=Temperature"),
+    );
+
+    expect(metadataOnly.metadata).toMatchObject({
+      nodeId: "ns=1;s=Temperature",
+      nodeClass: "Variable",
+    });
+    expect(metadataOnly.value).toBeUndefined();
+    expect(metadataOnly.dataTypeDefinition).toBeUndefined();
+
+    const result = await Effect.runPromise(
+      readNode(session, "ns=1;s=Temperature", {
+        value: true,
+        dataTypeDefinition: true,
+      }),
     );
 
     expect(result.value).toMatchObject({ _tag: "Value", value: 21.5 });
@@ -100,7 +114,9 @@ describe("metadata enrichment", () => {
       },
     });
     await expect(
-      Effect.runPromise(readNode(missing, "ns=1;s=Missing")),
+      Effect.runPromise(
+        readNode(missing, "ns=1;s=Missing", { dataTypeDefinition: true }),
+      ),
     ).resolves.toMatchObject({
       dataTypeDefinition: {
         _tag: "Missing",
@@ -108,12 +124,22 @@ describe("metadata enrichment", () => {
       },
     });
 
-    const failed = {
-      ...missing,
-      readDataTypeDefinition: () => Effect.fail(new Error("boom") as never),
-    };
+    const failed = makeFakeSession({
+      metadata: {
+        "ns=1;s=Missing": variableMetadata("ns=1;s=Missing"),
+      },
+      definitions: {
+        "i=11": {
+          _tag: "Failure",
+          dataTypeNodeId: "i=11",
+          reason: "boom",
+        },
+      },
+    });
     await expect(
-      Effect.runPromise(readNode(failed, "ns=1;s=Missing")),
+      Effect.runPromise(
+        readNode(failed, "ns=1;s=Missing", { dataTypeDefinition: true }),
+      ),
     ).resolves.toMatchObject({
       dataTypeDefinition: {
         _tag: "Failure",

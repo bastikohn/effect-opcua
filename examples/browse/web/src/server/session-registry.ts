@@ -21,10 +21,8 @@ export type BrowserOpcuaSession = Pick<
   | "browseChildren"
   | "browseNext"
   | "releaseBrowseContinuation"
-  | "readNodeMetadata"
   | "readManyNodeMetadata"
-  | "readDataTypeDefinition"
-  | "read"
+  | "inspectNode"
   | "write"
   | "makeSubscription"
 >;

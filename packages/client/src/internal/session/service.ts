@@ -1,5 +1,5 @@
 import { resolveNodeId, type ClientSession } from "node-opcua";
-import { Effect, PubSub, Scope, Semaphore, Stream } from "effect";
+import { Effect, PubSub, Result, Scope, Semaphore, Stream } from "effect";
 
 import * as OpcuaError from "../../OpcuaError.js";
 import * as OpcuaSession from "../../OpcuaSession.js";
@@ -359,6 +359,62 @@ export const makeSession: (
       (dataTypeNodeIds) =>
         readManyDataTypeDefinitionsImpl(unsafeRaw, metadata, dataTypeNodeIds);
 
+    const isValueReadable = (nodeMetadata: OpcuaSession.OpcuaNodeMetadata) =>
+      nodeMetadata.accessLevel?.readable === true &&
+      nodeMetadata.userAccessLevel?.readable !== false;
+
+    const inspectValue = (
+      nodeId: string,
+      nodeMetadata: OpcuaSession.OpcuaNodeMetadata,
+    ): Effect.Effect<OpcuaSession.OpcuaInspectValueResult> =>
+      isValueReadable(nodeMetadata)
+        ? Effect.map(
+            Effect.result(
+              read(OpcuaVariable.makeVariableDef({ nodeId, access: "read" })),
+            ),
+            (result) =>
+              Result.isSuccess(result)
+                ? result.success
+                : {
+                    _tag: "ReadFailed" as const,
+                    nodeId,
+                    error: result.failure,
+                  },
+          )
+        : Effect.succeed({ _tag: "NotReadable" as const, nodeId });
+
+    const inspectNode: OpcuaSession.SessionService["inspectNode"] = (
+      nodeId,
+      options,
+    ) =>
+      Effect.gen(function* () {
+        const nodeMetadata = yield* metadata.node(nodeId);
+        const value =
+          options?.value === true
+            ? yield* inspectValue(nodeId, nodeMetadata)
+            : undefined;
+        const dataTypeDefinition =
+          options?.dataTypeDefinition === true &&
+          nodeMetadata.dataType !== undefined
+            ? yield* readDataTypeDefinitionImpl(
+                unsafeRaw,
+                metadata,
+                nodeMetadata.dataType,
+              )
+            : undefined;
+        return { nodeId, metadata: nodeMetadata, value, dataTypeDefinition };
+      }).pipe(
+        Effect.withSpan("opcua.session.inspectNode", {
+          attributes: {
+            "opcua.node_id": nodeId,
+            "opcua.inspect_value": options?.value === true,
+            "opcua.inspect_data_type_definition":
+              options?.dataTypeDefinition === true,
+          },
+          kind: "client",
+        }),
+      );
+
     return OpcuaSession.Session.of({
       read,
       write,
@@ -376,6 +432,7 @@ export const makeSession: (
       readManyNodeMetadata,
       readDataTypeDefinition,
       readManyDataTypeDefinitions,
+      inspectNode,
       events: Stream.fromPubSub(events),
       unsafeRaw,
     });

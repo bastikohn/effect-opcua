@@ -3,12 +3,11 @@ import {
   OpcuaSession,
   type OpcuaSubscription,
 } from "@effect-opcua/client";
-import { Duration, Effect, Result, Stream } from "effect";
+import { Duration, Effect, Stream } from "effect";
 
 import type {
   BrowseReference,
   BrowseResponse,
-  DataTypeDefinitionResult,
   MetadataFailure,
   MonitorEvent,
   MonitorRejectedItem,
@@ -164,35 +163,38 @@ export const browseContinuation = (
     };
   });
 
+export type ReadNodeOptions = {
+  readonly value?: boolean;
+  readonly dataTypeDefinition?: boolean;
+};
+
 export const readNode = (
   session: BrowserOpcuaSession,
   nodeId: string,
+  options?: ReadNodeOptions,
 ): Effect.Effect<ReadNodeResponse, WebRpcError> =>
   Effect.gen(function* () {
-    const metadata = yield* session
-      .readNodeMetadata(nodeId)
-      .pipe(
-        Effect.mapError((cause) => rpcError("ReadNodeMetadata", nodeId, cause)),
-      );
-    const valueResult = isReadable(metadata)
-      ? yield* Effect.result(readValue(session, nodeId))
-      : undefined;
-    const dataTypeDefinition = metadata.dataType
-      ? yield* readDataTypeDefinition(session, metadata.dataType)
-      : undefined;
+    const inspection = yield* session
+      .inspectNode(nodeId, {
+        value: options?.value === true,
+        dataTypeDefinition: options?.dataTypeDefinition === true,
+      })
+      .pipe(Effect.mapError((cause) => rpcError("ReadNode", nodeId, cause)));
 
     return {
       nodeId,
-      metadata: nodeMetadata(metadata),
+      metadata: nodeMetadata(inspection.metadata),
       value:
-        valueResult && Result.isSuccess(valueResult)
-          ? valueResult.success
+        inspection.value &&
+        inspection.value._tag !== "NotReadable" &&
+        inspection.value._tag !== "ReadFailed"
+          ? readValue(nodeId, inspection.value)
           : undefined,
       valueError:
-        valueResult && Result.isFailure(valueResult)
-          ? rpcError("ReadValue", nodeId, valueResult.failure)
+        inspection.value?._tag === "ReadFailed"
+          ? rpcError("ReadValue", nodeId, inspection.value.error)
           : undefined,
-      dataTypeDefinition,
+      dataTypeDefinition: inspection.dataTypeDefinition,
     };
   });
 
@@ -209,7 +211,7 @@ export const writeNode = (
     const write = yield* session
       .write(variable, value as never)
       .pipe(Effect.mapError((cause) => rpcError("WriteNode", nodeId, cause)));
-    const refreshed = yield* readNode(session, nodeId);
+    const refreshed = yield* readNode(session, nodeId, { value: true });
     return {
       nodeId,
       attemptedValue: toJsonValue(value),
@@ -359,66 +361,43 @@ export const nodeMetadata = (metadata: OpcuaNodeMetadata): NodeMetadata => ({
 });
 
 const readValue = (
-  session: BrowserOpcuaSession,
   nodeId: string,
-): Effect.Effect<ReadValue, unknown> =>
-  Effect.map(
-    session.read(
-      Opcua.variable({
-        nodeId,
-        access: "read",
-      }),
-    ),
-    (result): ReadValue => {
-      if (result._tag === "Value") {
-        return {
-          _tag: "Value",
-          nodeId,
-          value: toJsonValue(result.value),
-          status: result.status,
-          sourceTimestamp: result.sourceTimestamp,
-          serverTimestamp: result.serverTimestamp,
-          variant: result.variant,
-        };
-      }
-      if (result._tag === "DecodeError") {
-        return {
-          _tag: "DecodeError",
-          nodeId,
-          error: toJsonValue(result.error),
-          status: result.status,
-          sourceTimestamp: result.sourceTimestamp,
-          serverTimestamp: result.serverTimestamp,
-          variant: result.variant,
-        };
-      }
-      return {
-        _tag: "NonGoodStatus",
-        nodeId,
-        status: result.status,
-        sourceTimestamp: result.sourceTimestamp,
-        serverTimestamp: result.serverTimestamp,
-        variant: result.variant,
-      };
-    },
-  );
-
-const readDataTypeDefinition = (
-  session: BrowserOpcuaSession,
-  dataTypeNodeId: string,
-): Effect.Effect<DataTypeDefinitionResult> =>
-  session.readDataTypeDefinition(dataTypeNodeId).pipe(
-    Effect.matchEffect({
-      onFailure: (cause) =>
-        Effect.succeed({
-          _tag: "Failure" as const,
-          dataTypeNodeId,
-          reason: rpcError("ReadDataTypeDefinition", dataTypeNodeId, cause)
-            .message,
-        }),
-      onSuccess: (result) => Effect.succeed(result),
-    }),
-  );
+  result: Exclude<
+    OpcuaSession.OpcuaInspectValueResult,
+    { _tag: "NotReadable" } | { _tag: "ReadFailed" }
+  >,
+): ReadValue => {
+  if (result._tag === "Value") {
+    return {
+      _tag: "Value",
+      nodeId,
+      value: toJsonValue(result.value),
+      status: result.status,
+      sourceTimestamp: result.sourceTimestamp,
+      serverTimestamp: result.serverTimestamp,
+      variant: result.variant,
+    };
+  }
+  if (result._tag === "DecodeError") {
+    return {
+      _tag: "DecodeError",
+      nodeId,
+      error: toJsonValue(result.error),
+      status: result.status,
+      sourceTimestamp: result.sourceTimestamp,
+      serverTimestamp: result.serverTimestamp,
+      variant: result.variant,
+    };
+  }
+  return {
+    _tag: "NonGoodStatus",
+    nodeId,
+    status: result.status,
+    sourceTimestamp: result.sourceTimestamp,
+    serverTimestamp: result.serverTimestamp,
+    variant: result.variant,
+  };
+};
 
 const browseReference = (
   reference: OpcuaBrowseReference,
@@ -462,7 +441,3 @@ const metadataFailure = (
     attribute: failure.attribute,
   };
 };
-
-const isReadable = (metadata: OpcuaNodeMetadata) =>
-  metadata.accessLevel?.readable === true &&
-  metadata.userAccessLevel?.readable !== false;

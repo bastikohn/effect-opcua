@@ -336,7 +336,11 @@ export const UaBrowserRpcs = RpcGroup.make(
     error: WebRpcError,
   }),
   Rpc.make("ReadNode", {
-    payload: { nodeId: Schema.String },
+    payload: {
+      nodeId: Schema.String,
+      value: Schema.optional(Schema.Boolean),
+      dataTypeDefinition: Schema.optional(Schema.Boolean),
+    },
     success: ReadNodeResponseSchema,
     error: WebRpcError,
   }),

@@ -226,6 +226,27 @@ export type OpcuaEnumField = {
   readonly description?: string;
 };
 
+export type OpcuaInspectNodeOptions = {
+  readonly value?: boolean;
+  readonly dataTypeDefinition?: boolean;
+};
+
+export type OpcuaInspectValueResult =
+  | OpcuaVariable.ReadResult<OpcuaVariable.OpcuaDynamicValue>
+  | { readonly _tag: "NotReadable"; readonly nodeId: NodeIdString }
+  | {
+      readonly _tag: "ReadFailed";
+      readonly nodeId: NodeIdString;
+      readonly error: OpcuaError.OpcuaError;
+    };
+
+export type OpcuaNodeInspection = {
+  readonly nodeId: NodeIdString;
+  readonly metadata: OpcuaNodeMetadata;
+  readonly value?: OpcuaInspectValueResult;
+  readonly dataTypeDefinition?: OpcuaDataTypeDefinitionResult;
+};
+
 interface VariableService {
   readonly read: <const Def extends OpcuaVariable.ReadableVariableDef>(
     def: Def,
@@ -335,6 +356,10 @@ interface MetadataService {
     readonly OpcuaDataTypeDefinitionResult[],
     OpcuaError.OpcuaError
   >;
+  readonly inspectNode: (
+    nodeId: string,
+    options?: OpcuaInspectNodeOptions,
+  ) => Effect.Effect<OpcuaNodeInspection, OpcuaError.OpcuaError>;
 }
 
 export interface SessionService
@@ -426,6 +451,11 @@ export const readManyDataTypeDefinitions = (
   Session.use((session) =>
     session.readManyDataTypeDefinitions(dataTypeNodeIds),
   );
+
+export const inspectNode = (
+  nodeId: string,
+  options?: OpcuaInspectNodeOptions,
+) => Session.use((session) => session.inspectNode(nodeId, options));
 
 export type SessionOptions = {
   readonly userIdentity?: UserIdentityInfo;

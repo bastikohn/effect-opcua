@@ -26,6 +26,15 @@ export type NodeRequestToken = RequestToken & {
   readonly nodeId: string;
 };
 
+export type ReadRequestOptions = {
+  readonly value: boolean;
+  readonly dataTypeDefinition: boolean;
+};
+
+export type ReadRequestToken = NodeRequestToken & {
+  readonly options: ReadRequestOptions;
+};
+
 export type BrowseRequestToken = NodeRequestToken & {
   readonly mode: "replace" | "append";
   readonly continuationToken?: string;
@@ -302,13 +311,15 @@ export const disconnectLocal = (
 export const beginRead = (
   state: HmiState,
   nodeId: string,
-): { readonly state: HmiState; readonly token?: NodeRequestToken } => {
+  options: ReadRequestOptions = { value: false, dataTypeDefinition: false },
+): { readonly state: HmiState; readonly token?: ReadRequestToken } => {
   if (state.connection._tag !== "Connected") return { state };
   const requestId = state.nextRequestId;
   const token = {
     requestId,
     sessionGeneration: state.sessionGeneration,
     nodeId,
+    options,
   };
   return {
     state: {
@@ -323,19 +334,35 @@ export const beginRead = (
 
 export const finishReadSuccess = (
   state: HmiState,
-  token: NodeRequestToken,
+  token: ReadRequestToken,
   response: ReadNodeResponse,
 ): HmiState =>
   isNodeRequestCurrent(state, state.activeRead, token) &&
   state.selectedNodeId === token.nodeId
     ? {
         ...state,
-        selected: response,
+        selected: mergeReadResponse(state.selected, token.options, response),
         selectedNodeId: response.nodeId,
         activeRead: undefined,
         tree: state.tree.length === 0 ? [nodeFromRead(response)] : state.tree,
       }
     : state;
+
+const mergeReadResponse = (
+  previous: ReadNodeResponse | undefined,
+  options: ReadRequestOptions,
+  response: ReadNodeResponse,
+): ReadNodeResponse =>
+  previous?.nodeId === response.nodeId
+    ? {
+        ...response,
+        value: options.value ? response.value : previous.value,
+        valueError: options.value ? response.valueError : previous.valueError,
+        dataTypeDefinition: options.dataTypeDefinition
+          ? response.dataTypeDefinition
+          : previous.dataTypeDefinition,
+      }
+    : response;
 
 export const finishReadFailure = (
   state: HmiState,
@@ -387,7 +414,14 @@ export const finishWriteSuccess = (
         : { _tag: "NonGoodStatus", response },
     selected:
       state.selectedNodeId === token.nodeId
-        ? response.refreshed
+        ? state.selected?.nodeId === response.refreshed.nodeId
+          ? {
+              ...response.refreshed,
+              dataTypeDefinition:
+                response.refreshed.dataTypeDefinition ??
+                state.selected.dataTypeDefinition,
+            }
+          : response.refreshed
         : state.selected,
   };
 };

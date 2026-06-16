@@ -125,14 +125,26 @@ export const makeHmiActions = (options: {
     }
   };
 
-  const selectNode = async (nodeId: string) => {
+  const readNode = async (
+    nodeId: string,
+    readOptions: { value?: boolean; dataTypeDefinition?: boolean } = {},
+  ) => {
     const runtime = options.getRuntime();
     if (!runtime) return;
-    const started = beginRead(options.getState(), nodeId);
+    const started = beginRead(options.getState(), nodeId, {
+      value: readOptions.value === true,
+      dataTypeDefinition: readOptions.dataTypeDefinition === true,
+    });
     options.setState(started.state);
     if (!started.token) return;
     const token = started.token;
-    const exit = await runtime.runExit(runtime.rpc.ReadNode({ nodeId }));
+    const exit = await runtime.runExit(
+      runtime.rpc.ReadNode({
+        nodeId,
+        value: token.options.value,
+        dataTypeDefinition: token.options.dataTypeDefinition,
+      }),
+    );
     if (Exit.isFailure(exit)) {
       options.setState(finishReadFailure(options.getState(), token));
       log("error", messageOf(exit.cause));
@@ -143,6 +155,8 @@ export const makeHmiActions = (options: {
       log("info", `Read ${nodeId}`);
     }
   };
+
+  const selectNode = (nodeId: string) => readNode(nodeId);
 
   const startMonitoring = () => {
     const runtime = options.getRuntime();
@@ -255,7 +269,12 @@ export const makeHmiActions = (options: {
     readSelected: () => {
       const state = options.getState();
       const nodeId = state.selected?.nodeId ?? state.selectedNodeId;
-      void selectNode(nodeId);
+      void readNode(nodeId, { value: true });
+    },
+    loadDataTypeDefinition: () => {
+      const state = options.getState();
+      const nodeId = state.selected?.nodeId ?? state.selectedNodeId;
+      void readNode(nodeId, { dataTypeDefinition: true });
     },
     writeSelected: async (text: string) => {
       const runtime = options.getRuntime();

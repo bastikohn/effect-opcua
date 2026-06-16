@@ -84,6 +84,7 @@
       selected={hmi.selected}
       selectedNodeId={hmi.selectedNodeId}
       onReadSelected={actions.readSelected}
+      onLoadDataTypeDefinition={actions.loadDataTypeDefinition}
       onWriteSelected={actions.writeSelected}
       onMonitorSelected={() => actions.addMonitorNode()}
       writePolicy={hmi.writePolicy}
