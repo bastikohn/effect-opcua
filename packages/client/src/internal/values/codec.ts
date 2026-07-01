@@ -10,6 +10,7 @@ import {
   denormalizeDynamicValue,
   isArrayRank,
   normalizeDynamicValue,
+  plainVariantValue,
   type OpcuaDynamicValue,
   type OpcuaDynamicValueMetadata,
 } from "./normalize.js";
@@ -244,7 +245,10 @@ const decodeCodec = <A>(
         case "Dynamic":
           return decodeDynamicValue(variant?.value, variant) as A;
         case "Schema":
-          return decodeWithSchema(codec.schema, variant?.value) as A;
+          return decodeWithSchema(
+            codec.schema,
+            plainVariantValue(variant?.value),
+          ) as A;
         case "Structure":
           return decodeStructureValue(codec, variant, structureRuntime) as A;
         case "StructureArray":

@@ -98,15 +98,43 @@ export const normalizeDynamicValue = (
   value: unknown,
   variant?: Variant,
 ): OpcuaDynamicValue => {
-  if (value === null || value === undefined) return null;
-  if (Array.isArray(value)) {
-    return value.map((item) => normalizeDynamicValue(item));
+  if (
+    variant &&
+    variant.arrayType !== VariantArrayType.Scalar &&
+    !isByteStringValue(value)
+  ) {
+    const elements = arrayElements(value);
+    if (elements) {
+      return elements.map((element) =>
+        normalizeElement(element, variant.dataType),
+      );
+    }
   }
-  if (Buffer.isBuffer(value) || value instanceof Uint8Array) {
+  return normalizeElement(value, variant?.dataType);
+};
+
+const normalizeElement = (
+  value: unknown,
+  dataType?: DataType,
+): OpcuaDynamicValue => {
+  if (value === null || value === undefined) return null;
+  if (dataType === DataType.Int64 || dataType === DataType.UInt64) {
+    const text = int64Text(value, dataType === DataType.Int64);
+    if (text !== undefined) {
+      return dataType === DataType.UInt64
+        ? { _tag: "UInt64", text }
+        : { _tag: "Int64", text };
+    }
+  }
+  if (isByteStringValue(value)) {
     return {
       _tag: "ByteString",
       base64: Buffer.from(value).toString("base64"),
     };
+  }
+  const elements = arrayElements(value);
+  if (elements) {
+    return elements.map((element) => normalizeElement(element));
   }
   if (value instanceof Date) {
     return { _tag: "DateTime", iso: value.toISOString() };
@@ -115,21 +143,13 @@ export const normalizeDynamicValue = (
     return { _tag: "NodeId", ...normalizeNodeId(value) };
   }
   if (typeof value === "bigint") {
-    return variant?.dataType === DataType.UInt64
-      ? { _tag: "UInt64", text: value.toString() }
-      : { _tag: "Int64", text: value.toString() };
+    return { _tag: "Int64", text: value.toString() };
   }
   if (
     typeof value === "boolean" ||
     typeof value === "number" ||
     typeof value === "string"
   ) {
-    if (variant?.dataType === DataType.Int64) {
-      return { _tag: "Int64", text: String(value) };
-    }
-    if (variant?.dataType === DataType.UInt64) {
-      return { _tag: "UInt64", text: String(value) };
-    }
     return value;
   }
   if (value instanceof LocalizedText) {
@@ -162,6 +182,42 @@ export const normalizeDynamicValue = (
     };
   }
   return String(value);
+};
+
+const isByteStringValue = (value: unknown): value is Uint8Array =>
+  Buffer.isBuffer(value) || value instanceof Uint8Array;
+
+// node-opcua materializes numeric array variants as typed arrays.
+const arrayElements = (value: unknown): ReadonlyArray<unknown> | undefined => {
+  if (Array.isArray(value)) return value;
+  if (ArrayBuffer.isView(value) && !(value instanceof DataView)) {
+    return Array.from(value as unknown as ArrayLike<unknown>);
+  }
+  return undefined;
+};
+
+export const plainVariantValue = (value: unknown): unknown =>
+  !isByteStringValue(value) &&
+  ArrayBuffer.isView(value) &&
+  !(value instanceof DataView)
+    ? Array.from(value as unknown as ArrayLike<unknown>)
+    : value;
+
+// node-opcua represents Int64/UInt64 values as [high, low] UInt32 pairs.
+const int64Text = (value: unknown, signed: boolean): string | undefined => {
+  if (typeof value === "bigint") return value.toString();
+  if (typeof value === "number") return String(value);
+  if (typeof value === "string") return value;
+  if (
+    Array.isArray(value) &&
+    value.length === 2 &&
+    typeof value[0] === "number" &&
+    typeof value[1] === "number"
+  ) {
+    const unsigned = (BigInt(value[0] >>> 0) << 32n) | BigInt(value[1] >>> 0);
+    return (signed ? BigInt.asIntN(64, unsigned) : unsigned).toString();
+  }
+  return undefined;
 };
 
 export type OpcuaDynamicValueMetadata = {
