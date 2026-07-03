@@ -47,11 +47,11 @@
     "clean": "rm -rf dist coverage node_modules"
   },
   "peerDependencies": {
-    "effect": "4.0.0-beta.79"
+    "effect": "catalog:"
   },
   "dependencies": {
     "@effect-opcua/client": "workspace:*",
-    "@effect/platform-node": "4.0.0-beta.79",
+    "@effect/platform-node": "catalog:",
     "unrun": "^0.3.0"
   },
   "devDependencies": {}
