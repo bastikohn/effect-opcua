@@ -4,6 +4,18 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+catalogs:
+  default:
+    '@effect/platform-browser':
+      specifier: 4.0.0-beta.92
+      version: 4.0.0-beta.92
+    '@effect/platform-node':
+      specifier: 4.0.0-beta.92
+      version: 4.0.0-beta.92
+    effect:
+      specifier: 4.0.0-beta.92
+      version: 4.0.0-beta.92
+
 importers:
 
   .:
@@ -48,8 +60,8 @@ importers:
         specifier: ^2.0.0
         version: 2.0.0(ink@5.2.1(@types/react@18.3.28)(react@18.3.1))
       effect:
-        specifier: 4.0.0-beta.79
-        version: 4.0.0-beta.79
+        specifier: 'catalog:'
+        version: 4.0.0-beta.92
       ink:
         specifier: ^5.0.0
         version: 5.2.1(@types/react@18.3.28)(react@18.3.1)
@@ -67,17 +79,17 @@ importers:
         specifier: workspace:*
         version: link:../../../packages/client
       '@effect/platform-browser':
-        specifier: 4.0.0-beta.79
-        version: 4.0.0-beta.79(effect@4.0.0-beta.79)
+        specifier: 'catalog:'
+        version: 4.0.0-beta.92(effect@4.0.0-beta.92)
       '@effect/platform-node':
-        specifier: 4.0.0-beta.79
-        version: 4.0.0-beta.79(effect@4.0.0-beta.79)(ioredis@5.11.0)
+        specifier: 'catalog:'
+        version: 4.0.0-beta.92(effect@4.0.0-beta.92)(ioredis@5.11.0)
       '@tailwindcss/vite':
         specifier: ^4.0.0
         version: 4.3.0(vite@7.3.3(@types/node@24.12.4)(jiti@2.7.0)(lightningcss@1.32.0)(yaml@2.9.0))
       effect:
-        specifier: 4.0.0-beta.79
-        version: 4.0.0-beta.79
+        specifier: 'catalog:'
+        version: 4.0.0-beta.92
       lucide-svelte:
         specifier: ^0.468.0
         version: 0.468.0(svelte@5.56.0)
@@ -104,8 +116,8 @@ importers:
         specifier: workspace:*
         version: link:../../../packages/client
       effect:
-        specifier: 4.0.0-beta.79
-        version: 4.0.0-beta.79
+        specifier: 'catalog:'
+        version: 4.0.0-beta.92
 
   examples/demo-machine/server:
     dependencies:
@@ -122,8 +134,8 @@ importers:
   packages/client:
     dependencies:
       effect:
-        specifier: 4.0.0-beta.79
-        version: 4.0.0-beta.79
+        specifier: 'catalog:'
+        version: 4.0.0-beta.92
       node-opcua:
         specifier: ^2.170.0
         version: 2.172.0
@@ -134,11 +146,11 @@ importers:
         specifier: workspace:*
         version: link:../client
       '@effect/platform-node':
-        specifier: 4.0.0-beta.79
-        version: 4.0.0-beta.79(effect@4.0.0-beta.79)(ioredis@5.11.0)
+        specifier: 'catalog:'
+        version: 4.0.0-beta.92(effect@4.0.0-beta.92)(ioredis@5.11.0)
       effect:
-        specifier: 4.0.0-beta.79
-        version: 4.0.0-beta.79
+        specifier: 'catalog:'
+        version: 4.0.0-beta.92
       unrun:
         specifier: ^0.3.0
         version: 0.3.0
@@ -233,22 +245,22 @@ packages:
     resolution: {integrity: sha512-mrXfnyHiY6FDNYF+MFkHCW/oBcCubQXG2Ma0B4iH0YMoue+6Cxv+CSiiUql22rLBAhea4re2TlV+9+FBarLSGA==}
     hasBin: true
 
-  '@effect/platform-browser@4.0.0-beta.79':
-    resolution: {integrity: sha512-RPYeQHVNk/xXGJpl06puSc5Vk90FheqFt/bDv3vja5O+1Bh/fD5W17eOHXNfhMqQBafnTniOjs33bWZZBEaeKw==}
+  '@effect/platform-browser@4.0.0-beta.92':
+    resolution: {integrity: sha512-j5WNX0b6pUnl+xHrCIHl1XDUPQgcj+XWnpN8ID2DuPr74JOp2ichzYSjwFk/33tRe1zHRQvaCiJ5GFi1saVKxw==}
     peerDependencies:
-      effect: ^4.0.0-beta.79
+      effect: ^4.0.0-beta.92
 
-  '@effect/platform-node-shared@4.0.0-beta.83':
-    resolution: {integrity: sha512-+yr/+PJmKTgmJq1QOINSBPgLu7Cjc4CZcotBXnGjyDEizOmimFgTkN2B8PBJAKIKUWYWfobjXqC+58/VhhPKAw==}
+  '@effect/platform-node-shared@4.0.0-beta.93':
+    resolution: {integrity: sha512-XUqZ2u5GglBqY8q2jj4Q7GjN5K/enedk8auZM9rY/l5a/myaQTrQp3QnvpIK4/Yg0WFjLGuctGPMKWRk3OLIrA==}
     engines: {node: '>=18.0.0'}
     peerDependencies:
-      effect: ^4.0.0-beta.83
+      effect: ^4.0.0-beta.93
 
-  '@effect/platform-node@4.0.0-beta.79':
-    resolution: {integrity: sha512-gJrBa+7X04F+C49/Elwp7ah1E7MyacDYq1adeLktVCdT7iUa+YaoiienJJ8Fj4wH1D5iwwckA59xrZzi7iiEEw==}
+  '@effect/platform-node@4.0.0-beta.92':
+    resolution: {integrity: sha512-ZNcwKqBb99yw+cj+KQBMgw0xoQl3GDbUtQjnN3cLsIRpfYS/AVcSp4wfURMczvX5PzoR131yOWkqds5Vmm5tLg==}
     engines: {node: '>=18.0.0'}
     peerDependencies:
-      effect: ^4.0.0-beta.79
+      effect: ^4.0.0-beta.92
       ioredis: ^5.7.0
 
   '@emnapi/core@1.10.0':
@@ -1884,8 +1896,8 @@ packages:
   ecc-jsbn@0.1.2:
     resolution: {integrity: sha512-eh9O+hwRHNbG4BLTjEl3nw044CkGm5X6LoaCf7LPp7UU8Qrt47JYNi6nPX8xjW97TKGKm1ouctg0QSpZe9qrnw==}
 
-  effect@4.0.0-beta.79:
-    resolution: {integrity: sha512-AwtiZ1zsbau3HS/zXlB9jRFAjRB8VoANjSwipTH0NtaMUwYPoVokgCF08FmJt9eOGPmeCQy1KRDvsuaYrP5Bhw==}
+  effect@4.0.0-beta.92:
+    resolution: {integrity: sha512-et6Fy8X9cxhzV/w4U372lB7YCP/B9a8FYVxlx9UMzSgnmwWKxpldnaHz7mHpZHh+OU+ENhU9DO/rTAakmT0sEA==}
 
   emoji-regex@10.6.0:
     resolution: {integrity: sha512-toUI84YS5YmxW219erniWD0CIVOo46xGKColeNQRgOzDorgBi1v4D71/OFzgD9GO2UGKIv1C3Sp8DAn0+j5w7A==}
@@ -3401,24 +3413,24 @@ snapshots:
 
   '@effect/language-service@0.39.0': {}
 
-  '@effect/platform-browser@4.0.0-beta.79(effect@4.0.0-beta.79)':
+  '@effect/platform-browser@4.0.0-beta.92(effect@4.0.0-beta.92)':
     dependencies:
-      effect: 4.0.0-beta.79
+      effect: 4.0.0-beta.92
       multipasta: 0.2.7
 
-  '@effect/platform-node-shared@4.0.0-beta.83(effect@4.0.0-beta.79)':
+  '@effect/platform-node-shared@4.0.0-beta.93(effect@4.0.0-beta.92)':
     dependencies:
       '@types/ws': 8.18.1
-      effect: 4.0.0-beta.79
+      effect: 4.0.0-beta.92
       ws: 8.20.1
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
 
-  '@effect/platform-node@4.0.0-beta.79(effect@4.0.0-beta.79)(ioredis@5.11.0)':
+  '@effect/platform-node@4.0.0-beta.92(effect@4.0.0-beta.92)(ioredis@5.11.0)':
     dependencies:
-      '@effect/platform-node-shared': 4.0.0-beta.83(effect@4.0.0-beta.79)
-      effect: 4.0.0-beta.79
+      '@effect/platform-node-shared': 4.0.0-beta.93(effect@4.0.0-beta.92)
+      effect: 4.0.0-beta.92
       ioredis: 5.11.0
       mime: 4.1.0
       undici: 8.3.0
@@ -4549,7 +4561,7 @@ snapshots:
       jsbn: 0.1.1
       safer-buffer: 2.1.2
 
-  effect@4.0.0-beta.79:
+  effect@4.0.0-beta.92:
     dependencies:
       '@standard-schema/spec': 1.1.0
       fast-check: 4.8.0
