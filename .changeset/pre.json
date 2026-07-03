@@ -13,6 +13,7 @@
     "effect-beta-92",
     "fix-array-int64-decoding",
     "publish-codegen",
+    "republish-resolved-specifiers",
     "session-namespace"
   ]
 }
