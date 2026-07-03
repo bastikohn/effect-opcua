@@ -68,10 +68,13 @@ export const UaBrowserHandlers = UaBrowserRpcs.toLayer(
             released,
           }),
         ),
-      ReadNode: ({ nodeId }, { client }) =>
+      ReadNode: ({ nodeId, value, dataTypeDefinition }, { client }) =>
         Effect.gen(function* () {
           const session = yield* registry.get(client.id);
-          return yield* readNode(session, nodeId);
+          return yield* readNode(session, nodeId, {
+            value,
+            dataTypeDefinition,
+          });
         }),
       WriteNode: ({ nodeId, value }, { client }) =>
         Effect.gen(function* () {

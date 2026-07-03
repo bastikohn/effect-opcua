@@ -140,11 +140,41 @@ export const makeFakeSession = (
       Effect.sync(() => {
         options.onReleaseContinuation?.(input.nodeId);
       }),
-    readNodeMetadata: (nodeId) => {
+    inspectNode: (nodeId, inspectOptions) => {
       const entry = metadata.get(nodeId);
-      return entry
-        ? Effect.succeed(entry)
-        : Effect.fail(new Error(`Missing metadata for ${nodeId}`) as never);
+      if (!entry) {
+        return Effect.fail(
+          new Error(`Missing metadata for ${nodeId}`) as never,
+        );
+      }
+      const readable =
+        entry.accessLevel?.readable === true &&
+        entry.userAccessLevel?.readable !== false;
+      const value =
+        inspectOptions?.value === true
+          ? readable
+            ? ((values.get(nodeId) ?? {
+                _tag: "Value",
+                nodeId,
+                value: null,
+                status: goodStatus,
+              }) as never)
+            : ({ _tag: "NotReadable", nodeId } as never)
+          : undefined;
+      const dataTypeDefinition =
+        inspectOptions?.dataTypeDefinition === true && entry.dataType
+          ? ((definitions.get(entry.dataType) ?? {
+              _tag: "Missing",
+              dataTypeNodeId: entry.dataType,
+              reason: "No DataTypeDefinition",
+            }) as never)
+          : undefined;
+      return Effect.succeed({
+        nodeId,
+        metadata: entry,
+        value,
+        dataTypeDefinition,
+      });
     },
     readManyNodeMetadata: (nodeIds) =>
       Effect.succeed(
@@ -166,23 +196,6 @@ export const makeFakeSession = (
                 },
               };
         }),
-      ),
-    readDataTypeDefinition: (dataTypeNodeId) =>
-      Effect.succeed(
-        definitions.get(dataTypeNodeId) ?? {
-          _tag: "Missing",
-          dataTypeNodeId,
-          reason: "No DataTypeDefinition",
-        },
-      ),
-    read: (def) =>
-      Effect.succeed(
-        (values.get(def.nodeId) ?? {
-          _tag: "Value",
-          nodeId: def.nodeId,
-          value: null,
-          status: goodStatus,
-        }) as never,
       ),
     write: (def, value) => {
       if (options.writeFailure !== undefined) {

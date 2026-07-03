@@ -6,3 +6,11 @@ coverage
 .DS_Store
 *.log
 .plans/*
+
+# Never commit secrets or key material
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx

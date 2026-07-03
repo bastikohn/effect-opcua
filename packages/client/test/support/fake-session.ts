@@ -15,9 +15,9 @@ import type {
 } from "node-opcua";
 import { ExtensionObject } from "node-opcua";
 
-import { makeSession } from "../../src/internal/opcua-session.js";
+import { makeSession } from "../../src/internal/session/service.js";
 import type { OpcuaSession } from "@effect-opcua/client";
-import type { OpcuaSessionEvent } from "../../src/internal/events.js";
+import type { OpcuaSessionEvent } from "../../src/internal/events/model.js";
 import {
   AttributeIds,
   DataType,

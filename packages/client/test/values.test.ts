@@ -87,6 +87,98 @@ describe("values", () => {
     });
   });
 
+  it("decodes typed-array numeric array variants as plain arrays", async () => {
+    const nodeId = "ns=1;s=Doubles";
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* makeFakeSession({
+            variableMetadata: {
+              [nodeId]: { dataType: "i=11", valueRank: 1 },
+            },
+            readValues: () => [
+              variantDataValue(
+                DataType.Double,
+                [1.5, 2.5],
+                StatusCodes.Good,
+                VariantArrayType.Array,
+              ),
+            ],
+          });
+          return {
+            dynamic: yield* fake.session.read(Opcua.variable({ nodeId })),
+            schema: yield* fake.session.read(
+              Opcua.variable({
+                nodeId,
+                codec: Opcua.schema(Schema.Array(Schema.Number)),
+              }),
+            ),
+          };
+        }),
+      ),
+    );
+
+    expect(result.dynamic).toMatchObject({
+      _tag: "Value",
+      value: [1.5, 2.5],
+    });
+    expect(result.schema).toMatchObject({
+      _tag: "Value",
+      value: [1.5, 2.5],
+    });
+  });
+
+  it("decodes Int64 and UInt64 high/low pairs as tagged values", async () => {
+    const scalarNodeId = "ns=1;s=Int64Scalar";
+    const arrayNodeId = "ns=1;s=UInt64Array";
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* makeFakeSession({
+            variableMetadata: {
+              [scalarNodeId]: { dataType: "i=8" },
+              [arrayNodeId]: { dataType: "i=9", valueRank: 1 },
+            },
+            readValues: (nodes) =>
+              nodes.map((node) =>
+                node.nodeId?.toString() === scalarNodeId
+                  ? variantDataValue(DataType.Int64, -2)
+                  : variantDataValue(
+                      DataType.UInt64,
+                      [
+                        [1, 0],
+                        [0, 7],
+                      ],
+                      StatusCodes.Good,
+                      VariantArrayType.Array,
+                    ),
+              ),
+          });
+          return {
+            scalar: yield* fake.session.read(
+              Opcua.variable({ nodeId: scalarNodeId }),
+            ),
+            array: yield* fake.session.read(
+              Opcua.variable({ nodeId: arrayNodeId }),
+            ),
+          };
+        }),
+      ),
+    );
+
+    expect(result.scalar).toMatchObject({
+      _tag: "Value",
+      value: { _tag: "Int64", text: "-2" },
+    });
+    expect(result.array).toMatchObject({
+      _tag: "Value",
+      value: [
+        { _tag: "UInt64", text: "4294967296" },
+        { _tag: "UInt64", text: "7" },
+      ],
+    });
+  });
+
   it("does not report arbitrary dynamic objects as ExtensionObjects", async () => {
     const nodeId = "ns=1;s=RawObject";
     const result = await Effect.runPromise(

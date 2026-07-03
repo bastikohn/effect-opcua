@@ -84,8 +84,17 @@ describe("RPC handlers", () => {
             browse.references.map((reference) => reference.nodeId),
           ).toEqual(["ns=1;s=Temperature"]);
 
+          const metadataOnly = yield* client.ReadNode({
+            nodeId: "ns=1;s=Temperature",
+          });
+          expect(metadataOnly.value).toBeUndefined();
+          expect(metadataOnly.metadata).toMatchObject({
+            nodeId: "ns=1;s=Temperature",
+          });
+
           const read = yield* client.ReadNode({
             nodeId: "ns=1;s=Temperature",
+            value: true,
           });
           expect(read.value).toMatchObject({ value: 10 });
 
@@ -265,7 +274,7 @@ describe("RPC handlers", () => {
       get: () =>
         Effect.succeed({
           ...makeFakeSession(),
-          readNodeMetadata: () =>
+          inspectNode: () =>
             Effect.fail(new Error("raw session failure with stack") as never),
         }),
       disconnect: () => Effect.succeed(false),
@@ -292,7 +301,7 @@ describe("RPC handlers", () => {
           expect(error).toMatchObject({
             _tag: "WebRpcError",
             category: "Unexpected",
-            operation: "ReadNodeMetadata",
+            operation: "ReadNode",
             nodeId: "ns=1;s=Temperature",
             message: "raw session failure with stack",
           });

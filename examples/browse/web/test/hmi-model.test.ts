@@ -57,6 +57,61 @@ describe("HMI model", () => {
     expect(state.selected?.nodeId).toBe("ns=1;s=Pressure");
   });
 
+  it("keeps loaded value and definition across partial reads of the same node", () => {
+    let state = connectedState();
+    const definition = {
+      _tag: "Success",
+      dataTypeNodeId: "i=11",
+      definition: {
+        _tag: "Enum",
+        dataTypeNodeId: "i=11",
+        name: "Double",
+        fields: [],
+      },
+    } as const;
+
+    const metadataOnly = beginRead(state, "ns=1;s=Temperature");
+    state = finishReadSuccess(metadataOnly.state, metadataOnly.token!, {
+      ...readResponse("ns=1;s=Temperature", "Temperature"),
+      value: undefined,
+    });
+    expect(state.selected?.value).toBeUndefined();
+
+    const valueRead = beginRead(state, "ns=1;s=Temperature", {
+      value: true,
+      dataTypeDefinition: false,
+    });
+    state = finishReadSuccess(
+      valueRead.state,
+      valueRead.token!,
+      readResponse("ns=1;s=Temperature", "Temperature"),
+    );
+    expect(state.selected?.value).toMatchObject({ _tag: "Value" });
+
+    const definitionRead = beginRead(state, "ns=1;s=Temperature", {
+      value: false,
+      dataTypeDefinition: true,
+    });
+    state = finishReadSuccess(definitionRead.state, definitionRead.token!, {
+      ...readResponse("ns=1;s=Temperature", "Temperature"),
+      value: undefined,
+      dataTypeDefinition: definition,
+    });
+    expect(state.selected?.value).toMatchObject({ _tag: "Value" });
+    expect(state.selected?.dataTypeDefinition).toEqual(definition);
+
+    const refresh = beginRead(state, "ns=1;s=Temperature", {
+      value: true,
+      dataTypeDefinition: false,
+    });
+    state = finishReadSuccess(
+      refresh.state,
+      refresh.token!,
+      readResponse("ns=1;s=Temperature", "Temperature"),
+    );
+    expect(state.selected?.dataTypeDefinition).toEqual(definition);
+  });
+
   it("ignores stale browse results after disconnect cleanup", () => {
     let state = connectedState();
     const started = beginBrowse(state, "i=85");

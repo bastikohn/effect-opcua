@@ -1,14 +1,8 @@
-import { OPCUAClient, type OPCUAClientOptions } from "node-opcua";
-import { type Config, Context, Effect, Layer, PubSub, Stream } from "effect";
+import type { OPCUAClient, OPCUAClientOptions } from "node-opcua";
+import { type Config, Context, Effect, Layer, type Stream } from "effect";
 
-import * as OpcuaError from "./OpcuaError.js";
-
-import { EVENT_BUFFER_SIZE } from "./internal/constants.js";
-import {
-  EventBus,
-  type OpcuaClientEvent,
-  wireClientEvents,
-} from "./internal/events.js";
+import { makeClientService } from "./internal/client/make.js";
+import type { OpcuaClientEvent } from "./internal/events/model.js";
 
 const TypeId = "@effect-opcua/client/OpcuaClient";
 
@@ -18,84 +12,8 @@ export interface ClientService {
 }
 export class Client extends Context.Service<Client, ClientService>()(TypeId) {}
 
-export const make = Effect.fnUntraced(function* (options: ClientLayerOptions) {
-  const events = yield* PubSub.sliding<OpcuaClientEvent>({
-    capacity: EVENT_BUFFER_SIZE,
-    replay: 1,
-  });
-  yield* Effect.addFinalizer(() => PubSub.shutdown(events));
-
-  const unsafeRawClient = yield* Effect.try({
-    try: () => OPCUAClient.create(options.clientOptions ?? {}),
-    catch: (cause) =>
-      OpcuaError.connectError({ endpointUrl: options.endpointUrl, cause }),
-  });
-  yield* wireClientEvents(unsafeRawClient, events);
-  yield* Effect.acquireRelease(
-    Effect.tryPromise({
-      try: async (signal) => {
-        let disconnectAfterAbort: Promise<void> | undefined;
-        const disconnectOnAbort = () => {
-          disconnectAfterAbort ??= unsafeRawClient
-            .disconnect()
-            .catch(() => undefined);
-        };
-
-        signal.addEventListener("abort", disconnectOnAbort, { once: true });
-        try {
-          await unsafeRawClient.connect(options.endpointUrl);
-          if (signal.aborted) {
-            disconnectOnAbort();
-            await disconnectAfterAbort;
-            throw new Error("Connection aborted");
-          }
-          EventBus.publishUnsafe(events, {
-            _tag: "Connected",
-            endpointUrl: options.endpointUrl,
-          });
-          return unsafeRawClient;
-        } finally {
-          signal.removeEventListener("abort", disconnectOnAbort);
-        }
-      },
-      catch: (cause) =>
-        OpcuaError.connectError({
-          endpointUrl: options.endpointUrl,
-          cause,
-        }),
-    }).pipe(
-      Effect.withSpan("opcua.connect", {
-        attributes: { "opcua.endpoint_url": options.endpointUrl },
-        kind: "client",
-      }),
-    ),
-    () =>
-      Effect.tryPromise({
-        try: async () => {
-          await unsafeRawClient.disconnect();
-          EventBus.publishUnsafe(events, {
-            _tag: "Disconnected",
-            endpointUrl: options.endpointUrl,
-          });
-        },
-        catch: (cause) =>
-          OpcuaError.disconnectError({
-            endpointUrl: options.endpointUrl,
-            cause,
-          }),
-      }).pipe(
-        Effect.withSpan("opcua.disconnect", {
-          attributes: { "opcua.endpoint_url": options.endpointUrl },
-          kind: "client",
-        }),
-        Effect.ignore,
-      ),
-  );
-  return Client.of({
-    events: Stream.fromPubSub(events),
-    unsafeRawClient,
-  });
-});
+export const make = (options: ClientLayerOptions) =>
+  Effect.map(makeClientService(options), Client.of);
 
 export type ClientLayerOptions = {
   readonly endpointUrl: string;

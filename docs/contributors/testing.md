@@ -14,6 +14,8 @@ pnpm check:release
 
 `pnpm test` runs package tests serially across `@effect-opcua/*` packages.
 `pnpm test:types` runs Tstyche type tests.
+`pnpm lint` and `pnpm format` use Vite+ internally, backed by Oxlint and
+Oxfmt.
 
 `pnpm check:release` runs the alpha release gate: lint, format, build,
 workspace typecheck, Tstyche tests, workspace tests, packed client package

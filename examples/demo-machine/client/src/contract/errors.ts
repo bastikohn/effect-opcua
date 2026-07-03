@@ -3,8 +3,8 @@ import { Schema } from "effect";
 export class InvalidCommandInput extends Schema.TaggedErrorClass<InvalidCommandInput>()(
   "InvalidCommandInput",
   {
-    command: Schema.Defect,
-    cause: Schema.Defect,
+    command: Schema.Defect(),
+    cause: Schema.Defect(),
   },
 ) {}
 
@@ -34,6 +34,6 @@ export class CommandStatusUnavailable extends Schema.TaggedErrorClass<CommandSta
   {
     operation: Schema.String,
     nodeId: Schema.optional(Schema.String),
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {}

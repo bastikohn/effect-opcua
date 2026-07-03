@@ -51,17 +51,63 @@ types, constants, and helpers that users still need.
 `packages/client/src/internal/*` contains shared implementation code and is not
 public API. The package export map blocks `./internal/*`.
 
+Internal files must not import from `@effect-opcua/client`. Use relative imports
+to the concrete source file that owns the public type, such as
+`../../OpcuaVariable.js`.
+
 Use internal modules for reusable mechanics such as:
 
-- metadata discovery and cache invalidation
-- keyed batch normalization
-- browse result normalization
-- structure runtime initialization
-- monitor option normalization
-- event wiring
+- option validation: `internal/common/options.ts`
+- plain record and integer predicates: `internal/common/predicates.ts`
+- node-id helpers: `internal/common/node-id.ts`
+- client lifecycle: `internal/client/make.ts`
+- session lifecycle and service assembly: `internal/session/make.ts` and
+  `internal/session/service.ts`
+- metadata discovery and cache invalidation: `internal/metadata/*`
+- keyed batch normalization: `internal/batch/keyed.ts`
+- browse result normalization: `internal/browse/operations.ts`
+- value and status normalization: `internal/values/*`
+- structure runtime initialization: `internal/structures/runtime.ts`
+- subscription lifecycle and options: `internal/subscription/*`
+- monitor option normalization, request creation, sample decoding, and runtime:
+  `internal/monitoring/*`
+- event model and wiring: `internal/events/model.ts` and
+  `internal/events/wire.ts`
 
 Keep public modules small and definition-oriented. A public module should define
 the user-facing types, constructors, and service functions for one feature area.
+Reusable runtime mechanics belong in `internal/*`, and there is no
+`internal/index.ts` barrel.
+
+Target client layout:
+
+```txt
+packages/client/src/
+├── index.ts
+├── node-opcua.ts
+├── Opcua.ts
+├── OpcuaClient.ts
+├── OpcuaSession.ts
+├── OpcuaError.ts
+├── OpcuaVariable.ts
+├── OpcuaMethod.ts
+├── OpcuaSubscription.ts
+└── internal/
+    ├── common/
+    ├── client/
+    ├── session/
+    ├── values/
+    ├── structures/
+    ├── metadata/
+    ├── variable/
+    ├── method/
+    ├── batch/
+    ├── browse/
+    ├── data-types/
+    ├── subscription/
+    ├── monitoring/
+    └── events/
+```
 
 ## Design direction
 

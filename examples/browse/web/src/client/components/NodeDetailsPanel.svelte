@@ -12,6 +12,7 @@
     selected?: ReadNodeResponse;
     selectedNodeId: string;
     onReadSelected: () => void;
+    onLoadDataTypeDefinition: () => void;
     onWriteSelected: (text: string) => void;
     onMonitorSelected: () => void;
     writePolicy: HmiWritePolicy;
@@ -22,6 +23,15 @@
   let writeText = $state("");
 
   const latestValue = $derived(props.selected?.value);
+  const valueReadable = $derived(
+    props.selected?.metadata.accessLevel?.readable === true &&
+      props.selected?.metadata.userAccessLevel?.readable !== false,
+  );
+  const valueStatusText = $derived(
+    latestValue?.status.text ??
+      props.selected?.valueError?.message ??
+      (valueReadable ? "Not loaded" : "Not readable"),
+  );
   const canWrite = $derived(
     props.writePolicy._tag === "Enabled" &&
       props.selected?.metadata.accessLevel?.writable === true &&
@@ -132,10 +142,18 @@
           class="flex h-9 items-center justify-between border-b border-neutral-800 px-3"
         >
           <div class="text-sm font-medium text-stone-200">Value</div>
-          <div class="text-xs text-stone-500">
-            {latestValue?.status.text ??
-              props.selected.valueError?.message ??
-              "Not readable"}
+          <div class="flex items-center gap-2">
+            <div class="text-xs text-stone-500">{valueStatusText}</div>
+            {#if valueReadable}
+              <button
+                class="flex h-6 items-center border border-neutral-700 bg-neutral-900 px-2 text-xs text-stone-100 hover:bg-neutral-800"
+                type="button"
+                onclick={readSelected}
+                title="Read value"
+              >
+                Read
+              </button>
+            {/if}
           </div>
         </div>
         <pre
@@ -171,18 +189,36 @@
         </div>
       {/if}
 
-      {#if props.selected.dataTypeDefinition}
+      {#if props.selected.metadata.dataType}
         <div class="border border-neutral-800">
           <div
-            class="h-9 border-b border-neutral-800 px-3 py-2 text-sm font-medium text-stone-200"
+            class="flex h-9 items-center justify-between border-b border-neutral-800 px-3"
           >
-            Data Type Definition
+            <div class="text-sm font-medium text-stone-200">
+              Data Type Definition
+            </div>
+            {#if !props.selected.dataTypeDefinition}
+              <button
+                class="flex h-6 items-center border border-neutral-700 bg-neutral-900 px-2 text-xs text-stone-100 hover:bg-neutral-800"
+                type="button"
+                onclick={props.onLoadDataTypeDefinition}
+                title="Load data type definition"
+              >
+                Load
+              </button>
+            {/if}
           </div>
-          <div class="max-h-64 overflow-auto p-3 text-sm">
-            <DataTypeDefinition
-              definition={props.selected.dataTypeDefinition}
-            />
-          </div>
+          {#if props.selected.dataTypeDefinition}
+            <div class="max-h-64 overflow-auto p-3 text-sm">
+              <DataTypeDefinition
+                definition={props.selected.dataTypeDefinition}
+              />
+            </div>
+          {:else}
+            <div class="p-3 text-xs text-stone-500">
+              Definition not loaded
+            </div>
+          {/if}
         </div>
       {/if}
     </div>

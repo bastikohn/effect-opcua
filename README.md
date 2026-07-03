@@ -35,12 +35,17 @@ pnpm build
 pnpm test
 ```
 
+The public contributor commands intentionally stay on `pnpm`. Some scripts use
+Vite+ internally for linting, formatting, and workspace task orchestration.
+
 ## Releases
 
 Releases are managed with Changesets. Add a changeset for user-visible changes
 to published packages, then merge the generated `Version packages` PR.
 
-Publishing uses npm trusted publishing from `.github/workflows/release.yml`, so
-no long-lived `NPM_TOKEN` is required. Configure npm trusted publishing for
-`@effect-opcua/client` against this repository and workflow before the first
-release.
+Publishing runs from `.github/workflows/release.yml` with npm provenance
+enabled (which requires this repository to stay public). The first releases
+authenticate with an `NPM_TOKEN` repository secret (an npm automation token).
+Once `@effect-opcua/client` and `@effect-opcua/codegen` exist on npm, configure
+npm trusted publishing for them against this repository and workflow, then drop
+the `NODE_AUTH_TOKEN` env from the publish job to publish token-free via OIDC.

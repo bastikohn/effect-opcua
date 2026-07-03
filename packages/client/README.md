@@ -210,6 +210,33 @@ Use `OpcuaSession.browse`, `OpcuaSession.browseNext`, and
 `OpcuaSession.releaseBrowseContinuation` directly when you need explicit
 pagination control. `includeRaw: true` opts into raw node-opcua browse values.
 
+## Inspect nodes
+
+`OpcuaSession.inspectNode` reads node metadata and, only when requested, the
+current value and the data type definition:
+
+```ts
+const program = Effect.gen(function* () {
+  // Metadata only — safe for address-space navigation.
+  const node = yield* OpcuaSession.inspectNode("ns=2;s=Machine.State");
+
+  // Opt into the expensive parts on demand.
+  const details = yield* OpcuaSession.inspectNode("ns=2;s=Machine.State", {
+    value: true,
+    dataTypeDefinition: true,
+  });
+
+  return { node, details };
+});
+```
+
+Keep `value` off while browsing: reading the value of a custom-structure
+(`ExtensionObject`) variable forces node-opcua to populate its session-wide
+data type manager on first use, which can take many seconds on large or slow
+servers. With `value: true`, an unreadable node yields
+`{ _tag: "NotReadable" }` and a failed read yields `{ _tag: "ReadFailed" }`
+instead of failing the whole inspection.
+
 ## Monitoring
 
 Subscriptions and monitors are scoped resources. Closing or interrupting the

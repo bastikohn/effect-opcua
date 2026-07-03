@@ -16,6 +16,23 @@ const run = (command, args, options = {}) =>
 
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
 
+// Returns the dist-tag to publish under. In changeset pre mode we mirror the
+// configured pre tag (e.g. `alpha`) so a prerelease can never silently land on
+// `latest`; stable releases fall through to `latest`.
+const readPrereleaseTag = () => {
+  try {
+    const pre = readJson(join(rootPath, ".changeset", "pre.json"));
+    if (pre.mode === "pre" && typeof pre.tag === "string") {
+      return pre.tag;
+    }
+  } catch {
+    // No pre.json (or unreadable): not in pre mode.
+  }
+  return "latest";
+};
+
+const distTag = readPrereleaseTag();
+
 const workspacePackages = JSON.parse(
   execFileSync("pnpm", ["list", "--recursive", "--json", "--depth", "-1"], {
     cwd: rootPath,
@@ -73,6 +90,8 @@ for (const workspacePackage of publishablePackages) {
     `./${packageDir}`,
     "--access",
     "public",
+    "--tag",
+    distTag,
     "--provenance",
   ];
 

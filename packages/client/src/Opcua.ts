@@ -7,12 +7,12 @@ export {
   type CodecType,
   type OpcuaCodec,
   type SchemaType,
-} from "./internal/codecs.js";
+} from "./internal/values/codec.js";
 export type {
   AnyStructureDef,
   StructureArrayDef,
   StructureDef,
-} from "./internal/structures.js";
+} from "./internal/structures/model.js";
 export {
   BufferPolicy,
   MonitorDeadband,
