@@ -1,6 +1,6 @@
 {
   "name": "@effect-opcua/codegen",
-  "version": "0.1.0-alpha.0",
+  "version": "0.1.0-alpha.1",
   "description": "Effect OPC-UA client code generator",
   "license": "Apache-2.0",
   "sideEffects": false,

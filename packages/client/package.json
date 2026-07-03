@@ -1,6 +1,6 @@
 {
   "name": "@effect-opcua/client",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "description": "Effect-native OPC-UA client wrapper for node-opcua",
   "license": "Apache-2.0",
   "sideEffects": false,
