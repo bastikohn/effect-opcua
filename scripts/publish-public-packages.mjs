@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const rootPath = fileURLToPath(new URL("..", import.meta.url));
@@ -84,10 +85,42 @@ for (const workspacePackage of publishablePackages) {
     continue;
   }
 
-  const packageDir = relative(rootPath, packagePath);
+  // Pack with pnpm (not npm) so `catalog:` and `workspace:` protocol specifiers
+  // are rewritten to concrete versions in the published manifest. Raw
+  // `npm publish` ships package.json verbatim and would leave those
+  // pnpm-only specifiers in the registry, where no package manager can resolve
+  // them. We then hand the resolved tarball to `npm publish` to preserve
+  // provenance / OIDC trusted publishing.
+  const packDestination = mkdtempSync(join(tmpdir(), "opcua-pack-"));
+  run("pnpm", ["pack", "--pack-destination", packDestination], {
+    cwd: packagePath,
+  });
+  const tarballName = readdirSync(packDestination).find((file) =>
+    file.endsWith(".tgz"),
+  );
+  if (!tarballName) {
+    throw new Error(`pnpm pack produced no tarball for ${name}@${version}`);
+  }
+  const tarballPath = join(packDestination, tarballName);
+
+  // Safety net: never publish a manifest that still carries unresolved
+  // workspace-only protocols. This turns a silently broken publish into a
+  // loud, pre-publish failure.
+  const packedManifest = execFileSync(
+    "tar",
+    ["-xzOf", tarballPath, "package/package.json"],
+    { encoding: "utf8" },
+  );
+  if (/"(?:catalog|workspace):/.test(packedManifest)) {
+    throw new Error(
+      `${name}@${version} tarball still contains unresolved catalog:/workspace: ` +
+        `specifiers; refusing to publish. Check the pnpm pack step.`,
+    );
+  }
+
   const args = [
     "publish",
-    `./${packageDir}`,
+    tarballPath,
     "--access",
     "public",
     "--tag",
