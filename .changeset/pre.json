@@ -9,5 +9,9 @@
     "@effect-opcua/demo-server": "0.0.0",
     "@effect-opcua/codegen": "0.0.0"
   },
-  "changesets": []
+  "changesets": [
+    "fix-array-int64-decoding",
+    "publish-codegen",
+    "session-namespace"
+  ]
 }
