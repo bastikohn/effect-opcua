@@ -1,6 +1,10 @@
 packages:
   - "packages/*"
   - "examples/*/*"
+catalog:
+  effect: 4.0.0-beta.92
+  "@effect/platform-node": 4.0.0-beta.92
+  "@effect/platform-browser": 4.0.0-beta.92
 allowBuilds:
   esbuild: true
   msgpackr-extract: true

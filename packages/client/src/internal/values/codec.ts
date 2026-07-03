@@ -110,15 +110,17 @@ export const encodeWithSchema = <S extends AnySchema>(
   schema: S,
   value: unknown,
 ): unknown =>
-  Schema.encodeUnknownSync(schema as unknown as Schema.Encoder<unknown>)(value);
+  Schema.encodeUnknownSync(
+    schema as unknown as Schema.ConstraintEncoder<unknown>,
+  )(value);
 
 export const decodeWithSchema = <S extends AnySchema>(
   schema: S,
   value: unknown,
 ): SchemaType<S> =>
-  Schema.decodeUnknownSync(schema as unknown as Schema.Decoder<unknown>)(
-    value,
-  ) as SchemaType<S>;
+  Schema.decodeUnknownSync(
+    schema as unknown as Schema.ConstraintDecoder<unknown>,
+  )(value) as SchemaType<S>;
 
 export const encodeDynamicValue = (
   value: unknown,

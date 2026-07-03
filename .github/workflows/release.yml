@@ -95,3 +95,34 @@ jobs:
           # packages exist we switch to token-free OIDC trusted publishing.
           # id-token: write already mints provenance attestations either way.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  back-merge:
+    name: Back-merge main into dev
+    # Runs only after a successful publish (needs: publish already implies the
+    # `has-changesets == false` gate). Keeps `dev` in sync with the version and
+    # CHANGELOG commits the changesets bot lands on `main` at release time, so
+    # the next `dev -> main` PR diffs cleanly instead of drifting.
+    if: github.ref == 'refs/heads/main'
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout dev
+        uses: actions/checkout@v6
+        with:
+          ref: dev
+          fetch-depth: 0
+          # Default GITHUB_TOKEN pushes do not re-trigger workflows, so this
+          # cannot loop back into another Release run.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Merge main into dev
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          # Fast-forwards when dev has not advanced; creates a merge commit
+          # otherwise. A real conflict fails the job loudly for manual fixup.
+          git merge --no-edit origin/main
+          git push origin HEAD:dev
