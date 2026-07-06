@@ -32,6 +32,7 @@ export type DemoSimulationScenario =
 
 export type DemoOpcuaServerOptions = {
   readonly port?: number;
+  readonly host?: string;
   readonly resourcePath?: string;
   readonly certificateRootFolder?: string;
   readonly scenario?: DemoSimulationScenario;
@@ -777,6 +778,11 @@ export const startDemoOpcuaServer = async (
   options: DemoOpcuaServerOptions = {},
 ): Promise<DemoOpcuaServer> => {
   const port = options.port ?? 4840;
+  // Bind to a concrete address rather than the wildcard. On macOS, listening on
+  // the unspecified address (`::`/`0.0.0.0`, node-opcua's default when `host` is
+  // undefined) intermittently fails with a spurious EADDRINUSE even when the
+  // port is free; binding to a specific address (loopback by default) avoids it.
+  const host = options.host ?? "127.0.0.1";
   const resourcePath = options.resourcePath ?? "/UA/effect-opcua-demo";
   const certificateRootFolder =
     options.certificateRootFolder ??
@@ -795,6 +801,7 @@ export const startDemoOpcuaServer = async (
   });
   const server = new OPCUAServer({
     port,
+    host,
     resourcePath,
     nodeset_filename: [nodesets.standard],
     serverCertificateManager,
@@ -821,7 +828,7 @@ export const startDemoOpcuaServer = async (
 
   return {
     server,
-    endpointUrl: `opc.tcp://127.0.0.1:${port}${resourcePath}`,
+    endpointUrl: `opc.tcp://${host}:${port}${resourcePath}`,
     stop: async () => {
       clearInterval(timer);
       await server.shutdown(1_000);
