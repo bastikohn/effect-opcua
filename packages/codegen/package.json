@@ -5,10 +5,21 @@
   "license": "Apache-2.0",
   "sideEffects": false,
   "type": "module",
+  "keywords": [
+    "opcua",
+    "opc-ua",
+    "effect",
+    "node-opcua",
+    "iiot",
+    "industrial",
+    "codegen"
+  ],
   "files": [
+    "CHANGELOG.md",
     "LICENSE",
     "README.md",
     "dist",
+    "!dist/**/*.map",
     "package.json"
   ],
   "engines": {
@@ -47,12 +58,14 @@
     "clean": "rm -rf dist coverage node_modules"
   },
   "peerDependencies": {
-    "effect": "catalog:"
+    "effect": "^4.0.0-beta.92"
   },
   "dependencies": {
-    "@effect-opcua/client": "workspace:*",
+    "@effect-opcua/client": "workspace:^",
     "@effect/platform-node": "catalog:",
     "unrun": "^0.3.0"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "effect": "catalog:"
+  }
 }

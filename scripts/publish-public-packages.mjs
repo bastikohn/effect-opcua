@@ -60,6 +60,30 @@ if (publishablePackages.length === 0) {
   process.exit(0);
 }
 
+// npm hands the very first publish the `latest` dist-tag and never moves it
+// for prerelease publishes, so bare `npm install <name>` would keep resolving
+// to a stale early alpha. While every published version is still a
+// prerelease, follow each publish by moving `latest` to it. Once a stable
+// release exists it owns `latest` (via the distTag fallthrough above) and
+// this must not touch it anymore.
+const publishedVersions = (name) => {
+  const output = execFileSync("npm", ["view", name, "versions", "--json"], {
+    cwd: rootPath,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const versions = JSON.parse(output);
+  return Array.isArray(versions) ? versions : [versions];
+};
+
+const syncLatestTagForPrerelease = ({ name, version }) => {
+  const isPrerelease = (v) => v.includes("-");
+  if (!isPrerelease(version)) return;
+  if (!publishedVersions(name).every(isPrerelease)) return;
+  console.log(`Moving ${name} dist-tag \`latest\` to ${version}`);
+  run("npm", ["dist-tag", "add", `${name}@${version}`, "latest"]);
+};
+
 const isPublished = ({ name, version }) => {
   try {
     execFileSync("npm", ["view", `${name}@${version}`, "version", "--json"], {
@@ -132,4 +156,8 @@ for (const workspacePackage of publishablePackages) {
 
   console.log(`${dryRun ? "Dry-running" : "Publishing"} ${name}@${version}`);
   run("npm", args);
+
+  if (!dryRun && distTag !== "latest") {
+    syncLatestTagForPrerelease({ name, version });
+  }
 }
