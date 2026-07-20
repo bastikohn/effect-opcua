@@ -52,7 +52,7 @@
   "dependencies": {
     "@effect-opcua/client": "workspace:*",
     "@effect/platform-node": "catalog:",
-    "unrun": "^0.3.0"
+    "unrun": "^0.3.1"
   },
   "devDependencies": {}
 }
