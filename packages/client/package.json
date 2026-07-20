@@ -51,7 +51,7 @@
     "effect": "catalog:"
   },
   "dependencies": {
-    "node-opcua": "^2.170.0"
+    "node-opcua": "^2.175.2"
   },
   "devDependencies": {}
 }
