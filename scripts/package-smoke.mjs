@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -15,6 +16,20 @@ const packageNames = ["@effect-opcua/client", "@effect-opcua/codegen"];
 const workDir = mkdtempSync(join(tmpdir(), "effect-opcua-package-smoke-"));
 const packDir = join(workDir, "pack");
 const consumerDir = join(workDir, "consumer");
+
+// The consumer must install the same `effect` version the workspace develops
+// and tests against, so read it from the pnpm catalog instead of hardcoding a
+// copy that silently drifts.
+const catalogEffectVersion = () => {
+  const workspaceYaml = readFileSync(join(root, "pnpm-workspace.yaml"), "utf8");
+  const match = workspaceYaml.match(/^\s{2}effect:\s*(\S+)\s*$/m);
+  if (!match) {
+    throw new Error(
+      "Could not find `effect` in the pnpm-workspace.yaml catalog",
+    );
+  }
+  return match[1];
+};
 
 const run = (command, args, cwd) => {
   execFileSync(command, args, {
@@ -76,7 +91,7 @@ try {
         dependencies: {
           "@effect-opcua/client": clientTarballSpecifier,
           "@effect-opcua/codegen": codegenTarballSpecifier,
-          effect: "4.0.0-beta.66",
+          effect: catalogEffectVersion(),
           typescript: "^5.0.0",
         },
         pnpm: {

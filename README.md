@@ -1,5 +1,9 @@
 # effect-opcua
 
+[![CI](https://github.com/bastikohn/effect-opcua/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/bastikohn/effect-opcua/actions/workflows/ci.yml)
+[![npm @effect-opcua/client](https://img.shields.io/npm/v/%40effect-opcua%2Fclient?label=%40effect-opcua%2Fclient)](https://www.npmjs.com/package/@effect-opcua/client)
+[![npm @effect-opcua/codegen](https://img.shields.io/npm/v/%40effect-opcua%2Fcodegen?label=%40effect-opcua%2Fcodegen)](https://www.npmjs.com/package/@effect-opcua/codegen)
+
 Effect-native OPC UA client wrappers and examples built on top of
 `node-opcua`.
 

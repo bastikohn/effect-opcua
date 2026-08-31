@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 
-export class InvalidCommandInput extends Schema.TaggedErrorClass<InvalidCommandInput>()(
+export class InvalidCommandInput extends Schema.TaggedError<InvalidCommandInput>()(
   "InvalidCommandInput",
   {
     command: Schema.Defect(),
@@ -8,28 +8,28 @@ export class InvalidCommandInput extends Schema.TaggedErrorClass<InvalidCommandI
   },
 ) {}
 
-export class CommandSubmissionInProgress extends Schema.TaggedErrorClass<CommandSubmissionInProgress>()(
+export class CommandSubmissionInProgress extends Schema.TaggedError<CommandSubmissionInProgress>()(
   "CommandSubmissionInProgress",
   {
     commandId: Schema.String,
   },
 ) {}
 
-export class CommandObservationTimeout extends Schema.TaggedErrorClass<CommandObservationTimeout>()(
+export class CommandObservationTimeout extends Schema.TaggedError<CommandObservationTimeout>()(
   "CommandObservationTimeout",
   {
     commandId: Schema.String,
   },
 ) {}
 
-export class CommandTimeout extends Schema.TaggedErrorClass<CommandTimeout>()(
+export class CommandTimeout extends Schema.TaggedError<CommandTimeout>()(
   "CommandTimeout",
   {
     commandId: Schema.String,
   },
 ) {}
 
-export class CommandStatusUnavailable extends Schema.TaggedErrorClass<CommandStatusUnavailable>()(
+export class CommandStatusUnavailable extends Schema.TaggedError<CommandStatusUnavailable>()(
   "CommandStatusUnavailable",
   {
     operation: Schema.String,
