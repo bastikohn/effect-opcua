@@ -11,7 +11,9 @@
   },
   "changesets": [
     "effect-beta-92",
+    "effect-rc-112",
     "fix-array-int64-decoding",
+    "npm-packaging-fixes",
     "publish-codegen",
     "republish-resolved-specifiers",
     "session-namespace"
