@@ -101,14 +101,82 @@ const isPublished = ({ name, version }) => {
   }
 };
 
-for (const workspacePackage of publishablePackages) {
-  const { name, version, path: packagePath } = workspacePackage;
+const tagExists = (tag) =>
+  execFileSync("git", ["tag", "--list", tag], {
+    cwd: rootPath,
+    encoding: "utf8",
+  }).trim() === tag;
 
-  if (isPublished({ name, version })) {
-    console.log(`${name}@${version} is already published; skipping.`);
-    continue;
+const releaseExists = (tag) => {
+  try {
+    execFileSync("gh", ["release", "view", tag], {
+      cwd: rootPath,
+      stdio: "ignore",
+    });
+    return true;
+  } catch {
+    return false;
   }
+};
 
+// Returns the CHANGELOG.md section for `version` (as written by changesets),
+// so the GitHub release carries the same notes as the changelog.
+const readChangelogEntry = (packagePath, version) => {
+  let changelog;
+  try {
+    changelog = readFileSync(join(packagePath, "CHANGELOG.md"), "utf8");
+  } catch {
+    return undefined;
+  }
+  const lines = changelog.split("\n");
+  const start = lines.findIndex((line) => line.trim() === `## ${version}`);
+  if (start === -1) {
+    return undefined;
+  }
+  let end = lines.findIndex(
+    (line, index) => index > start && line.startsWith("## "),
+  );
+  if (end === -1) {
+    end = lines.length;
+  }
+  const entry = lines
+    .slice(start + 1, end)
+    .join("\n")
+    .trim();
+  return entry === "" ? undefined : entry;
+};
+
+// Tags and GitHub releases are created for every published version, not only
+// the ones this run publishes, so a rerun repairs a release that failed
+// between the npm publish and the tag/release steps.
+const tagAndRelease = ({ name, version, path: packagePath }) => {
+  const tag = `${name}@${version}`;
+  if (!tagExists(tag)) {
+    run("git", ["tag", tag]);
+  }
+  run("git", ["push", "origin", `refs/tags/${tag}`]);
+  if (!process.env.GITHUB_TOKEN && !process.env.GH_TOKEN) {
+    console.warn(`No GITHUB_TOKEN/GH_TOKEN; skipping GitHub release ${tag}.`);
+    return;
+  }
+  if (releaseExists(tag)) {
+    console.log(`GitHub release ${tag} already exists; skipping.`);
+    return;
+  }
+  const notes = readChangelogEntry(packagePath, version) ?? `Release ${tag}.`;
+  run("gh", [
+    "release",
+    "create",
+    tag,
+    "--title",
+    tag,
+    "--notes",
+    notes,
+    ...(version.includes("-") ? ["--prerelease"] : []),
+  ]);
+};
+
+const publishPackage = ({ name, version, path: packagePath }) => {
   // Pack with pnpm (not npm) so `catalog:` and `workspace:` protocol specifiers
   // are rewritten to concrete versions in the published manifest. Raw
   // `npm publish` ships package.json verbatim and would leave those
@@ -159,5 +227,19 @@ for (const workspacePackage of publishablePackages) {
 
   if (!dryRun && distTag !== "latest") {
     syncLatestTagForPrerelease({ name, version });
+  }
+};
+
+for (const workspacePackage of publishablePackages) {
+  const { name, version } = workspacePackage;
+
+  if (isPublished({ name, version })) {
+    console.log(`${name}@${version} is already published; skipping publish.`);
+  } else {
+    publishPackage(workspacePackage);
+  }
+
+  if (!dryRun) {
+    tagAndRelease(workspacePackage);
   }
 }

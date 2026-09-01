@@ -71,7 +71,9 @@ jobs:
     # the job must opt into that environment for the secret to be available.
     environment: npm-publish
     permissions:
-      contents: read
+      # contents: write lets the job push per-package version tags and create
+      # GitHub releases; id-token: write lets npm mint provenance attestations.
+      contents: write
       id-token: write
     steps:
       - name: Checkout
@@ -95,6 +97,8 @@ jobs:
           # packages exist we switch to token-free OIDC trusted publishing.
           # id-token: write already mints provenance attestations either way.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # Used by `gh` to create GitHub releases for each published version.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   back-merge:
     name: Back-merge main into dev
