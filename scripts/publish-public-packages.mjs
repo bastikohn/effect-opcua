@@ -81,7 +81,18 @@ const syncLatestTagForPrerelease = ({ name, version }) => {
   if (!isPrerelease(version)) return;
   if (!publishedVersions(name).every(isPrerelease)) return;
   console.log(`Moving ${name} dist-tag \`latest\` to ${version}`);
-  run("npm", ["dist-tag", "add", `${name}@${version}`, "latest"]);
+  // Best-effort: OIDC trusted publishing only grants credentials to
+  // `npm publish` itself, so `npm dist-tag add` may be unauthenticated in CI.
+  // A stale `latest` tag is recoverable by hand; a failed job after a
+  // successful publish is worse.
+  try {
+    run("npm", ["dist-tag", "add", `${name}@${version}`, "latest"]);
+  } catch {
+    console.warn(
+      `::warning::Could not move dist-tag \`latest\` for ${name}. ` +
+        `Run \`npm dist-tag add ${name}@${version} latest\` manually.`,
+    );
+  }
 };
 
 const isPublished = ({ name, version }) => {
