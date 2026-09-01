@@ -22,7 +22,7 @@ export const WebRpcErrorCategorySchema = Schema.Literals([
 ] as const);
 export type WebRpcErrorCategory = typeof WebRpcErrorCategorySchema.Type;
 
-export class WebRpcError extends Schema.ErrorClass<WebRpcError>("WebRpcError")({
+export class WebRpcError extends Schema.Error<WebRpcError>("WebRpcError")({
   _tag: Schema.tag("WebRpcError"),
   category: WebRpcErrorCategorySchema,
   message: Schema.String,

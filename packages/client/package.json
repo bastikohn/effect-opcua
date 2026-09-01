@@ -1,6 +1,6 @@
 {
   "name": "@effect-opcua/client",
-  "version": "0.1.0-alpha.3",
+  "version": "0.1.0-alpha.4",
   "description": "Effect-native OPC-UA client wrapper for node-opcua",
   "license": "Apache-2.0",
   "sideEffects": false,
@@ -59,7 +59,7 @@
     "clean": "rm -rf dist coverage node_modules"
   },
   "peerDependencies": {
-    "effect": "^4.0.0-beta.92"
+    "effect": "^4.0.0-rc.112"
   },
   "dependencies": {
     "node-opcua": "^2.170.0"
