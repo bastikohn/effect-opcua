@@ -58,7 +58,7 @@
     "clean": "rm -rf dist coverage node_modules"
   },
   "peerDependencies": {
-    "effect": "^4.0.0-rc.112"
+    "effect": "^4.0.0-rc.115"
   },
   "dependencies": {
     "@effect-opcua/client": "workspace:^",
