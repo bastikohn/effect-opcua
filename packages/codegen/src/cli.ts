@@ -6,16 +6,16 @@ import { CliError, Command, Flag } from "effect/unstable/cli";
 import { displayPath } from "./diagnostics.js";
 import type { CodegenIssue } from "./types.js";
 
-const configPath = Flag.string("config").pipe(
+const configPath = Flag.String("config").pipe(
   Flag.withDescription("Path to the codegen config"),
   Flag.withDefault("effect-opcua.codegen.ts"),
 );
 
-const verbose = Flag.boolean("verbose").pipe(
+const verbose = Flag.Boolean("verbose").pipe(
   Flag.withDescription("Print informational diagnostics"),
 );
 
-const check = Flag.boolean("check").pipe(
+const check = Flag.Boolean("check").pipe(
   Flag.withDescription("Check generated output without writing files"),
 );
 
