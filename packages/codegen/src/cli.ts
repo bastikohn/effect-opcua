@@ -1,22 +1,26 @@
 #!/usr/bin/env node
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
-import { Effect } from "effect";
-import { CliError, Command, Flag } from "effect/unstable/cli";
+import type * as Client from "@effect-opcua/client";
+import { Effect, type Cause } from "effect";
+import { CliError, Command, Flag } from "effect/cli";
 
 import { displayPath } from "./diagnostics.js";
+import type { CodegenError } from "./errors.js";
 import type { CodegenIssue } from "./types.js";
 
-const configPath = Flag.string("config").pipe(
+const configPath = Flag.String("config").pipe(
   Flag.withDescription("Path to the codegen config"),
   Flag.withDefault("effect-opcua.codegen.ts"),
 );
 
-const verbose = Flag.boolean("verbose").pipe(
+const verbose = Flag.Boolean("verbose").pipe(
   Flag.withDescription("Print informational diagnostics"),
+  Flag.withDefault(false),
 );
 
-const check = Flag.boolean("check").pipe(
+const check = Flag.Boolean("check").pipe(
   Flag.withDescription("Check generated output without writing files"),
+  Flag.withDefault(false),
 );
 
 const command = Command.make(
@@ -69,15 +73,9 @@ const main = command.pipe(
   Effect.provide(NodeServices.layer),
 );
 
-const loadConfigModule = Effect.tryPromise({
-  try: () => import("./config.js"),
-  catch: (cause) => cause,
-});
+const loadConfigModule = Effect.tryPromise(() => import("./config.js"));
 
-const loadGenerateModule = Effect.tryPromise({
-  try: () => import("./generate.js"),
-  catch: (cause) => cause,
-});
+const loadGenerateModule = Effect.tryPromise(() => import("./generate.js"));
 
 const printIssues = (issues: readonly CodegenIssue[], verbose: boolean) => {
   const visible = verbose
@@ -119,30 +117,22 @@ const candidatesFromCause = (cause: unknown): readonly string[] => {
   return [];
 };
 
-const formatError = (error: unknown) => {
-  if (isTagged(error, "CodegenError")) {
-    const typed = error as {
-      readonly reason: { readonly _tag: string };
-      readonly issues?: readonly CodegenIssue[];
-    };
-    const issues = typed.issues ?? [];
-    return [
-      `Codegen failed: ${typed.reason._tag}`,
-      ...issues.map(formatIssue),
-    ].join("\n");
+const formatError = (
+  error: CodegenError | Client.OpcuaError.OpcuaError | Cause.UnknownError,
+) => {
+  switch (error._tag) {
+    case "CodegenError":
+      return [
+        `Codegen failed: ${error.reason._tag}`,
+        ...error.issues.map(formatIssue),
+      ].join("\n");
+    case "OpcuaError":
+      return `OPC-UA failed: ${error.reason._tag}`;
+    case "UnknownError":
+      return error.cause instanceof Error
+        ? error.cause.message
+        : String(error.cause);
   }
-  if (isTagged(error, "OpcuaError")) {
-    const reason = (error as { readonly reason: { readonly _tag: string } })
-      .reason;
-    return `OPC-UA failed: ${reason._tag}`;
-  }
-  return error instanceof Error ? error.message : String(error);
 };
-
-const isTagged = (value: unknown, tag: string) =>
-  typeof value === "object" &&
-  value !== null &&
-  "_tag" in value &&
-  (value as { readonly _tag?: unknown })._tag === tag;
 
 NodeRuntime.runMain(main, { disableErrorReporting: true });

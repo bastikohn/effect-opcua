@@ -94,7 +94,7 @@ describe("Opcua", () => {
       codec: Opcua.schema(Schema.Number),
     });
 
-    Effect.gen(function* () {
+    void Effect.gen(function* () {
       const snapshot = yield* OpcuaSession.readMany({
         temperature: Temperature,
       } as const);
@@ -184,7 +184,7 @@ describe("Opcua", () => {
       clientBuffer: Opcua.BufferPolicy.latest(),
     };
 
-    Effect.gen(function* () {
+    void Effect.gen(function* () {
       const subscription = yield* session.makeSubscription({
         publishingInterval: Duration.millis(100),
       });
@@ -262,17 +262,17 @@ describe("Opcua", () => {
   it("checks layer config types", () => {
     expect(OpcuaClient.layerConfig).type.toBeCallableWith(
       Config.all({
-        endpointUrl: Config.string("OPCUA_ENDPOINT_URL"),
+        endpointUrl: Config.String("OPCUA_ENDPOINT_URL"),
       }),
     );
     expect(OpcuaClient.layerConfig).type.toBeCallableWith(
       Config.all({
-        endpointUrl: Config.string("OPCUA_ENDPOINT_URL"),
+        endpointUrl: Config.String("OPCUA_ENDPOINT_URL"),
         clientOptions: Config.succeed({}),
       }),
     );
     expect(OpcuaClient.layerConfig).type.not.toBeCallableWith({
-      endpointUrl: Config.string("OPCUA_ENDPOINT_URL"),
+      endpointUrl: Config.String("OPCUA_ENDPOINT_URL"),
     });
     expect(OpcuaClient.layerConfig).type.not.toBeCallableWith({
       endpointUrl: "opc.tcp://localhost:4840",

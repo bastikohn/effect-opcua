@@ -241,24 +241,21 @@ const decodeCodec = <A>(
   _dataValue: DataValue | undefined,
   structureRuntime: OpcuaStructureRuntime,
 ): Effect.Effect<A, unknown> =>
-  Effect.try({
-    try: () => {
-      switch (codec._tag) {
-        case "Dynamic":
-          return decodeDynamicValue(variant?.value, variant) as A;
-        case "Schema":
-          return decodeWithSchema(
-            codec.schema,
-            plainVariantValue(variant?.value),
-          ) as A;
-        case "Structure":
-          return decodeStructureValue(codec, variant, structureRuntime) as A;
-        case "StructureArray":
-          return decodeStructureValue(codec, variant, structureRuntime) as A;
-      }
-    },
-    catch: (error) => error,
-  });
+  Effect.try(() => {
+    switch (codec._tag) {
+      case "Dynamic":
+        return decodeDynamicValue(variant?.value, variant) as A;
+      case "Schema":
+        return decodeWithSchema(
+          codec.schema,
+          plainVariantValue(variant?.value),
+        ) as A;
+      case "Structure":
+        return decodeStructureValue(codec, variant, structureRuntime) as A;
+      case "StructureArray":
+        return decodeStructureValue(codec, variant, structureRuntime) as A;
+    }
+  }).pipe(Effect.mapError((error) => error.cause));
 
 const decodeStructureValue = (
   structure: AnyStructureDef,

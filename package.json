@@ -34,13 +34,12 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "esbuild",
-      "msgpackr-extract"
+      "esbuild"
     ]
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.0",
-    "@effect/language-service": "^0.39.0",
+    "@effect/language-service": "^0.87.4",
     "@oxlint/plugins": "^1.63.0",
     "@types/node": "^24.0.0",
     "tsdown": "^0.16.0",

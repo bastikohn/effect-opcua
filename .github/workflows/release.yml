@@ -67,8 +67,12 @@ jobs:
     if: github.ref == 'refs/heads/main' && needs.changesets.outputs.has-changesets == 'false'
     needs: [verify, changesets]
     runs-on: ubuntu-latest
-    # The NPM_TOKEN lives in the `npm-publish` environment (scoped to `main`);
-    # the job must opt into that environment for the secret to be available.
+    # Auth is npm OIDC trusted publishing: each package on npmjs.com trusts
+    # this repo + this workflow file + the `npm-publish` environment, so the
+    # job must run in that environment for the OIDC claim to match. No npm
+    # token is involved (npm deprecated 2FA-bypassing tokens for publishing).
+    # NOTE: a brand-new package cannot be first-published via OIDC; bootstrap
+    # it manually once, then add the trusted publisher on npmjs.com.
     environment: npm-publish
     permissions:
       contents: read
@@ -82,19 +86,17 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
         with:
+          # Node 24 ships npm >= 11.5.1, required for OIDC trusted publishing.
+          # No registry-url: passing it makes setup-node write an .npmrc that
+          # expects NODE_AUTH_TOKEN, which no longer exists; `npm publish`
+          # exchanges the workflow's OIDC token for credentials on its own.
           node-version: "24.x"
-          registry-url: "https://registry.npmjs.org"
 
       - name: Build
         run: pnpm build
 
       - name: Publish changed public packages
         run: pnpm changeset:publish
-        env:
-          # First publishes authenticate with an npm automation token; once the
-          # packages exist we switch to token-free OIDC trusted publishing.
-          # id-token: write already mints provenance attestations either way.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   back-merge:
     name: Back-merge main into dev

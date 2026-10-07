@@ -374,7 +374,7 @@ export interface SessionService
 }
 
 export class Session extends Context.Service<Session, SessionService>()(
-  "@effect-opcua/client/OpcuaSession",
+  "@effect-opcua/client/OpcuaSession/Session",
 ) {}
 
 export type Service = SessionService;

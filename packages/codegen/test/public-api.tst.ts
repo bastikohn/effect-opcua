@@ -38,14 +38,14 @@ describe("codegen public API", () => {
     expect(generate).type.toBeCallableWith(config);
     expect(check).type.toBeCallableWith(config);
 
-    Effect.map(generate(config), (result) => {
+    void Effect.map(generate(config), (result) => {
       expect(result).type.toBe<GenerateResult>();
       expect(result).type.toHaveProperty("issues");
       expect(result).type.toHaveProperty("writtenFiles");
       expect(result).type.not.toHaveProperty("files");
     });
 
-    Effect.map(check(config), (result) => {
+    void Effect.map(check(config), (result) => {
       expect(result).type.toBe<CheckResult>();
       expect(result).type.toHaveProperty("issues");
       expect(result).type.toHaveProperty("staleFiles");
@@ -181,7 +181,7 @@ describe("codegen public API", () => {
       },
     );
 
-    Effect.gen(function* () {
+    void Effect.gen(function* () {
       const monitor = yield* subscription.monitor({ status: Status } as const, {
         startup: "strict" as const,
         validation: "strict" as const,

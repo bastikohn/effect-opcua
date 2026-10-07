@@ -80,7 +80,7 @@ describe("README public snippets", () => {
       return { current, written, reset, snapshot, writes, calls };
     });
 
-    Effect.scoped(program).pipe(Effect.provide(MainLayer));
+    void Effect.scoped(program).pipe(Effect.provide(MainLayer));
 
     expect(OpcuaSession.read).type.toBeCallableWith(Temperature);
     expect(OpcuaSession.write).type.toBeCallableWith(Setpoint, 42);
@@ -119,7 +119,7 @@ describe("README public snippets", () => {
       return { children, monitor };
     });
 
-    Effect.scoped(program).pipe(Effect.provide(MainLayer));
+    void Effect.scoped(program).pipe(Effect.provide(MainLayer));
 
     expect(OpcuaSession.makeSubscription).type.toBeCallableWith({
       publishingInterval: Duration.millis(100),

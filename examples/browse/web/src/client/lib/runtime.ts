@@ -8,12 +8,8 @@ import {
   Stream,
   type Exit,
 } from "effect";
-import {
-  RpcClient,
-  RpcClientError,
-  RpcSerialization,
-} from "effect/unstable/rpc";
-import type { RpcGroup } from "effect/unstable/rpc";
+import { RpcClient, RpcClientError, RpcSerialization } from "effect/rpc";
+import type { RpcGroup } from "effect/rpc";
 
 import { UaBrowserRpcs } from "../../shared/rpc.js";
 
@@ -23,7 +19,7 @@ export class UaBrowserClient extends Context.Service<
     RpcGroup.Rpcs<typeof UaBrowserRpcs>,
     RpcClientError.RpcClientError
   >
->()("@effect-opcua/web/UaBrowserClient") {
+>()("@effect-opcua/web/client/lib/runtime/UaBrowserClient") {
   static layer = (url: string) =>
     Layer.effect(
       UaBrowserClient,

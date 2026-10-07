@@ -1,5 +1,5 @@
 import { Effect, Layer, Queue, Stream } from "effect";
-import { RpcServer } from "effect/unstable/rpc";
+import { RpcServer } from "effect/rpc";
 
 import {
   UaBrowserRpcs,

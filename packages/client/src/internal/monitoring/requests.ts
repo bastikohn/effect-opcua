@@ -15,25 +15,23 @@ export const monitorItems = <Items>(
   chunk: ReadonlyArray<EffectiveMonitorItem<Items>>,
 ) => {
   const first = chunk[0]!;
-  return Effect.tryPromise({
-    try: (signal) =>
-      subscription
-        .monitorItems(
-          chunk.map((item) => ({
-            nodeId: item.rawNodeId,
-            attributeId: AttributeIds.Value,
-          })),
-          {
-            samplingInterval: first.requested.samplingInterval,
-            queueSize: first.requested.queueSize,
-            discardOldest: first.requested.discardOldest,
-            filter: first.nodeOpcuaFilter,
-          },
-          first.timestampsToReturn,
-        )
-        .then((group) => monitorItemsSuccess(group, signal)),
-    catch: (cause) => cause,
-  });
+  return Effect.tryPromise((signal) =>
+    subscription
+      .monitorItems(
+        chunk.map((item) => ({
+          nodeId: item.rawNodeId,
+          attributeId: AttributeIds.Value,
+        })),
+        {
+          samplingInterval: first.requested.samplingInterval,
+          queueSize: first.requested.queueSize,
+          discardOldest: first.requested.discardOldest,
+          filter: first.nodeOpcuaFilter,
+        },
+        first.timestampsToReturn,
+      )
+      .then((group) => monitorItemsSuccess(group, signal)),
+  );
 };
 
 export const monitoredItemStatusCode = (

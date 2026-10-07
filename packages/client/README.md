@@ -10,7 +10,7 @@ ergonomics, performance, or the package boundary.
 
 - Node.js 22 or newer.
 - ESM projects.
-- `effect` v4 beta as a peer dependency.
+- `effect` v4 (`^4.0.1`) as a peer dependency.
 
 ```sh
 pnpm add @effect-opcua/client effect
