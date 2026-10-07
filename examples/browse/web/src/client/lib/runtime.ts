@@ -19,7 +19,7 @@ export class UaBrowserClient extends Context.Service<
     RpcGroup.Rpcs<typeof UaBrowserRpcs>,
     RpcClientError.RpcClientError
   >
->()("@effect-opcua/web/UaBrowserClient") {
+>()("@effect-opcua/web/client/lib/runtime/UaBrowserClient") {
   static layer = (url: string) =>
     Layer.effect(
       UaBrowserClient,
