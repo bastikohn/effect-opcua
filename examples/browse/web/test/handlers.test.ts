@@ -1,5 +1,5 @@
 import { Effect, Fiber, Layer, Stream } from "effect";
-import { RpcTest } from "effect/unstable/rpc";
+import { RpcTest } from "effect/rpc";
 import { describe, expect, it } from "vitest";
 
 import { UaBrowserRpcs } from "../src/shared/rpc.js";

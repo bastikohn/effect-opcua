@@ -28,7 +28,7 @@ Those paths are intentionally not public.
 - Node.js 22 or newer.
 - ESM projects.
 - `pnpm` 11 or newer in this workspace.
-- `effect` v4 beta as a peer dependency.
+- `effect` v4 (`^4.0.1`) as a peer dependency.
 
 For a consuming package, install the client and Effect:
 

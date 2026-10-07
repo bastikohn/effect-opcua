@@ -59,7 +59,7 @@
     "clean": "rm -rf dist coverage node_modules"
   },
   "peerDependencies": {
-    "effect": "^4.0.0-rc.115"
+    "effect": "^4.0.1"
   },
   "dependencies": {
     "node-opcua": "^2.170.0"

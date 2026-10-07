@@ -95,7 +95,7 @@ try {
           typescript: "^5.0.0",
         },
         pnpm: {
-          onlyBuiltDependencies: ["esbuild", "msgpackr-extract"],
+          onlyBuiltDependencies: ["esbuild"],
           overrides: {
             "@effect-opcua/client": clientTarballSpecifier,
             "@effect-opcua/codegen>@effect-opcua/client":

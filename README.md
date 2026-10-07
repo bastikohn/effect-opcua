@@ -58,8 +58,7 @@ Planned:
 - [ ] Offline codegen from `NodeSet2.xml` files, without a live server.
 - [ ] npm trusted publishing (OIDC) once the packages are established, dropping
       the `NPM_TOKEN` secret.
-- [ ] Track Effect v4 to stable (currently on a 4.0 beta) and re-validate the
-      public API against it.
+- [ ] Re-validate the public API against stable Effect v4 (now on `4.0.1`).
 - [ ] API stabilization: settle naming and result shapes, then cut a first
       non-alpha `0.1.0`.
 
