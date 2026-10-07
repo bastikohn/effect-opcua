@@ -35,33 +35,33 @@ acceptable when they improve API quality, ergonomics, or performance.
 Shipped so far (alpha releases on npm):
 
 - [x] Effect-native client: session lifecycle with connection profiles, typed
-  reads/writes (single and batch), method calls, browsing, and data-change
-  monitoring via subscriptions.
+      reads/writes (single and batch), method calls, browsing, and data-change
+      monitoring via subscriptions.
 - [x] ExtensionObject structure support with on-demand data type loading.
 - [x] Session/connection event stream (including reconnection events).
 - [x] Codegen for NodeIds, variables, enums, and structures from a live
-  server, with CLI, config, and diagnostics.
+      server, with CLI, config, and diagnostics.
 - [x] Demo filling-cell server, typed demo client, and TUI example.
 - [x] User and contributor documentation tracks.
 - [x] CI plus Changesets-based alpha publishing of `@effect-opcua/client` and
-  `@effect-opcua/codegen`.
+      `@effect-opcua/codegen`.
 
 Planned:
 
 - [ ] Secure connections: expose security mode/policy and certificate
-  management (currently only `userIdentity` is configurable).
+      management (currently only `userIdentity` is configurable).
 - [ ] OPC UA event monitoring (event filters, alarms & conditions) alongside
-  data-change monitoring.
+      data-change monitoring.
 - [ ] Historical access (`HistoryRead` for values and events).
 - [ ] Reconnection hardening: verify and document subscription/monitored-item
-  behavior across session re-establishment.
+      behavior across session re-establishment.
 - [ ] Offline codegen from `NodeSet2.xml` files, without a live server.
 - [ ] npm trusted publishing (OIDC) once the packages are established, dropping
-  the `NPM_TOKEN` secret.
+      the `NPM_TOKEN` secret.
 - [ ] Track Effect v4 to stable (currently on a 4.0 beta) and re-validate the
-  public API against it.
+      public API against it.
 - [ ] API stabilization: settle naming and result shapes, then cut a first
-  non-alpha `0.1.0`.
+      non-alpha `0.1.0`.
 
 ## Development
 
