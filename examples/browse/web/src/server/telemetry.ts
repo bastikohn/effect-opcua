@@ -1,6 +1,6 @@
 import { NodeHttpClient } from "@effect/platform-node";
 import { Layer } from "effect";
-import { OtlpSerialization, OtlpTracer } from "effect/unstable/observability";
+import { OtlpSerialization, OtlpTracer } from "effect/observability";
 
 import { readTelemetryConfig, type TelemetryConfig } from "./config.js";
 

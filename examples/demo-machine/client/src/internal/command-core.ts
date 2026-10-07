@@ -61,7 +61,7 @@ export type DemoMachineCommandCoreService = {
 export class DemoMachineCommandCore extends Context.Service<
   DemoMachineCommandCore,
   DemoMachineCommandCoreService
->()("@effect-opcua/demo-client/internal/DemoMachineCommandCore") {
+>()("@effect-opcua/demo-client/internal/command-core/DemoMachineCommandCore") {
   static layerLive = (options: DemoMachineOptions = {}) =>
     Layer.effect(
       DemoMachineCommandCore,

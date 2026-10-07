@@ -30,7 +30,9 @@ export type DemoMachineTelemetryCoreService = {
 export class DemoMachineTelemetryCore extends Context.Service<
   DemoMachineTelemetryCore,
   DemoMachineTelemetryCoreService
->()("@effect-opcua/demo-client/internal/DemoMachineTelemetryCore") {
+>()(
+  "@effect-opcua/demo-client/internal/telemetry-core/DemoMachineTelemetryCore",
+) {
   static layerLive = (options: DemoMachineOptions = {}) => {
     void options;
     return Layer.effect(

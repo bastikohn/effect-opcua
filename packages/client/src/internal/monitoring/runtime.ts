@@ -291,10 +291,7 @@ const validateAccessChunk = <Items>(
       { nodeId: item.rawNodeId, attributeId: AttributeIds.UserAccessLevel },
     ]);
     const readResult = yield* Effect.result(
-      Effect.tryPromise({
-        try: () => subscription.session.read(nodes, 0),
-        catch: (cause) => cause,
-      }),
+      Effect.tryPromise(() => subscription.session.read(nodes, 0)),
     );
     if (Result.isFailure(readResult)) {
       return {
@@ -302,7 +299,7 @@ const validateAccessChunk = <Items>(
         failed: new Map(
           chunk.map((item) => [
             item.key,
-            startupFailure(item, "Validation", readResult.failure),
+            startupFailure(item, "Validation", readResult.failure.cause),
           ]),
         ),
       };
@@ -384,7 +381,7 @@ const createMonitorChunk = <Items>(
         active: [],
         failed: chunk.map((item) => [
           item.key,
-          startupFailure(item, "Create", groupResult.failure),
+          startupFailure(item, "Create", groupResult.failure.cause),
         ]),
       };
     }
@@ -606,10 +603,7 @@ const makeStartupReport = <Items>(
 });
 
 const terminateMonitorGroup = (group: ClientMonitoredItemGroup) =>
-  Effect.tryPromise({
-    try: () => group.terminate(),
-    catch: (cause) => cause,
-  }).pipe(Effect.ignore);
+  Effect.tryPromise(() => group.terminate()).pipe(Effect.ignore);
 
 const terminateCreatedMonitorGroup = (
   group: ClientMonitoredItemGroup,

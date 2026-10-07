@@ -1,7 +1,7 @@
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
 import { Effect, Layer } from "effect";
-import { HttpRouter } from "effect/unstable/http";
-import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
+import { HttpRouter } from "effect/http";
+import { RpcSerialization, RpcServer } from "effect/rpc";
 import { createServer } from "node:http";
 
 import { UaBrowserRpcLive, withClientCleanup } from "./handlers.js";

@@ -45,7 +45,7 @@ export type SessionFactoryService = {
 export class SessionFactory extends Context.Service<
   SessionFactory,
   SessionFactoryService
->()("@effect-opcua/web/SessionFactory") {
+>()("@effect-opcua/web/server/session-registry/SessionFactory") {
   static readonly live = Layer.succeed(
     SessionFactory,
     SessionFactory.of({
@@ -121,7 +121,7 @@ type RegistryEntry = {
 export class SessionRegistry extends Context.Service<
   SessionRegistry,
   SessionRegistryService
->()("@effect-opcua/web/SessionRegistry") {
+>()("@effect-opcua/web/server/session-registry/SessionRegistry") {
   static readonly layer = Layer.effect(
     SessionRegistry,
     Effect.gen(function* () {
