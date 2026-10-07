@@ -63,8 +63,7 @@ describe("RPC handlers", () => {
       Effect.scoped(
         Effect.gen(function* () {
           const client = yield* RpcTest.makeClient(UaBrowserRpcs).pipe(
-            Effect.provide(UaBrowserHandlers),
-            Effect.provide(registry),
+            Effect.provide(Layer.provide(UaBrowserHandlers, registry)),
           );
 
           const connected = yield* client.Connect({
@@ -161,8 +160,7 @@ describe("RPC handlers", () => {
       Effect.scoped(
         Effect.gen(function* () {
           const client = yield* RpcTest.makeClient(UaBrowserRpcs).pipe(
-            Effect.provide(UaBrowserHandlers),
-            Effect.provide(registry),
+            Effect.provide(Layer.provide(UaBrowserHandlers, registry)),
           );
 
           const fiber = yield* Effect.forkScoped(
@@ -204,8 +202,7 @@ describe("RPC handlers", () => {
       Effect.scoped(
         Effect.gen(function* () {
           const client = yield* RpcTest.makeClient(UaBrowserRpcs).pipe(
-            Effect.provide(UaBrowserHandlers),
-            Effect.provide(registry),
+            Effect.provide(Layer.provide(UaBrowserHandlers, registry)),
           );
 
           yield* client.Connect({
@@ -291,8 +288,7 @@ describe("RPC handlers", () => {
       Effect.scoped(
         Effect.gen(function* () {
           const client = yield* RpcTest.makeClient(UaBrowserRpcs).pipe(
-            Effect.provide(UaBrowserHandlers),
-            Effect.provide(registry),
+            Effect.provide(Layer.provide(UaBrowserHandlers, registry)),
           );
 
           const error = yield* Effect.flip(
@@ -332,8 +328,7 @@ describe("RPC handlers", () => {
         Effect.scoped(
           Effect.gen(function* () {
             const client = yield* RpcTest.makeClient(UaBrowserRpcs).pipe(
-              Effect.provide(UaBrowserHandlers),
-              Effect.provide(registry),
+              Effect.provide(Layer.provide(UaBrowserHandlers, registry)),
             );
 
             expect(yield* client.GetConfig()).toEqual({

@@ -49,14 +49,14 @@ describe("Demo client", () => {
   });
 
   it("checks command status service types", () => {
-    Effect.map(commands.readCommandStatus, (status) => {
+    void Effect.map(commands.readCommandStatus, (status) => {
       expect(status.entries[0]?.state).type.toBeAssignableTo<string>();
       expect(status.entries[0]?.state).type.not.toBeAssignableTo<number>();
     });
   });
 
   it("checks telemetry service types", () => {
-    Effect.map(telemetry.readSnapshot, (snapshot) => {
+    void Effect.map(telemetry.readSnapshot, (snapshot) => {
       expect(snapshot.revision).type.toBe<bigint>();
     });
   });

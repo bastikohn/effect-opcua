@@ -94,7 +94,7 @@ describe("Opcua", () => {
       codec: Opcua.schema(Schema.Number),
     });
 
-    Effect.gen(function* () {
+    void Effect.gen(function* () {
       const snapshot = yield* OpcuaSession.readMany({
         temperature: Temperature,
       } as const);
@@ -184,7 +184,7 @@ describe("Opcua", () => {
       clientBuffer: Opcua.BufferPolicy.latest(),
     };
 
-    Effect.gen(function* () {
+    void Effect.gen(function* () {
       const subscription = yield* session.makeSubscription({
         publishingInterval: Duration.millis(100),
       });
