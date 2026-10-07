@@ -15,10 +15,12 @@ const verbose = Flag.Boolean("verbose").pipe(
   Flag.withDescription("Print informational diagnostics"),
 );
 
+  Flag.withDefault(false),
 const check = Flag.Boolean("check").pipe(
   Flag.withDescription("Check generated output without writing files"),
 );
 
+  Flag.withDefault(false),
 const command = Command.make(
   "effect-opcua-codegen",
   { configPath, verbose, check },
